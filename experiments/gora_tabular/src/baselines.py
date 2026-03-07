@@ -102,10 +102,20 @@ def train_tabpfn(X_tr, y_tr, X_te, y_te, task, seed=42,
 
     print(f"  [TabPFN] N_train={len(X_tr_use)} d={X_tr_use.shape[1]}{pca_note}{subsample_note}")
 
+    # Always run TabPFN on CPU — its in-context computation allocates
+    # O(N_train × N_test × n_classes) tensors that overflow 8GB MPS on M-series.
+    import os; os.environ.pop("TABPFN_DEVICE", None)
+    tabpfn_device = "cpu"
+
     if task == "classification":
-        clf = TabPFNClassifier(n_estimators=8, random_state=seed)
+        clf = TabPFNClassifier(n_estimators=8, random_state=seed, device=tabpfn_device)
         clf.fit(X_tr_use, y_tr_sub)
-        proba = clf.predict_proba(X_te_use)
+        # Batch predict_proba to avoid residual OOM even on CPU for very large test sets
+        chunk = 500
+        proba_chunks = []
+        for start in range(0, len(X_te_use), chunk):
+            proba_chunks.append(clf.predict_proba(X_te_use[start:start + chunk]))
+        proba = np.vstack(proba_chunks)
         preds = proba.argmax(-1)
         # TabPFN returns classes in sorted order — remap to original labels
         classes = np.sort(np.unique(y_tr_sub))
@@ -113,7 +123,7 @@ def train_tabpfn(X_tr, y_tr, X_te, y_te, task, seed=42,
         preds = np.array([label_map[p] for p in preds])
         return preds, proba
     else:
-        reg = TabPFNRegressor(n_estimators=8, random_state=seed)
+        reg = TabPFNRegressor(n_estimators=8, random_state=seed, device=tabpfn_device)
         reg.fit(X_tr_use, y_tr_sub)
         preds = reg.predict(X_te_use).astype(np.float32)
         return preds, None

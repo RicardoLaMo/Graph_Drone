@@ -236,10 +236,10 @@ def run_mnist(n_subset=10000):
     metrics.append(score("B1_HGBR", y[te_i], p_b1, task, pb1))
     bin_rows += bin_metric(p_b1, y[te_i], kappa_bins[te_i], task, "B1_HGBR")
 
-    print("[B2] TabPFN (PCA-200)...")
+    print("[B2] TabPFN (PCA-200, train subsample=1k for CPU speed)...")
     try:
         p_b2, pb2 = train_tabpfn(X[tr_i], y[tr_i], X[te_i], y[te_i], task,
-                                   max_train_samples=8000, max_features=200, pca_features=True)
+                                   max_train_samples=1000, max_features=200, pca_features=True)
         metrics.append(score("B2_TabPFN", y[te_i], p_b2, task, pb2))
         bin_rows += bin_metric(p_b2, y[te_i], kappa_bins[te_i], task, "B2_TabPFN")
     except Exception as e:
