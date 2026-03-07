@@ -1,0 +1,19 @@
+data:
+  dataset: mnist_784
+  N_SUBSET: 10000
+  seed: 42
+  test_size: 0.15
+  val_size: 0.15
+
+graph:
+  K: 15
+  K_SCALES: [10, 20, 30]
+  N_BLOCKS: 16
+  PCA_DIMS: 50
+
+models:
+  mlp: {hidden: 256, lr: 0.001, epochs: 100, patience: 15}
+  graphsage: {hidden: 128, lr: 0.001, epochs: 150, patience: 20}
+  routing: {obs_dim: 4, hidden_router: 32, lr: 0.005, epochs: 500, patience: 30}
+  xgboost: {n_estimators: 200, max_depth: 6, learning_rate: 0.1}
+  tabpfn: {max_train_n: 1024, max_test_n: 128}
