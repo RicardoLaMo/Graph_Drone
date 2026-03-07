@@ -1,0 +1,63 @@
+# MNIST Geometry Sanity Check — Default Configuration
+
+# ── Data ─────────────────────────────────────────────────────────────
+data:
+  dataset: "mnist_784"
+  version: 1
+  N_SUBSET: 10000        # null = use full 70k dataset
+  SEED: 42
+  test_size: 0.15
+  val_size: 0.15
+
+# ── Graph construction ────────────────────────────────────────────────
+graph:
+  K: 15                  # kNN neighbors
+  K_SCALES: [10, 20, 30] # for multi-scale curvature stability
+  N_SPATIAL_BLOCKS: 16   # 4x4 block aggregation on 28x28 MNIST
+  PCA_DIMS: 50           # for PCA-embedding graph view
+
+# ── Curvature ─────────────────────────────────────────────────────────
+curvature:
+  R_DIMS: 2              # number of top PCs kept in residual proxy
+  BIN_PERCENTILES: [33, 67]  # low/medium/high thresholds
+
+# ── Models ────────────────────────────────────────────────────────────
+models:
+  mlp:
+    hidden: 256
+    dropout: 0.1
+    lr: 0.001
+    epochs: 100
+    patience: 15
+  graphsage:
+    hidden: 128
+    lr: 0.001
+    epochs: 150
+    patience: 20
+  xgboost:
+    n_estimators: 200
+    max_depth: 6
+    learning_rate: 0.1
+    tree_method: "hist"
+    objective: "multi:softmax"
+    num_class: 10
+  hgbr:
+    max_iter: 200
+    max_depth: 6
+    learning_rate: 0.05
+    n_iter_no_change: 15
+  tabpfn:
+    max_train_n: 1024    # hard limit at 1024 for public v2.5
+    device: "auto"
+
+# ── TabPFN subset for evaluation ──────────────────────────────────────
+tabpfn_eval:
+  train_n: 1024
+  test_n: 512
+
+# ── Output paths (relative to experiment root) ────────────────────────
+paths:
+  artifacts: "artifacts"
+  figures: "figures"
+  reports: "reports"
+  logs: "logs"
