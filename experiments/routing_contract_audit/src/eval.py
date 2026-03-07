@@ -204,11 +204,16 @@ def write_report(
     uniform_ent = float(np.log(len(view_tags)))
     routing_active = ent_val is not None and ent_val < uniform_ent * 0.9
 
+    ent_str = f"{ent_val:.4f}" if ent_val is not None else "N/A"
+    beta_str = f"{beta_val:.4f}" if beta_val is not None else "N/A"
+    a_str = f"{a_val:.4f}" if a_val is not None else "N/A"
+    b_str = f"{b_val:.4f}" if b_val is not None else "N/A"
+
     lines += [
         f"1. **A vs B architecturally different?** YES — verified by code: A has no pi/beta, B uses explicit ObserverRouter.",
-        f"2. **B behaves like routing (vs post-hoc weighting)?** {'YES' if routing_active else 'PARTIAL/NO'} — routing entropy={ent_val:.4f if ent_val else 'N/A'} (uniform={uniform_ent:.4f}).",
-        f"3. **B improved prediction?** {'YES' if b_better else 'NO'} — A {metric_label}={a_val:.4f if a_val else 'N/A'}, B {metric_label}={b_val:.4f if b_val else 'N/A'}.",
-        f"4. **B satisfies routing semantics?** YES — all 6 synthetic tests passed. pi sums to 1. beta ∈ [0,1]. mean_beta={beta_val:.4f if beta_val else 'N/A'}.",
+        f"2. **B behaves like routing (vs post-hoc weighting)?** {'YES' if routing_active else 'PARTIAL/NO'} — routing entropy={ent_str} (uniform={uniform_ent:.4f}).",
+        f"3. **B improved prediction?** {'YES' if b_better else 'NO'} — A {metric_label}={a_str}, B {metric_label}={b_str}.",
+        f"4. **B satisfies routing semantics?** YES — all 6 synthetic tests passed. pi sums to 1. beta ∈ [0,1]. mean_beta={beta_str}.",
         "",
         "## Prior Agent Comparison",
         "- Prior `feature/routing-curvature-dual-datasets` used observer features as *combiner input* (Model A pattern).",

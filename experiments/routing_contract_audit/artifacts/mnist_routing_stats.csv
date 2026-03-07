@@ -1,0 +1,13 @@
+stat,value
+mean_pi_FULL,0.2366761863231659
+mean_pi_BLOCK,0.14846940338611603
+mean_pi_PCA,0.6148543953895569
+top1_freq_FULL,0.14266666666666666
+top1_freq_BLOCK,0.0
+top1_freq_PCA,0.8573333333333333
+routing_entropy_mean,0.833894670009613
+routing_entropy_std,0.1521863043308258
+mean_beta,0.6734540462493896
+mean_beta_low_kappa,0.7173495888710022
+mean_beta_medium_kappa,0.6434857845306396
+mean_beta_high_kappa,0.6591596007347107

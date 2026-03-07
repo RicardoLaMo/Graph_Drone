@@ -56,13 +56,15 @@ def train_view_encoders(
         for ep in range(epochs):
             enc.train(); head.train(); opt.zero_grad()
             reps = enc(data.x, data.edge_index)
-            out = head(reps)[tr_t]
+            rawout = head(reps)[tr_t]
+            out = rawout.squeeze(-1) if task == "regression" else rawout
             yt = data.y[tr_t].long() if task == "classification" else data.y[tr_t].float()
             crit(out, yt).backward(); opt.step()
             enc.eval(); head.eval()
             with torch.no_grad():
                 vr = enc(data.x, data.edge_index)
-                vout = head(vr)[va_t]
+                rawvo = head(vr)[va_t]
+                vout = rawvo.squeeze(-1) if task == "regression" else rawvo
                 yo = data.y[va_t].long() if task == "classification" else data.y[va_t].float()
                 vl = crit(vout, yo).item()
             if vl < best: best=vl; bst={"enc":enc.state_dict(),"head":head.state_dict()}; wait=0

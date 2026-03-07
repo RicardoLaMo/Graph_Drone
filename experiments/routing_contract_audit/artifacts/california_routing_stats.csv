@@ -1,0 +1,15 @@
+stat,value
+mean_pi_FULL,0.04202467203140259
+mean_pi_GEO,0.8113681674003601
+mean_pi_SOCIO,0.10696149617433548
+mean_pi_LOWRANK,0.03964562714099884
+top1_freq_FULL,0.0
+top1_freq_GEO,1.0
+top1_freq_SOCIO,0.0
+top1_freq_LOWRANK,0.0
+routing_entropy_mean,0.6619401574134827
+routing_entropy_std,0.08031516522169113
+mean_beta,0.5195017457008362
+mean_beta_low_kappa,0.5235831141471863
+mean_beta_medium_kappa,0.5169638395309448
+mean_beta_high_kappa,0.518104612827301
