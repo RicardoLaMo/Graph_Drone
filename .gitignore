@@ -67,3 +67,5 @@ data/
 !data/**/.gitkeep
 models/
 !models/**/.gitkeep
+experiments/gora_tabular/artifacts/*.npy
+experiments/gora_tabular/figures/**/*.png

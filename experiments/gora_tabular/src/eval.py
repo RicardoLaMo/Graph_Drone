@@ -51,7 +51,7 @@ def head_specialisation(pi_all: np.ndarray, view_tags: List[str]) -> pd.DataFram
         top1_freq = np.bincount(top1, minlength=M) / len(top1)
         ent = scipy_entropy(mean_pi + 1e-9)
         dominant_view = view_tags[mean_pi.argmax()]
-        row = {"head": h, "entropy": float(ent), "dominant_view": dominant_view}
+        row = {"head_idx": h, "entropy": float(ent), "dominant_view": dominant_view}
         for vi, vname in enumerate(view_tags):
             row[f"mean_pi_{vname}"] = float(mean_pi[vi])
             row[f"top1_freq_{vname}"] = float(top1_freq[vi])
@@ -81,7 +81,7 @@ def fig_head_affinity(spec_df: pd.DataFrame, view_tags: List[str], fig_dir: Path
     matrix = spec_df[cols].values    # [H, M]
     fig, ax = plt.subplots(figsize=(max(4, len(view_tags) * 1.5), max(3, len(spec_df) * 0.8)))
     sns.heatmap(matrix, ax=ax, xticklabels=view_tags,
-                yticklabels=[f"Head {h}" for h in spec_df.head.values],
+                yticklabels=[f"Head {h}" for h in spec_df.head_idx.values],
                 annot=True, fmt=".2f", cmap="Blues", vmin=0, vmax=1)
     ax.set_title(f"Head-View Affinity (mean π_{{i,h,m}}) — {name}")
     ax.set_xlabel("View"); ax.set_ylabel("Head")
@@ -148,6 +148,10 @@ def write_report(name, task, metrics, spec_df, tau, view_tags, n_heads, rep_path
     routing_helps = g2v and g3v and better(g2v, g3v)
     gora_beats_baseline = g2v and b1v and better(g2v, b1v)
 
+    g2s = f"{g2v:.4f}" if g2v is not None else "N/A"
+    g3s = f"{g3v:.4f}" if g3v is not None else "N/A"
+    b1s = f"{b1v:.4f}" if b1v is not None else "N/A"
+
     lines = [
         f"# GoRA-Tabular: {name}",
         f"*{ts}* | Branch: `feature/gora-tabular-routing`\n",
@@ -175,14 +179,14 @@ def write_report(name, task, metrics, spec_df, tau, view_tags, n_heads, rep_path
         f"\n## Per-head temperature τ (learned): {[f'{t:.3f}' for t in tau]}\n",
         "## Audit Conclusion",
         f"- G2 routing beats G3 uniform? **{'YES' if routing_helps else 'NO'}** "
-        f"(G2={g2v:.4f if g2v else 'N/A'}, G3={g3v:.4f if g3v else 'N/A'} {key})",
+        f"(G2={g2s}, G3={g3s} {key})",
         f"- G2 beats strong tabular baseline (B1)? **{'YES' if gora_beats_baseline else 'NO'}** "
-        f"(G2={g2v:.4f if g2v else 'N/A'}, B1={b1v:.4f if b1v else 'N/A'})",
+        f"(G2={g2s}, B1={b1s})",
         "",
         "## What makes this different from prior experiments",
         "- Prior: frozen reps → ObserverRouter → reweighting (post-hoc, Model A pattern)",
         "- This: g_i → π_{i,h,m} → logit bias inside softmax → representation formation",
-        "- The graph neighourhood each head sees is determined BEFORE embedding is complete.",
+        "- The graph neighbourhood each head sees is determined BEFORE embedding is complete.",
     ]
     rep_path.write_text("\n".join(lines))
     print(f"[report] Saved: {rep_path}")

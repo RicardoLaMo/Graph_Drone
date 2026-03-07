@@ -144,12 +144,12 @@ def run_california():
     pd.DataFrame(metrics).to_csv(ART/f"{tag}_metrics.csv", index=False)
     pd.DataFrame(bin_rows).to_csv(ART/f"{tag}_bin_metrics.csv", index=False)
     sp = spec_df_g2 if spec_df_g2 is not None else pd.DataFrame()
-    if len(sp): sp.to_csv(ART/f"{tag}_head_specialisation.csv", index=False); print(f"\n[Head Spec]\n{sp[['head','dominant_view','entropy']].to_string(index=False)}")
+    if len(sp): sp.to_csv(ART/f"{tag}_head_specialisation.csv", index=False); print(f"\n[Head Spec]\n{sp[['head_idx','dominant_view','entropy']].to_string(index=False)}")
     fig_dir = FIG/tag; fig_dir.mkdir(exist_ok=True)
     if pi_g2 is not None and len(sp): fig_head_affinity(sp, view_tags, fig_dir, tag); fig_pi_spread(pi_g2, view_tags, fig_dir, tag)
     if tau_g2 is not None: fig_tau(tau_g2, fig_dir, tag)
     fig_per_bin(bin_rows, task, fig_dir, tag)
-    write_report(tag, task, metrics, sp, tau_g2 or [], view_tags, N_HEADS, REP/f"{tag}_report.md")
+    write_report(tag, task, metrics, sp, tau_g2 if tau_g2 is not None else [], view_tags, N_HEADS, REP/f"{tag}_report.md")
     print(f"\n[DONE] California in {time.time()-t0:.1f}s")
 
 
@@ -228,12 +228,12 @@ def run_mnist(n_subset=10000):
     pd.DataFrame(metrics).to_csv(ART/f"{tag}_metrics.csv", index=False)
     pd.DataFrame(bin_rows).to_csv(ART/f"{tag}_bin_metrics.csv", index=False)
     sp = spec_df_g2 if spec_df_g2 is not None else pd.DataFrame()
-    if len(sp): sp.to_csv(ART/f"{tag}_head_specialisation.csv", index=False); print(f"\n[Head Spec]\n{sp[['head','dominant_view','entropy']].to_string(index=False)}")
+    if len(sp): sp.to_csv(ART/f"{tag}_head_specialisation.csv", index=False); print(f"\n[Head Spec]\n{sp[['head_idx','dominant_view','entropy']].to_string(index=False)}")
     fig_dir = FIG/tag; fig_dir.mkdir(exist_ok=True)
     if pi_g2 is not None and len(sp): fig_head_affinity(sp, view_tags, fig_dir, tag); fig_pi_spread(pi_g2, view_tags, fig_dir, tag)
     if tau_g2 is not None: fig_tau(tau_g2, fig_dir, tag)
     fig_per_bin(bin_rows, task, fig_dir, tag)
-    write_report(tag, task, metrics, sp, tau_g2 or [], view_tags, N_HEADS, REP/f"{tag}_report.md")
+    write_report(tag, task, metrics, sp, tau_g2 if tau_g2 is not None else [], view_tags, N_HEADS, REP/f"{tag}_report.md")
     print(f"\n[DONE] MNIST in {time.time()-t0:.1f}s")
 
 

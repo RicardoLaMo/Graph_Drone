@@ -69,7 +69,7 @@ class MoERouter(nn.Module):
 class UniformRouter(nn.Module):
     """Ablation G3: uniform pi = 1/M for all rows and heads. No geometry used."""
 
-    def __init__(self, n_heads: int, n_views: int):
+    def __init__(self, n_heads: int, n_views: int, **kwargs):
         super().__init__()
         self.n_heads = n_heads
         self.n_views = n_views
@@ -86,7 +86,7 @@ class UniformRouter(nn.Module):
 class RandomRouter(nn.Module):
     """Ablation G4: shuffled pi from shuffled g — tests if geometry signal matters."""
 
-    def __init__(self, obs_dim: int, n_heads: int, n_views: int, hidden: int = 32):
+    def __init__(self, obs_dim: int = 1, n_heads: int = 4, n_views: int = 4, hidden: int = 32, **kwargs):
         super().__init__()
         self.real_router = MoERouter(obs_dim, n_heads, n_views, hidden)
 
