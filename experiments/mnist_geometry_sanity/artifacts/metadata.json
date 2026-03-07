@@ -1,0 +1,9 @@
+{
+  "n_total": 10000,
+  "n_train": 7000,
+  "n_val": 1500,
+  "n_test": 1500,
+  "n_features": 784,
+  "n_classes": 10,
+  "seed": 42
+}

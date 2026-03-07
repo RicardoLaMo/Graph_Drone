@@ -190,12 +190,14 @@ def train_tabpfn(X_tr, X_te, y_tr, y_te):
         print(f"  [M4_TabPFN] Using first {MAX_TRAIN} train samples (model limit). DOCUMENTED LIMITATION.")
         X_sub = X_tr[:MAX_TRAIN]
         y_sub = y_tr[:MAX_TRAIN]
-        # TabPFN also limits test samples for RAM; we clip to 512
-        X_te_sub = X_te[:512]
-        y_te_sub = y_te[:512]
+        # Force CPU for TabPFN — MPS OOM with 784-d × 512 test samples (8 GiB limit).
+        # Documented: MPS allocated 2.06 GiB + 6.19 GiB other, attempted 165 MiB extra → OOM.
+        MAX_TEST = 128
+        X_te_sub = X_te[:MAX_TEST]
+        y_te_sub = y_te[:MAX_TEST]
 
         start = time.time()
-        clf = TabPFNClassifier(device="auto")
+        clf = TabPFNClassifier(device="cpu")
         clf.fit(X_sub, y_sub)
         train_time = time.time() - start
 
