@@ -1,0 +1,21 @@
+# Core Data Science
+numpy>=1.26.0
+pandas>=2.1.0
+scikit-learn>=1.3.0
+scipy>=1.11.0
+
+# Visualization
+matplotlib>=3.8.0
+seaborn>=0.13.0
+
+# PyTorch ecosystem for Apple Silicon (built-in MPS support)
+torch>=2.2.0
+torchvision>=0.17.0
+torchaudio>=2.2.0
+
+# OpenML data access
+openml>=0.14.0
+
+# Utilities
+jupyterlab>=4.0.0
+tqdm>=4.66.0
