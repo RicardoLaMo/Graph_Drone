@@ -26,10 +26,15 @@ def get_device():
 
 def test_xgboost(device):
     print("\n" + "=" * 50)
-    print("XGBoost Test (California Housing)")
+    print("XGBoost Test (California Housing from OpenML)")
     print("=" * 50)
-    housing = fetch_california_housing()
-    X_train, X_test, y_train, y_test = train_test_split(housing.data, housing.target, test_size=0.2, random_state=42)
+    
+    # Fetch from OpenML directly
+    import openml
+    dataset = openml.datasets.get_dataset('california')
+    X, y, _, _ = dataset.get_data(dataset_format='dataframe', target=dataset.default_target_attribute)
+    
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
     
     # Check if XGBoost supports MPS specifically via hist tree method
     # It might fall back to CPU if XGB is not compiled with Mac Metal support, which is fine for functionality test.
@@ -53,11 +58,13 @@ def test_xgboost(device):
 
 def test_knn_and_graph_embeddings(device):
     print("\n" + "=" * 50)
-    print("KNN & PyTorch Geometric Test (California Housing Subset)")
+    print("KNN & PyTorch Geometric Test (California Housing from OpenML Subset)")
     print("=" * 50)
     # Use a small subset to keep test fast
-    housing = fetch_california_housing()
-    X = housing.data[:1000] 
+    import openml
+    dataset = openml.datasets.get_dataset('california')
+    X, _, _, _ = dataset.get_data(dataset_format='dataframe', target=dataset.default_target_attribute)
+    X = X.values[:1000] 
     
     print("1. Computing KNN adjacency via Scikit-Learn...")
     start = time.time()
