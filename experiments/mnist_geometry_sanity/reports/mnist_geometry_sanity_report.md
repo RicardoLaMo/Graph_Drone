@@ -20,6 +20,7 @@ Test whether kNN + graph embedding + curvature-view pipeline detects and exploit
 | M10_KappaFeature |   0.938667 |  0.937829  | nan        |
 | M6_BLOCK         |   0.938    |  0.937178  | nan        |
 | M5_FULL          |   0.936667 |  0.936277  | nan        |
+| M4_TabPFN_subset |   0.929688 |  0.929033  | nan        |
 | M0_Majority      |   0.112667 |  0.0202516 | nan        |
 
 ## 3. Curvature Statistics

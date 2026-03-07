@@ -181,23 +181,26 @@ def train_xgboost(X_tr, X_val, X_te, y_tr, y_val, y_te):
 
 def train_tabpfn(X_tr, X_te, y_tr, y_te):
     """
-    TabPFN v2.5 has a hard practical limit at ~1024 training samples for public access.
-    We document this limitation clearly and run on a fixed 1024-sample subset.
+    TabPFN v2.5 documented limitations:
+    - Public model limit: ~1024 training samples
+    - MPS OOM on Apple M4: 784-d * 512 test rows exceeds 8 GiB limit
+    - CPU block: TabPFN raises if CPU + >1000 samples without override
+    Fix: force CPU + ignore_pretraining_limits=True + 128 test rows.
     """
     MAX_TRAIN = 1024
+    MAX_TEST = 128
     try:
+        import os
+        os.environ['TABPFN_ALLOW_CPU_LARGE_DATASET'] = '1'
         from tabpfn import TabPFNClassifier
-        print(f"  [M4_TabPFN] Using first {MAX_TRAIN} train samples (model limit). DOCUMENTED LIMITATION.")
+        print(f"  [M4_TabPFN] train={MAX_TRAIN}, test={MAX_TEST} (CPU, ignore_pretraining_limits). DOCUMENTED LIMITATION.")
         X_sub = X_tr[:MAX_TRAIN]
         y_sub = y_tr[:MAX_TRAIN]
-        # Force CPU for TabPFN — MPS OOM with 784-d × 512 test samples (8 GiB limit).
-        # Documented: MPS allocated 2.06 GiB + 6.19 GiB other, attempted 165 MiB extra → OOM.
-        MAX_TEST = 128
         X_te_sub = X_te[:MAX_TEST]
         y_te_sub = y_te[:MAX_TEST]
 
         start = time.time()
-        clf = TabPFNClassifier(device="cpu")
+        clf = TabPFNClassifier(device="cpu", ignore_pretraining_limits=True)
         clf.fit(X_sub, y_sub)
         train_time = time.time() - start
 
