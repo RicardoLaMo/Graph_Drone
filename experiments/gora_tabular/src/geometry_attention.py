@@ -1,56 +1,41 @@
 """
-geometry_attention.py — GoRA-style geometry-inside-attention for tabular rows.
+geometry_attention.py — GoRA-Tabular sparse neighbourhood attention.
 
-Core equation per head h for row i attending to row j:
-  logit_{ij}^h = <q_i^h, k_j^h> / sqrt(d_k)
-               + log(τ_h · Ã_{ij}^{i,h} + ε)
+Redesigned for scalability: instead of full [N,N] dense attention,
+each row i attends only to its pre-fetched k-hop neighbourhood.
+
+For anchor row i with neighbourhood N(i) = [j_1, ..., j_k]:
+
+  logit_{i,t}^h = <q_i^h, k_{j_t}^h> / sqrt(d_k)
+                + log(τ_h · Ã_{i,j_t}^{i,h} + ε)
 
 where:
-  Ã_{ij}^{i,h} = Σ_m π_{i,h,m} · A^(m)_{ij}     (geo-weighted effective adjacency)
-  τ_h           = per-head learned temperature (sharpens/broadens graph bias)
-  ε             = 1e-6  (log-barrier stability)
+  Ã_{i,j_t}^{i,h} = Σ_m π_{i,h,m} · w^(m)_{i,j_t}   (scalar, just one edge)
 
-Rows NOT in the adjacency of row i get:
-  log(τ_h · 0 + ε) = log(ε) ≈ -13.8  → near-zero attention
+This reduces memory from O(N²) to O(B × K) per forward pass.
+The routing still shapes which view's neighbour edges are trusted per head.
 
-This is the mechanism that makes routing structural:
-  A head routed to GEO (π_{h,GEO}≈1) can only attend to geographically near rows.
-  A head routed to FULL can attend to feature-similar rows.
-
-Mode (isolation vs interaction) is structural here:
-  isolation:  π is peaked → head can only see one view's neighbourhood
-  interaction: π is flat → head sees a convex mix of all view neighbourhoods
-
-Note on shapes:
-  N = total rows in dataset
-  B_idx = selected row indices for a batch (e.g. train_idx)
-  We compute attention over ALL N rows (for full neighbourhood context),
-  but only compute loss on B_idx rows.
+Shapes:
+  x_anchors:    [B, d_model]   — anchor row embeddings
+  x_neigh:      [B, K, d_model] — neighbour embeddings per anchor
+  pi:           [B, H, M]     — routing weights (from MoERouter)
+  tau:          [H]            — per-head temperatures
+  edge_weights: [B, K, M]     — Gaussian edge weights per view
 """
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
-from typing import Dict, List, Tuple
+from typing import Tuple, List
 
 
 EPS = 1e-6
 
 
-class GeometryAwareAttention(nn.Module):
+class SparseGeomAttention(nn.Module):
     """
-    Multi-head self-attention where each head's logits are biased by
-    the geometry-routed effective adjacency log(τ_h · Ã_{ij}^{i,h} + ε).
-
-    Inputs:
-      x:          [N, d_model]        row feature embeddings
-      pi:         [N, H, M]           per-row per-head routing weights
-      tau:        [H]                 per-head temperature
-      adjs:       List of M tensors, each [N, N]  row-normalised adjacency per view
-                  (dense, precomputed). For large N use edge_index variant.
-    Output:
-      out:        [N, d_model]
-      attn_map:   {head_idx: [N, N]} (optional, for head specialisation analysis)
+    Sparse neighbourhood attention with geometry-routing bias.
+    Each anchor row attends to exactly K neighbours.
     """
 
     def __init__(self, d_model: int, n_heads: int, dropout: float = 0.1):
@@ -66,82 +51,90 @@ class GeometryAwareAttention(nn.Module):
         self.W_o = nn.Linear(d_model, d_model, bias=False)
         self.dropout = nn.Dropout(dropout)
 
-    def _effective_adj(
+    def forward(
         self,
-        pi: torch.Tensor,   # [N, H, M]
-        adjs: List[torch.Tensor],  # M × [N, N]
-        head: int,
+        x_anc: torch.Tensor,       # [B, d_model]  anchor embeddings
+        x_nei: torch.Tensor,       # [B, K, d_model] neighbour embeddings
+        pi: torch.Tensor,           # [B, H, M]
+        tau: torch.Tensor,          # [H]
+        ew: torch.Tensor,           # [B, K, M]  per-view edge weights (Gaussian)
     ) -> torch.Tensor:
-        """
-        Computes Ã^{i,h} = Σ_m π_{i,h,m} · A^(m)
-        Shape: [N, N]
-        """
-        pi_h = pi[:, head, :]  # [N, M]
-        # Stack adjacencies: [M, N, N]
-        A_stack = torch.stack(adjs, dim=0).to(pi.device)           # [M, N, N]
-        # Ã_{ij}^{i,h} = Σ_m π_{i,h,m} · A^(m)_{ij}
-        # Einsum: pi_h [N, M], A_stack [M, N, N] → [N, N]
-        # For each row i: Ã[i, j] = Σ_m pi_h[i, m] * A_stack[m, i, j]
-        A_eff = torch.einsum('im,mij->ij', pi_h, A_stack)  # [N, N]
-        return A_eff
+        B, K, _ = x_nei.shape
+        H, dk = self.n_heads, self.d_k
+
+        # Project queries from anchors, keys/values from neighbours
+        Q = self.W_q(x_anc).view(B, H, dk)                # [B, H, dk]
+        K_ = self.W_k(x_nei.reshape(B * K, -1)).view(B, K, H, dk)  # [B, K, H, dk]
+        V_ = self.W_v(x_nei.reshape(B * K, -1)).view(B, K, H, dk)  # [B, K, H, dk]
+
+        # Effective edge weight per head:
+        # Ã_{i,j,h} = Σ_m π_{i,h,m} · w^(m)_{i,j}
+        # pi: [B, H, M], ew: [B, K, M] → [B, H, K]
+        A_eff = torch.einsum('bhm,bkm->bhk', pi, ew)       # [B, H, K]  ∈ [0,1]
+
+        # Graph bias: log(τ_h · Ã + ε)
+        # tau: [H] → broadcast to [1, H, 1]
+        tau_exp = tau.view(1, H, 1)
+        graph_bias = torch.log(tau_exp * A_eff + EPS)       # [B, H, K]
+
+        # Content scores: Q [B, H, dk] × K [B, K, H, dk] → [B, H, K]
+        # Permute K to [B, H, K, dk]
+        K_t = K_.permute(0, 2, 1, 3)                        # [B, H, K, dk]
+        Q_exp = Q.unsqueeze(2)                               # [B, H, 1, dk]
+        scores = (Q_exp @ K_t.transpose(-2, -1)).squeeze(2) / math.sqrt(dk)  # [B, H, K]
+
+        logits = scores + graph_bias                         # [B, H, K]
+        attn = self.dropout(torch.softmax(logits, dim=-1))  # [B, H, K]
+
+        # Aggregate values: [B, H, K] × [B, H, K, dk] → [B, H, dk]
+        V_t = V_.permute(0, 2, 1, 3)                        # [B, H, K, dk]
+        out = (attn.unsqueeze(2) @ V_t).squeeze(2)          # [B, H, dk]
+        out = out.reshape(B, H * dk)                         # [B, d_model]
+        return self.W_o(out)
+
+
+class SparseGeomLayer(nn.Module):
+    """Single GoRA transformer layer using sparse neighbourhood attention."""
+
+    def __init__(self, d_model: int, n_heads: int, ff_dim: int = None, dropout: float = 0.1):
+        super().__init__()
+        ff_dim = ff_dim or d_model * 4
+        self.attn = SparseGeomAttention(d_model, n_heads, dropout)
+        self.norm1 = nn.LayerNorm(d_model)
+        self.ff = nn.Sequential(
+            nn.Linear(d_model, ff_dim), nn.GELU(), nn.Dropout(dropout),
+            nn.Linear(ff_dim, d_model)
+        )
+        self.norm2 = nn.LayerNorm(d_model)
+        self.drop = nn.Dropout(dropout)
 
     def forward(
         self,
-        x: torch.Tensor,         # [N, d_model]
-        pi: torch.Tensor,         # [N, H, M]
-        tau: torch.Tensor,        # [H]
-        adjs: List[torch.Tensor], # M × [N, N]
-        return_attn: bool = False,
-    ):
-        N, D = x.shape
-        Q = self.W_q(x).view(N, self.n_heads, self.d_k)  # [N, H, dk]
-        K = self.W_k(x).view(N, self.n_heads, self.d_k)
-        V = self.W_v(x).view(N, self.n_heads, self.d_k)
-
-        head_outputs = []
-        attn_maps = {}
-
-        for h in range(self.n_heads):
-            # Content scores: <q^h, k^h> / sqrt(d_k)  [N, N]
-            q_h = Q[:, h, :]   # [N, dk]
-            k_h = K[:, h, :]
-            v_h = V[:, h, :]
-
-            scores = torch.matmul(q_h, k_h.t()) / math.sqrt(self.d_k)  # [N, N]
-
-            # Geometry bias: log(τ_h · Ã_{ij}^{i,h} + ε)
-            # Ã: [N, N]
-            A_eff = self._effective_adj(pi, adjs, h)                    # [N, N]
-            tau_h = tau[h]
-            graph_bias = torch.log(tau_h * A_eff + EPS)                 # [N, N]
-
-            # Combine: content + geometry
-            logits = scores + graph_bias                                 # [N, N]
-
-            # Structural mode:
-            #   Rows where A_eff is peaked → attention also peaked (isolation)
-            #   Rows where A_eff is flat → attention also broader (interaction)
-            # This emerges naturally from the log-barrier term.
-
-            attn = self.dropout(torch.softmax(logits, dim=-1))          # [N, N]
-            out_h = torch.matmul(attn, v_h)                             # [N, dk]
-            head_outputs.append(out_h)
-            if return_attn:
-                attn_maps[h] = attn.detach()
-
-        # Concat and project
-        out = torch.cat(head_outputs, dim=-1)    # [N, d_model]
-        out = self.W_o(out)
-        return (out, attn_maps) if return_attn else (out, None)
+        x_anc: torch.Tensor,    # [B, d_model]
+        x_nei: torch.Tensor,    # [B, K, d_model]
+        pi: torch.Tensor,       # [B, H, M]
+        tau: torch.Tensor,      # [H]
+        ew: torch.Tensor,       # [B, K, M]
+    ) -> torch.Tensor:
+        # Residual on anchors only
+        attn_out = self.attn(self.norm1(x_anc), x_nei, pi, tau, ew)
+        x_anc = x_anc + self.drop(attn_out)
+        x_anc = x_anc + self.drop(self.ff(self.norm2(x_anc)))
+        return x_anc
 
 
-class GeometryAwareTransformerLayer(nn.Module):
-    """Single transformer layer with geometry-aware attention."""
+class NoGraphLayer(nn.Module):
+    """G0 baseline: standard self-attention, no graph bias. Anchors only."""
 
     def __init__(self, d_model: int, n_heads: int, ff_dim: int = None, dropout: float = 0.1):
         super().__init__()
         ff_dim = ff_dim or d_model * 4
-        self.attn = GeometryAwareAttention(d_model, n_heads, dropout)
+        # Use standard attention (without bias)
+        self.W_q = nn.Linear(d_model, d_model, bias=False)
+        self.W_k = nn.Linear(d_model, d_model, bias=False)
+        self.W_v = nn.Linear(d_model, d_model, bias=False)
+        self.W_o = nn.Linear(d_model, d_model, bias=False)
+        self.n_heads = n_heads; self.d_k = d_model // n_heads
         self.norm1 = nn.LayerNorm(d_model)
         self.ff = nn.Sequential(
             nn.Linear(d_model, ff_dim), nn.GELU(), nn.Dropout(dropout),
@@ -150,33 +143,15 @@ class GeometryAwareTransformerLayer(nn.Module):
         self.norm2 = nn.LayerNorm(d_model)
         self.drop = nn.Dropout(dropout)
 
-    def forward(self, x, pi, tau, adjs, return_attn=False):
-        attn_out, attn_maps = self.attn(self.norm1(x), pi, tau, adjs, return_attn)
-        x = x + self.drop(attn_out)
-        x = x + self.drop(self.ff(self.norm2(x)))
-        return x, attn_maps
-
-
-class StandardTransformerLayer(nn.Module):
-    """Baseline G0: standard multi-head attention, no graph bias."""
-
-    def __init__(self, d_model: int, n_heads: int, ff_dim: int = None, dropout: float = 0.1):
-        super().__init__()
-        ff_dim = ff_dim or d_model * 4
-        self.attn = nn.MultiheadAttention(d_model, n_heads, dropout=dropout,
-                                           batch_first=True)
-        self.norm1 = nn.LayerNorm(d_model)
-        self.ff = nn.Sequential(
-            nn.Linear(d_model, ff_dim), nn.GELU(), nn.Dropout(dropout),
-            nn.Linear(ff_dim, d_model)
-        )
-        self.norm2 = nn.LayerNorm(d_model)
-        self.drop = nn.Dropout(dropout)
-
-    def forward(self, x, **kwargs):
-        # x: [N, D] → treat as sequence of length N, batch=1
-        x_seq = x.unsqueeze(0)    # [1, N, D]
-        attn_out, _ = self.attn(x_seq, x_seq, x_seq, need_weights=False)
-        x = x + self.drop(attn_out.squeeze(0))
-        x = x + self.drop(self.ff(self.norm2(x)))
-        return x, None
+    def forward(self, x_anc, x_nei, pi=None, tau=None, ew=None):
+        B, K, _ = x_nei.shape; H, dk = self.n_heads, self.d_k
+        Q = self.W_q(self.norm1(x_anc)).view(B, H, dk)
+        Kv = self.W_k(x_nei.reshape(B*K, -1)).view(B, K, H, dk)
+        Vv = self.W_v(x_nei.reshape(B*K, -1)).view(B, K, H, dk)
+        Kt = Kv.permute(0, 2, 1, 3); Vt = Vv.permute(0, 2, 1, 3)
+        scores = (Q.unsqueeze(2) @ Kt.transpose(-2,-1)).squeeze(2) / math.sqrt(dk)
+        attn = torch.softmax(scores, dim=-1)
+        out = (attn.unsqueeze(2) @ Vt).squeeze(2).reshape(B, -1)
+        x_anc = x_anc + self.drop(self.W_o(out))
+        x_anc = x_anc + self.drop(self.ff(self.norm2(x_anc)))
+        return x_anc

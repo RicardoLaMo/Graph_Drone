@@ -1,18 +1,24 @@
 """
-train.py — GoRA-Tabular training loop.
+train.py — GoRA-Tabular sparse mini-batch training loop.
 
-Key design:
-  - Full-batch forward pass over ALL N rows (for full graph context)
-  - Loss computed only on tr_i indices
-  - adj matrices [N, N] are precomputed and passed each forward
-  - For large N, adjacency [N,N] may be memory-intensive; use float16 or
-    edge-index variant for scale-up (left as future work)
+KEY DESIGN: Mini-batch subgraph sampling.
+  1. Precompute for all N rows: neigh_idx [N, K], edge_wts [N, K, M]
+     This is done once on CPU and is O(N*K) — very cheap.
+  2. At each training step, sample B anchor indices.
+  3. Fetch x_nei = X[neigh_idx[batch]]  → [B, K, d]
+  4. Fetch ew  = edge_wts[batch]         → [B, K, M]
+  5. Forward: anchor attends to K neighbours with geometry-shaped logits.
+
+Memory: O(B × K × d_model) per step — tractable at any N.
+Routing structure: still causal (anchor geometry → which view's edge weights it trusts)
+                  across the SAME neighbourhood structure.
 """
 import time
 import numpy as np
 import torch
 import torch.nn as nn
-from typing import List, Dict
+from sklearn.neighbors import NearestNeighbors
+from typing import Dict, List, Tuple
 
 
 SEED = 42; torch.manual_seed(SEED)
@@ -22,117 +28,164 @@ def get_device():
     return torch.device("mps") if torch.backends.mps.is_available() else torch.device("cpu")
 
 
-def precompute_adj_dense(views: Dict, N: int, device) -> List[torch.Tensor]:
-    """
-    Build dense [N, N] adjacency per view from (edge_index, edge_weight) tuples.
-    Row-normalised; each entry A[i,j] = Gaussian kNN weight (or 0).
-    """
-    adjs = []
-    for name, (ei, ew) in views.items():
-        A = torch.zeros(N, N, dtype=torch.float32)
-        A[ei[0], ei[1]] = ew
-        adjs.append(A.to(device))
-        print(f"  [adj {name}] sparsity={(A == 0).float().mean():.4f}")
-    return adjs
+# ─── Precompute neighbourhood + per-view edge weights ─────────────────────────
 
+def build_neighbourhood(
+    X_views: Dict[str, np.ndarray],   # {view_name: X_topo [N, d_topo]}
+    k: int = 15,
+    primary_key: str = None,          # view used to anchor the neighbourhood indices
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Returns:
+      neigh_idx: [N, K]   — universal neighbour indices (from primary view or union)
+      edge_wts:  [N, K, M]— Gaussian edge weights per view for those K neighbours
+    """
+    view_names = list(X_views.keys())
+    M = len(view_names)
+    primary = primary_key or view_names[0]
+    X_prim = X_views[primary]
+    N = X_prim.shape[0]
+
+    print(f"  [neighbourhood] Fitting kNN (k={k}) on primary view '{primary}'...")
+    nb = NearestNeighbors(n_neighbors=k + 1, n_jobs=-1).fit(X_prim)
+    _, neigh_idx_raw = nb.kneighbors(X_prim)
+    neigh_idx = neigh_idx_raw[:, 1:].astype(np.int64)   # [N, K] drop self
+
+    edge_wts = np.zeros((N, k, M), dtype=np.float32)
+    for mi, vname in enumerate(view_names):
+        Xv = X_views[vname]
+        # Gaussian weights for each (i, neigh_idx[i,j]) pair
+        diff_sq = ((Xv[np.arange(N)[:, None], :] -
+                    Xv[neigh_idx]) ** 2).sum(-1)   # [N, K]
+        sigma = np.median(np.sqrt(diff_sq)) + 1e-8
+        edge_wts[:, :, mi] = np.exp(-diff_sq / sigma ** 2)
+        # row-normalise per view
+        row_sum = edge_wts[:, :, mi].sum(-1, keepdims=True) + 1e-8
+        edge_wts[:, :, mi] /= row_sum
+        print(f"  [neighbourhood] View '{vname}': mean_ew={edge_wts[:,:,mi].mean():.4f}")
+
+    return neigh_idx, edge_wts
+
+
+# ─── Mini-batch fetch ──────────────────────────────────────────────────────────
+
+def fetch_batch(
+    batch_idx: np.ndarray,
+    X_all: np.ndarray,
+    g_all: np.ndarray,
+    y_all: np.ndarray,
+    neigh_idx: np.ndarray,
+    edge_wts: np.ndarray,
+    device,
+):
+    """Fetch anchor + neighbour tensors for a mini-batch."""
+    b_ni = neigh_idx[batch_idx]            # [B, K]
+    x_anc = torch.tensor(X_all[batch_idx], dtype=torch.float32).to(device)
+    g_anc = torch.tensor(g_all[batch_idx], dtype=torch.float32).to(device)
+    x_nei = torch.tensor(X_all[b_ni], dtype=torch.float32).to(device)   # [B, K, d]
+    ew    = torch.tensor(edge_wts[batch_idx], dtype=torch.float32).to(device)  # [B, K, M]
+    y_b   = torch.tensor(y_all[batch_idx]).to(device)
+    return x_anc, g_anc, x_nei, ew, y_b
+
+
+# ─── Training ─────────────────────────────────────────────────────────────────
 
 def train_gora(
     model: nn.Module,
-    X_all: np.ndarray,        # [N, d]
-    g_all: np.ndarray,        # [N, obs_dim]
-    y_all: np.ndarray,        # [N]
-    adjs_cpu: List[torch.Tensor],
+    X_all: np.ndarray,
+    g_all: np.ndarray,
+    y_all: np.ndarray,
+    neigh_idx: np.ndarray,   # [N, K]
+    edge_wts: np.ndarray,    # [N, K, M]
     tr_i: np.ndarray,
     va_i: np.ndarray,
     task: str,
     n_classes: int = 1,
-    epochs: int = 500,
-    patience: int = 40,
+    epochs: int = 100,
+    patience: int = 15,
     lr: float = 3e-4,
+    batch_size: int = 512,
     name: str = "model",
 ) -> nn.Module:
     dev = get_device()
     model = model.to(dev)
-    adjs = [A.to(dev) for A in adjs_cpu]
-
-    X_t = torch.tensor(X_all, dtype=torch.float32).to(dev)
-    g_t = torch.tensor(g_all, dtype=torch.float32).to(dev)
-    y_t = torch.tensor(y_all,
-                        dtype=torch.long if task == "classification" else torch.float32).to(dev)
-
+    crit = nn.CrossEntropyLoss() if task == "classification" else nn.MSELoss()
     opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs, eta_min=lr * 0.01)
-    crit = nn.CrossEntropyLoss() if task == "classification" else nn.MSELoss()
 
-    tr_t = torch.tensor(tr_i, dtype=torch.long)
-    va_t = torch.tensor(va_i, dtype=torch.long)
     best, bst, wait = 1e9, None, 0
     t0 = time.time()
 
     for ep in range(epochs):
         model.train()
-        opt.zero_grad()
-        # Full-batch forward (all N rows so attention has full graph context)
-        out, pi, tau, _ = model(X_t, g_t, adjs)     # [N, out_dim]
-        # Loss on train indices only
-        pred_tr = out[tr_t]
-        yt_tr = y_t[tr_t]
-        if task == "regression":
-            loss = crit(pred_tr.squeeze(-1), yt_tr)
-        else:
-            loss = crit(pred_tr, yt_tr)
-        loss.backward(); opt.step(); sched.step()
-
-        if ep % 10 == 0:
-            model.eval()
-            with torch.no_grad():
-                vout, *_ = model(X_t, g_t, adjs)
-                pred_va = vout[va_t]
-                yv = y_t[va_t]
-                if task == "regression":
-                    vl = crit(pred_va.squeeze(-1), yv).item()
-                else:
-                    vl = crit(pred_va, yv).item()
-            if vl < best:
-                best = vl
-                bst = {k: v.clone() for k, v in model.state_dict().items()}
-                wait = 0
+        perm = np.random.permutation(tr_i)
+        ep_loss = 0.0; n_batches = 0
+        for start in range(0, len(perm), batch_size):
+            b_idx = perm[start:start + batch_size]
+            x_a, g_a, x_n, ew_a, y_b = fetch_batch(b_idx, X_all, g_all, y_all,
+                                                      neigh_idx, edge_wts, dev)
+            opt.zero_grad()
+            out, pi, tau = model(x_a, g_a, x_n, ew_a)
+            if task == "regression":
+                loss = crit(out.squeeze(-1), y_b.float())
             else:
-                wait += 10
-            if wait >= patience: break
-            if ep % 100 == 0:
-                print(f"  [{name}] ep={ep:4d} train_loss={loss.item():.4f} val_loss={vl:.4f}")
+                loss = crit(out, y_b.long())
+            loss.backward(); opt.step()
+            ep_loss += loss.item(); n_batches += 1
+        sched.step()
+
+        # Validation (full pass in batches)
+        model.eval()
+        val_loss = 0.0; val_batches = 0
+        with torch.no_grad():
+            for start in range(0, len(va_i), batch_size):
+                b_idx = va_i[start:start + batch_size]
+                x_a, g_a, x_n, ew_a, y_b = fetch_batch(b_idx, X_all, g_all, y_all,
+                                                          neigh_idx, edge_wts, dev)
+                out, *_ = model(x_a, g_a, x_n, ew_a)
+                if task == "regression":
+                    vl = crit(out.squeeze(-1), y_b.float()).item()
+                else:
+                    vl = crit(out, y_b.long()).item()
+                val_loss += vl; val_batches += 1
+        val_loss /= max(val_batches, 1)
+
+        if val_loss < best:
+            best = val_loss
+            bst = {k: v.clone() for k, v in model.state_dict().items()}
+            wait = 0
+        else:
+            wait += 1
+        if wait >= patience: break
+        if ep % 10 == 0:
+            print(f"  [{name}] ep={ep:4d} tr={ep_loss/n_batches:.4f} val={val_loss:.4f}")
 
     model.load_state_dict(bst)
-    print(f"  [{name}] Done in {time.time()-t0:.1f}s")
+    print(f"  [{name}] Done in {time.time()-t0:.1f}s | best_val={best:.4f}")
     return model
 
 
 @torch.no_grad()
-def predict_gora(model, X_all, g_all, adjs_cpu, te_i, task, device):
-    dev = device
+def predict_gora(model, X_all, g_all, y_all, neigh_idx, edge_wts, te_i, task,
+                 batch_size=512):
+    dev = get_device()
     model = model.to(dev).eval()
-    X_t = torch.tensor(X_all, dtype=torch.float32).to(dev)
-    g_t = torch.tensor(g_all, dtype=torch.float32).to(dev)
-    adjs = [A.to(dev) for A in adjs_cpu]
-    out, pi, tau, _ = model(X_t, g_t, adjs, return_attn=False)
-    out = out.cpu(); pi_np = pi.cpu().numpy() if pi is not None else None
-    tau_np = tau.cpu().numpy() if tau is not None else None
-    te_out = out[te_i]
+    all_out, all_pi = [], []
+    for start in range(0, len(te_i), batch_size):
+        b_idx = te_i[start:start + batch_size]
+        x_a, g_a, x_n, ew_a, _ = fetch_batch(b_idx, X_all, g_all, y_all,
+                                               neigh_idx, edge_wts, dev)
+        out, pi, tau = model(x_a, g_a, x_n, ew_a)
+        all_out.append(out.cpu()); all_pi.append(pi.cpu() if pi is not None else None)
+
+    out_all = torch.cat(all_out, dim=0)
+    pi_all = torch.cat([p for p in all_pi if p is not None], dim=0).numpy() \
+             if all_pi[0] is not None else None
+
     if task == "classification":
-        proba = torch.softmax(te_out, -1).numpy(); preds = proba.argmax(-1)
+        proba = torch.softmax(out_all, -1).numpy(); preds = proba.argmax(-1)
     else:
-        preds = te_out.squeeze(-1).numpy(); proba = None
-    return preds, proba, pi_np, tau_np
+        preds = out_all.squeeze(-1).numpy(); proba = None
 
-
-@torch.no_grad()
-def get_head_attn_maps(model, X_all, g_all, adjs_cpu, device):
-    """Extract attention maps per head from first layer (for head specialisation analysis)."""
-    dev = device
-    model = model.to(dev).eval()
-    X_t = torch.tensor(X_all, dtype=torch.float32).to(dev)
-    g_t = torch.tensor(g_all, dtype=torch.float32).to(dev)
-    adjs = [A.to(dev) for A in adjs_cpu]
-    _, _, _, attn_maps = model(X_t, g_t, adjs, return_attn=True)
-    return {h: A.cpu().numpy() for h, A in attn_maps.items()}
+    tau_np = tau.cpu().numpy() if tau is not None else None
+    return preds, proba, pi_all, tau_np

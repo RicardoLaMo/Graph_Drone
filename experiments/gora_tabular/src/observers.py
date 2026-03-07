@@ -63,7 +63,7 @@ def compute_observers(X_pca: np.ndarray, X_views: Dict[str, np.ndarray], k: int 
         # Use mean distance as proxy for local density (richer signal than binary degree)
         vdists, _ = _knn(Xv, k); mean_dist = vdists.mean(1)
         # normalise to [0,1]
-        md_min, md_range = mean_dist.min(), mean_dist.ptp()
+        md_min = mean_dist.min(); md_range = mean_dist.max() - mean_dist.min()
         norm_dist = ((mean_dist - md_min) / (md_range + 1e-8)).astype(np.float32)
         degree_cols.append(norm_dist)
         print(f"  [obs] view '{vname}' mean_dist: {mean_dist.mean():.4f}")
