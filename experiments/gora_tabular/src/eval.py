@@ -190,3 +190,61 @@ def write_report(name, task, metrics, spec_df, tau, view_tags, n_heads, rep_path
     ]
     rep_path.write_text("\n".join(lines))
     print(f"[report] Saved: {rep_path}")
+
+
+def write_report_v2(name, task, metrics, spec_dict, tau, agree_score, view_tags, n_heads, rep_path):
+    """v2 report: multiple models in spec_dict, agree_score summary, TabPFN row."""
+    ts = datetime.datetime.now().strftime("%Y-%m-%d")
+    m_df = pd.DataFrame(metrics)
+    key = "rmse" if task == "regression" else "accuracy"
+    better = lambda a, b: (a < b) if task == "regression" else (a > b)
+
+    def _val(model_id):
+        row = m_df[m_df.model == model_id]
+        return float(row[key].values[0]) if len(row) and not pd.isna(row[key].values[0]) else None
+
+    g2v = _val("G2_GoRA_v1"); g5v = _val("G5_Joint"); g6v = _val("G6_Joint_Reg")
+    g3pv = _val("G3p_Uniform_Joint"); b1v = _val("B1_HGBR"); b2v = _val("B2_TabPFN")
+
+    def _fmt(v): return f"{v:.4f}" if v is not None else "N/A"
+
+    joint_helps = g5v is not None and g2v is not None and better(g5v, g2v)
+    reg_helps = g6v is not None and g5v is not None and better(g6v, g5v)
+    gora_beats_b1 = g5v is not None and b1v is not None and better(g5v, b1v)
+    gora_beats_tabpfn = g5v is not None and b2v is not None and better(g5v, b2v)
+
+    mean_ag = float(np.mean(agree_score)) if agree_score is not None else float("nan")
+
+    lines = [
+        f"# GoRA-Tabular v2: {name}",
+        f"*{ts}* | Branch: `feature/gora-joint-knn`\n",
+        "## Architecture upgrade: joint-view kNN",
+        "Each view m independently nominates K_each=5 neighbours.",
+        "Union pool P = ∪_m kNN_m(i). Edge weight w^(m)_{ij}=0 if j∉kNN_m(i).",
+        "Routing entropy aligned with view agreement (G6 only).\n",
+        "## Metrics\n",
+        m_df.to_markdown(index=False),
+        "\n## Ablation results",
+        f"- G5 (joint) vs G2 (single-primary): **{'✅ JOINT BETTER' if joint_helps else '❌ no gain'}** "
+        f"G5={_fmt(g5v)} G2={_fmt(g2v)} {key}",
+        f"- G6 (+ routing loss) vs G5: **{'✅ REG HELPS' if reg_helps else '❌ no gain'}** "
+        f"G6={_fmt(g6v)} G5={_fmt(g5v)}",
+        f"- G5 vs G3' (uniform+joint): G5={_fmt(g5v)} G3'={_fmt(g3pv)} — "
+        f"**{'routing > uniform' if g5v is not None and g3pv is not None and better(g5v, g3pv) else 'uniform competitive'}**",
+        f"- G5 vs B1 (HGBR): **{'✅ GoRA wins' if gora_beats_b1 else '❌ HGBR still leads'}** "
+        f"G5={_fmt(g5v)} B1={_fmt(b1v)}",
+        f"- G5 vs B2 (TabPFN): **{'✅ GoRA wins' if gora_beats_tabpfn else '❌ TabPFN leads'}** "
+        f"G5={_fmt(g5v)} B2={_fmt(b2v)}",
+        f"\n## View agreement score",
+        f"Mean agree_score = {mean_ag:.3f} (0=all views disagree, 1=all views nominate same neighbours)",
+        "\n## Head-View Affinity by model\n",
+    ]
+    for mname, sp in spec_dict.items():
+        if len(sp):
+            lines += [f"### {mname}", sp.to_markdown(index=False), ""]
+
+    if tau is not None and len(tau):
+        lines.append(f"\n## Per-head τ (G5): {[f'{t:.3f}' for t in tau]}")
+
+    rep_path.write_text("\n".join(lines))
+    print(f"[report v2] Saved: {rep_path}")

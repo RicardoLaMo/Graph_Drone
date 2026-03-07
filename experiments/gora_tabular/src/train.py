@@ -1,24 +1,30 @@
 """
-train.py — GoRA-Tabular sparse mini-batch training loop.
+train.py — GoRA-Tabular v2 training with joint-view kNN neighbourhood.
 
-KEY DESIGN: Mini-batch subgraph sampling.
-  1. Precompute for all N rows: neigh_idx [N, K], edge_wts [N, K, M]
-     This is done once on CPU and is O(N*K) — very cheap.
-  2. At each training step, sample B anchor indices.
-  3. Fetch x_nei = X[neigh_idx[batch]]  → [B, K, d]
-  4. Fetch ew  = edge_wts[batch]         → [B, K, M]
-  5. Forward: anchor attends to K neighbours with geometry-shaped logits.
+KEY UPGRADE from v1: build_joint_neighbourhood()
+  Instead of one primary view determining neighbour indices,
+  each view contributes k_per_view neighbours independently.
+  Union pool has ≤ M × k_per_view candidates per anchor row.
 
-Memory: O(B × K × d_model) per step — tractable at any N.
-Routing structure: still causal (anchor geometry → which view's edge weights it trusts)
-                  across the SAME neighbourhood structure.
+  This makes routing semantics correct:
+    - Isolation (peaked π at view m): Ã_{ij} ≈ w^(m)_{ij} which is 0
+      for j ∉ kNN_m(i). Head only attends to rows genuinely close in view m.
+    - Interaction (flat π): Ã averages all views. Rows close in any view
+      receive some attention weight.
+
+  view_mask [N, P, M]: binary indicator j ∈ kNN_m(i), used to compute
+  per-row view-agreement score (disagreement → routing should specialise).
+
+Decisions:
+  K_each = 5 per view (pool ≤ 20 for CA M=4, ≤ 15 for MNIST M=3)
+  TabPFN: California subsampled to 8k train; MNIST full 7k (PCA-200 features)
 """
 import time
 import numpy as np
 import torch
 import torch.nn as nn
 from sklearn.neighbors import NearestNeighbors
-from typing import Dict, List, Tuple
+from typing import Dict, Tuple
 
 
 SEED = 42; torch.manual_seed(SEED)
@@ -28,64 +34,151 @@ def get_device():
     return torch.device("mps") if torch.backends.mps.is_available() else torch.device("cpu")
 
 
-# ─── Precompute neighbourhood + per-view edge weights ─────────────────────────
+# ─── Joint-view kNN neighbourhood ──────────────────────────────────────────────
 
-def build_neighbourhood(
-    X_views: Dict[str, np.ndarray],   # {view_name: X_topo [N, d_topo]}
-    k: int = 15,
-    primary_key: str = None,          # view used to anchor the neighbourhood indices
-) -> Tuple[np.ndarray, np.ndarray]:
+def build_joint_neighbourhood(
+    X_views: Dict[str, np.ndarray],
+    k_per_view: int = 5,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
+    Build a joint-view neighbourhood pool.
+
+    For each view m, find k_per_view nearest neighbours independently.
+    Union the pools across views, deduplicate, pad to fixed size P.
+
     Returns:
-      neigh_idx: [N, K]   — universal neighbour indices (from primary view or union)
-      edge_wts:  [N, K, M]— Gaussian edge weights per view for those K neighbours
+      neigh_idx:  [N, P]    — padded neighbour pool indices (self=-1 mask)
+      edge_wts:   [N, P, M] — Gaussian edge weights (0 if j ∉ kNN_m(i))
+      view_mask:  [N, P, M] — binary: j ∈ kNN_m(i)
+      agree_score:[N]       — fraction of pool shared by ≥2 views per anchor
     """
+    view_names = list(X_views.keys())
+    M = len(view_names)
+    N = list(X_views.values())[0].shape[0]
+    max_pool = k_per_view * M   # generous upper bound
+
+    print(f"  [joint-kNN] Views={view_names} k_per_view={k_per_view} max_pool={max_pool}")
+
+    # Per-view kNN
+    per_view_knn = {}     # {vname: [N, k_per_view]}
+    per_view_sigma = {}   # for Gaussian bandwidth
+    for vname, Xv in X_views.items():
+        nb = NearestNeighbors(n_neighbors=k_per_view + 1, n_jobs=-1).fit(Xv)
+        dists, idxs = nb.kneighbors(Xv)
+        per_view_knn[vname] = idxs[:, 1:].astype(np.int64)   # drop self  [N, k]
+        per_view_sigma[vname] = float(np.median(dists[:, 1:]) + 1e-8)
+        print(f"  [joint-kNN] View '{vname}' sigma={per_view_sigma[vname]:.4f}")
+
+    # Build union pool per anchor
+    neigh_idx = np.full((N, max_pool), -1, dtype=np.int64)   # -1 = padding
+    edge_wts = np.zeros((N, max_pool, M), dtype=np.float32)
+    view_mask = np.zeros((N, max_pool, M), dtype=np.float32)
+
+    for i in range(N):
+        # Collect union set across views
+        pool_set = set()
+        for vname in view_names:
+            pool_set.update(per_view_knn[vname][i].tolist())
+        pool = sorted(pool_set)[:max_pool]   # deterministic ordering
+        P_i = len(pool)
+        neigh_idx[i, :P_i] = pool
+
+        for vi, vname in enumerate(view_names):
+            Xv = X_views[vname]
+            knn_set_i = set(per_view_knn[vname][i].tolist())
+            sigma_v = per_view_sigma[vname]
+            for pi_idx, j in enumerate(pool):
+                diff_sq = float(np.sum((Xv[i] - Xv[j]) ** 2))
+                w = float(np.exp(-diff_sq / sigma_v ** 2))
+                edge_wts[i, pi_idx, vi] = w if j in knn_set_i else 0.0
+                view_mask[i, pi_idx, vi] = 1.0 if j in knn_set_i else 0.0
+
+        # Row-normalise per view (only positions j ∈ kNN_m(i))
+        for vi in range(M):
+            row_sum = edge_wts[i, :P_i, vi].sum() + 1e-8
+            edge_wts[i, :P_i, vi] /= row_sum
+
+    # Agreement score: fraction of pool positions covered by ≥ 2 views per anchor
+    view_coverage = view_mask.sum(-1)   # [N, P] — how many views claim j
+    in_pool = (neigh_idx >= 0).astype(np.float32)   # [N, P]
+    shared = ((view_coverage >= 2) * in_pool).sum(-1)   # [N]
+    total = in_pool.sum(-1).clip(min=1)               # [N]
+    agree_score = (shared / total).astype(np.float32)   # [N]
+    print(f"  [joint-kNN] mean agree_score={agree_score.mean():.3f} "
+          f"(0=all different, 1=all views agree on the same neighbours)")
+
+    return neigh_idx, edge_wts, view_mask, agree_score
+
+
+def build_neighbourhood(X_views, k=15, primary_key=None):
+    """V1 fallback: single primary view — kept for G2 backward compat."""
     view_names = list(X_views.keys())
     M = len(view_names)
     primary = primary_key or view_names[0]
     X_prim = X_views[primary]
     N = X_prim.shape[0]
-
-    print(f"  [neighbourhood] Fitting kNN (k={k}) on primary view '{primary}'...")
     nb = NearestNeighbors(n_neighbors=k + 1, n_jobs=-1).fit(X_prim)
     _, neigh_idx_raw = nb.kneighbors(X_prim)
-    neigh_idx = neigh_idx_raw[:, 1:].astype(np.int64)   # [N, K] drop self
-
+    neigh_idx = neigh_idx_raw[:, 1:].astype(np.int64)
     edge_wts = np.zeros((N, k, M), dtype=np.float32)
     for mi, vname in enumerate(view_names):
         Xv = X_views[vname]
-        # Gaussian weights for each (i, neigh_idx[i,j]) pair
-        diff_sq = ((Xv[np.arange(N)[:, None], :] -
-                    Xv[neigh_idx]) ** 2).sum(-1)   # [N, K]
+        diff_sq = ((Xv[np.arange(N)[:, None], :] - Xv[neigh_idx]) ** 2).sum(-1)
         sigma = np.median(np.sqrt(diff_sq)) + 1e-8
         edge_wts[:, :, mi] = np.exp(-diff_sq / sigma ** 2)
-        # row-normalise per view
         row_sum = edge_wts[:, :, mi].sum(-1, keepdims=True) + 1e-8
         edge_wts[:, :, mi] /= row_sum
-        print(f"  [neighbourhood] View '{vname}': mean_ew={edge_wts[:,:,mi].mean():.4f}")
-
     return neigh_idx, edge_wts
 
 
-# ─── Mini-batch fetch ──────────────────────────────────────────────────────────
+# ─── Mini-batch fetch (handles -1 padding) ────────────────────────────────────
 
-def fetch_batch(
-    batch_idx: np.ndarray,
-    X_all: np.ndarray,
-    g_all: np.ndarray,
-    y_all: np.ndarray,
-    neigh_idx: np.ndarray,
-    edge_wts: np.ndarray,
-    device,
-):
-    """Fetch anchor + neighbour tensors for a mini-batch."""
-    b_ni = neigh_idx[batch_idx]            # [B, K]
+def fetch_batch(batch_idx, X_all, g_all, y_all, neigh_idx, edge_wts, device,
+                view_mask=None, agree_score=None):
+    b_ni = neigh_idx[batch_idx]        # [B, P]  may contain -1
+    # Replace -1 (padding) with 0 for gather, then zero the embeddings after
+    pad_mask = (b_ni == -1)
+    b_ni_safe = np.where(pad_mask, 0, b_ni)
+
     x_anc = torch.tensor(X_all[batch_idx], dtype=torch.float32).to(device)
     g_anc = torch.tensor(g_all[batch_idx], dtype=torch.float32).to(device)
-    x_nei = torch.tensor(X_all[b_ni], dtype=torch.float32).to(device)   # [B, K, d]
-    ew    = torch.tensor(edge_wts[batch_idx], dtype=torch.float32).to(device)  # [B, K, M]
-    y_b   = torch.tensor(y_all[batch_idx]).to(device)
-    return x_anc, g_anc, x_nei, ew, y_b
+    x_nei = torch.tensor(X_all[b_ni_safe], dtype=torch.float32).to(device)  # [B, P, d]
+    # Zero out padded positions
+    pad_t = torch.tensor(pad_mask, dtype=torch.float32).to(device).unsqueeze(-1)
+    x_nei = x_nei * (1 - pad_t)
+
+    ew = torch.tensor(edge_wts[batch_idx], dtype=torch.float32).to(device)  # [B, P, M]
+    y_b = torch.tensor(y_all[batch_idx]).to(device)
+
+    vm = torch.tensor(view_mask[batch_idx],
+                      dtype=torch.float32).to(device) if view_mask is not None else None
+    ag = torch.tensor(agree_score[batch_idx],
+                      dtype=torch.float32).to(device) if agree_score is not None else None
+    return x_anc, g_anc, x_nei, ew, y_b, vm, ag
+
+
+# ─── Disagreement-aligned routing loss ────────────────────────────────────────
+
+def routing_disagreement_loss(pi: torch.Tensor, agree: torch.Tensor, lam: float = 0.01):
+    """
+    Geometry-grounded routing regularisation.
+
+    pi:    [B, H, M]  routing weights
+    agree: [B]         per-row fraction of pool shared by ≥2 views
+
+    L_route = lam * mean(
+        agree_i * H(pi_i)                        ← high agreement → encourage diffuse
+       + (1 - agree_i) * (log(M) - H(pi_i))      ← low agreement  → encourage peaked
+    )
+
+    This aligns routing entropy with the geometry: the router is told to
+    specialise exactly when the views disagree about who is close.
+    """
+    M = pi.shape[-1]
+    H = -(pi * (pi + 1e-9).log()).sum(-1).mean(-1)   # [B]  avg over heads
+    log_M = float(torch.tensor(M).log())
+    loss = (agree * H + (1 - agree) * (log_M - H)).mean()
+    return lam * loss
 
 
 # ─── Training ─────────────────────────────────────────────────────────────────
@@ -95,17 +188,20 @@ def train_gora(
     X_all: np.ndarray,
     g_all: np.ndarray,
     y_all: np.ndarray,
-    neigh_idx: np.ndarray,   # [N, K]
-    edge_wts: np.ndarray,    # [N, K, M]
+    neigh_idx: np.ndarray,
+    edge_wts: np.ndarray,
     tr_i: np.ndarray,
     va_i: np.ndarray,
     task: str,
     n_classes: int = 1,
-    epochs: int = 100,
-    patience: int = 15,
+    epochs: int = 150,
+    patience: int = 20,
     lr: float = 3e-4,
     batch_size: int = 512,
     name: str = "model",
+    view_mask: np.ndarray = None,
+    agree_score: np.ndarray = None,
+    routing_lam: float = 0.0,   # 0 = disabled (G5); >0 = G6
 ) -> nn.Module:
     dev = get_device()
     model = model.to(dev)
@@ -122,38 +218,35 @@ def train_gora(
         ep_loss = 0.0; n_batches = 0
         for start in range(0, len(perm), batch_size):
             b_idx = perm[start:start + batch_size]
-            x_a, g_a, x_n, ew_a, y_b = fetch_batch(b_idx, X_all, g_all, y_all,
-                                                      neigh_idx, edge_wts, dev)
+            x_a, g_a, x_n, ew_a, y_b, vm, ag = fetch_batch(
+                b_idx, X_all, g_all, y_all, neigh_idx, edge_wts, dev, view_mask, agree_score)
             opt.zero_grad()
             out, pi, tau = model(x_a, g_a, x_n, ew_a)
-            if task == "regression":
-                loss = crit(out.squeeze(-1), y_b.float())
-            else:
-                loss = crit(out, y_b.long())
+            pred_loss = (crit(out.squeeze(-1), y_b.float()) if task == "regression"
+                         else crit(out, y_b.long()))
+            loss = pred_loss
+            if routing_lam > 0 and pi is not None and ag is not None:
+                loss = loss + routing_disagreement_loss(pi, ag, routing_lam)
             loss.backward(); opt.step()
-            ep_loss += loss.item(); n_batches += 1
+            ep_loss += pred_loss.item(); n_batches += 1
         sched.step()
 
-        # Validation (full pass in batches)
         model.eval()
         val_loss = 0.0; val_batches = 0
         with torch.no_grad():
             for start in range(0, len(va_i), batch_size):
                 b_idx = va_i[start:start + batch_size]
-                x_a, g_a, x_n, ew_a, y_b = fetch_batch(b_idx, X_all, g_all, y_all,
-                                                          neigh_idx, edge_wts, dev)
+                x_a, g_a, x_n, ew_a, y_b, _, _ = fetch_batch(
+                    b_idx, X_all, g_all, y_all, neigh_idx, edge_wts, dev)
                 out, *_ = model(x_a, g_a, x_n, ew_a)
-                if task == "regression":
-                    vl = crit(out.squeeze(-1), y_b.float()).item()
-                else:
-                    vl = crit(out, y_b.long()).item()
+                vl = (crit(out.squeeze(-1), y_b.float()) if task == "regression"
+                      else crit(out, y_b.long())).item()
                 val_loss += vl; val_batches += 1
         val_loss /= max(val_batches, 1)
 
         if val_loss < best:
-            best = val_loss
+            best = val_loss; wait = 0
             bst = {k: v.clone() for k, v in model.state_dict().items()}
-            wait = 0
         else:
             wait += 1
         if wait >= patience: break
@@ -166,26 +259,24 @@ def train_gora(
 
 
 @torch.no_grad()
-def predict_gora(model, X_all, g_all, y_all, neigh_idx, edge_wts, te_i, task,
-                 batch_size=512):
+def predict_gora(model, X_all, g_all, y_all, neigh_idx, edge_wts, te_i, task, batch_size=512):
     dev = get_device()
     model = model.to(dev).eval()
     all_out, all_pi = [], []
     for start in range(0, len(te_i), batch_size):
         b_idx = te_i[start:start + batch_size]
-        x_a, g_a, x_n, ew_a, _ = fetch_batch(b_idx, X_all, g_all, y_all,
-                                               neigh_idx, edge_wts, dev)
+        x_a, g_a, x_n, ew_a, _, _, _ = fetch_batch(
+            b_idx, X_all, g_all, y_all, neigh_idx, edge_wts, dev)
         out, pi, tau = model(x_a, g_a, x_n, ew_a)
-        all_out.append(out.cpu()); all_pi.append(pi.cpu() if pi is not None else None)
+        all_out.append(out.cpu())
+        all_pi.append(pi.cpu() if pi is not None else None)
 
     out_all = torch.cat(all_out, dim=0)
-    pi_all = torch.cat([p for p in all_pi if p is not None], dim=0).numpy() \
-             if all_pi[0] is not None else None
-
+    pi_all = (torch.cat([p for p in all_pi if p is not None], dim=0).numpy()
+              if all_pi and all_pi[0] is not None else None)
     if task == "classification":
         proba = torch.softmax(out_all, -1).numpy(); preds = proba.argmax(-1)
     else:
         preds = out_all.squeeze(-1).numpy(); proba = None
-
     tau_np = tau.cpu().numpy() if tau is not None else None
     return preds, proba, pi_all, tau_np
