@@ -1,0 +1,32 @@
+data:
+  seed: 42
+  test_size: 0.15
+  val_size: 0.15
+
+graph:
+  K: 15
+  K_SCALES: [10, 20, 30]
+
+models:
+  mlp:
+    hidden: 128
+    lr: 0.001
+    epochs: 100
+    patience: 15
+  graphsage:
+    hidden: 64
+    lr: 0.001
+    epochs: 200
+    patience: 20
+  routing:
+    obs_dim: 4
+    hidden_router: 32
+    lr: 0.005
+    epochs: 500
+    patience: 30
+  xgboost:
+    n_estimators: 300
+    max_depth: 6
+    learning_rate: 0.1
+  tabpfn:
+    max_train_n: 1024
