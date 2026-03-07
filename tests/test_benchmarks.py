@@ -16,7 +16,7 @@ from torch_geometric.nn import GCNConv
 
 # Boost & AutoML
 import xgboost as xgb
-from tabpfn import TabPFNClassifier
+from tabpfn import TabPFNClassifier, TabPFNRegressor
 
 
 def get_device():
@@ -110,21 +110,27 @@ def test_knn_and_graph_embeddings(device):
 
 def test_tabpfn():
     print("\n" + "=" * 50)
-    print("TabPFN v2.x Test (Breast Cancer)")
+    print("TabPFN v2.x Test (California Housing from OpenML)")
     print("=" * 50)
-    # TabPFN is historically classification, falling back to classification dataset to test functionality
-    data = load_breast_cancer()
-    X_train, X_test, y_train, y_test = train_test_split(data.data, data.target, test_size=0.33, random_state=42)
+    import openml
+    dataset = openml.datasets.get_dataset('california')
+    X, y, _, _ = dataset.get_data(dataset_format='dataframe', target=dataset.default_target_attribute)
+    
+    # TabPFN scales with context size, we use a 1000 point subset for this fast validation test
+    X = X.iloc[:1000]
+    y = y.iloc[:1000]
+    
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
     
     try:
-        classifier = TabPFNClassifier(device='auto')
+        regressor = TabPFNRegressor(device='auto')
         start = time.time()
-        classifier.fit(X_train, y_train)
-        preds = classifier.predict(X_test)
-        acc = accuracy_score(y_test, preds)
+        regressor.fit(X_train, y_train)
+        preds = regressor.predict(X_test)
+        mse = mean_squared_error(y_test, preds)
         duration = time.time() - start
         
-        print(f"TabPFN Accuracy: {acc:.4f}")
+        print(f"TabPFN MSE: {mse:.4f}")
         print(f"TabPFN Time: {duration:.2f}s")
         print("TabPFN operational!")
     except Exception as e:
