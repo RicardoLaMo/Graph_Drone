@@ -280,3 +280,207 @@ def predict_gora(model, X_all, g_all, y_all, neigh_idx, edge_wts, te_i, task, ba
         preds = out_all.squeeze(-1).numpy(); proba = None
     tau_np = tau.cpu().numpy() if tau is not None else None
     return preds, proba, pi_all, tau_np
+
+
+# ─── v3: Label context precomputation ─────────────────────────────────────────
+
+def compute_label_ctx_per_view(
+    y_all: np.ndarray,
+    neigh_idx: np.ndarray,    # [N, P]
+    edge_wts: np.ndarray,     # [N, P, M]
+    view_mask: np.ndarray,    # [N, P, M]
+) -> np.ndarray:
+    """
+    Precompute lbl_nei [N, P, M]: per-slot weighted neighbour label
+    for each view m.  Used in fetch_batch_v3 for LabelContextEncoder.
+
+    lbl_nei[i, p, m] = y_all[neigh_idx[i,p]] * view_mask[i,p,m]
+                       (0 if slot is padded or not in view m's kNN)
+
+    Regression: y_all float, n_classes=1
+    Classification: caller should pass one-hot or integer y (LabelContextEncoder
+                    handles normalisation internally).
+    """
+    N, P, M = edge_wts.shape
+    lbl_nei = np.zeros((N, P, M), dtype=np.float32)
+    for i in range(N):
+        for pi_idx in range(P):
+            j = neigh_idx[i, pi_idx]
+            if j >= 0:
+                for vi in range(M):
+                    lbl_nei[i, pi_idx, vi] = float(y_all[j]) * view_mask[i, pi_idx, vi]
+    return lbl_nei
+
+
+# ─── v3: Extended fetch_batch ──────────────────────────────────────────────────
+
+def fetch_batch_v3(
+    batch_idx: np.ndarray,
+    X_all: np.ndarray,
+    g_all: np.ndarray,
+    y_all: np.ndarray,
+    neigh_idx: np.ndarray,
+    edge_wts: np.ndarray,
+    device: torch.device,
+    view_mask: np.ndarray = None,
+    agree_score: np.ndarray = None,
+    z_arr: np.ndarray = None,       # [N, d_z]  teacher embeddings
+    lbl_nei: np.ndarray = None,     # [N, P, M] label context
+):
+    """
+    Extended fetch_batch for v3: adds z_anc and lbl_nei to the batch.
+    All new fields are optional — falls back to fetch_batch behaviour when None.
+    """
+    x_anc, g_anc, x_nei, ew, y_b, vm, ag = fetch_batch(
+        batch_idx, X_all, g_all, y_all, neigh_idx, edge_wts, device,
+        view_mask=view_mask, agree_score=agree_score,
+    )
+    z_b = (torch.tensor(z_arr[batch_idx], dtype=torch.float32).to(device)
+           if z_arr is not None else None)
+    lb = (torch.tensor(lbl_nei[batch_idx], dtype=torch.float32).to(device)
+          if lbl_nei is not None else None)
+    return x_anc, g_anc, x_nei, ew, y_b, vm, ag, z_b, lb
+
+
+# ─── v3: MQGoraTransformer training ───────────────────────────────────────────
+
+def train_gora_v3(
+    model: nn.Module,
+    X_all: np.ndarray,
+    g_all: np.ndarray,
+    y_all: np.ndarray,
+    neigh_idx: np.ndarray,
+    edge_wts: np.ndarray,
+    tr_i: np.ndarray,
+    va_i: np.ndarray,
+    task: str,
+    n_classes: int = 1,
+    epochs: int = 150,
+    patience: int = 20,
+    lr: float = 3e-4,
+    batch_size: int = 512,
+    name: str = "model",
+    view_mask: np.ndarray = None,
+    agree_score: np.ndarray = None,
+    routing_lam: float = 0.0,
+    z_arr: np.ndarray = None,       # [N, d_z]  teacher embeddings (frozen)
+    lbl_nei: np.ndarray = None,     # [N, P, M] label context per view
+) -> nn.Module:
+    """
+    Training loop for MQGoraTransformer (G7-G10).
+
+    Compatible with standard GoraTransformer too (z_arr=None, lbl_nei=None
+    → falls back to fetch_batch semantics, aux_losses={}).
+
+    Returns the best-val-loss model.
+    """
+    dev = get_device()
+    model = model.to(dev)
+    crit = nn.CrossEntropyLoss() if task == "classification" else nn.MSELoss()
+
+    # Exclude frozen teacher parameters from student optimizer
+    student_params = [p for p in model.parameters() if p.requires_grad]
+    opt = torch.optim.Adam(student_params, lr=lr, weight_decay=1e-4)
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs, eta_min=lr * 0.01)
+
+    best, bst, wait = 1e9, None, 0
+    t0 = time.time()
+
+    for ep in range(epochs):
+        model.train()
+        perm = np.random.permutation(tr_i)
+        ep_loss = 0.0; n_batches = 0
+
+        for start in range(0, len(perm), batch_size):
+            b_idx = perm[start:start + batch_size]
+            x_a, g_a, x_n, ew_a, y_b, vm, ag, z_b, lb = fetch_batch_v3(
+                b_idx, X_all, g_all, y_all, neigh_idx, edge_wts, dev,
+                view_mask=view_mask, agree_score=agree_score,
+                z_arr=z_arr, lbl_nei=lbl_nei,
+            )
+            opt.zero_grad()
+
+            # MQGoraTransformer returns (pred, pi, tau, aux_losses)
+            # Standard GoraTransformer returns (pred, pi, tau) — handle both
+            result = model(x_a, g_a, x_n, ew_a,
+                           view_mask=vm, z_anc=z_b, lbl_nei=lb, agree_score=ag)
+            if len(result) == 4:
+                out, pi, tau, aux_losses = result
+            else:
+                out, pi, tau = result; aux_losses = {}
+
+            pred_loss = (crit(out.squeeze(-1), y_b.float()) if task == "regression"
+                         else crit(out, y_b.long()))
+            loss = pred_loss
+            if routing_lam > 0 and pi is not None and ag is not None:
+                loss = loss + routing_disagreement_loss(pi, ag, routing_lam)
+            for aux_val in aux_losses.values():
+                loss = loss + aux_val
+
+            loss.backward(); opt.step()
+            ep_loss += pred_loss.item(); n_batches += 1
+        sched.step()
+
+        # Validation (no label context at val time — mirrors inference)
+        model.eval()
+        val_loss = 0.0; val_batches = 0
+        with torch.no_grad():
+            for start in range(0, len(va_i), batch_size):
+                b_idx = va_i[start:start + batch_size]
+                x_a, g_a, x_n, ew_a, y_b, vm, ag, z_b, _ = fetch_batch_v3(
+                    b_idx, X_all, g_all, y_all, neigh_idx, edge_wts, dev,
+                    view_mask=view_mask, agree_score=agree_score, z_arr=z_arr,
+                    lbl_nei=None,   # ← inference mode: no labels
+                )
+                result = model(x_a, g_a, x_n, ew_a, view_mask=vm, z_anc=z_b)
+                out = result[0]
+                vl = (crit(out.squeeze(-1), y_b.float()) if task == "regression"
+                      else crit(out, y_b.long())).item()
+                val_loss += vl; val_batches += 1
+        val_loss /= max(val_batches, 1)
+
+        if val_loss < best:
+            best = val_loss; wait = 0
+            bst = {k: v.clone() for k, v in model.state_dict().items()}
+        else:
+            wait += 1
+        if wait >= patience: break
+        if ep % 10 == 0:
+            print(f"  [{name}] ep={ep:4d} tr={ep_loss/n_batches:.4f} val={val_loss:.4f}")
+
+    model.load_state_dict(bst)
+    print(f"  [{name}] Done in {time.time()-t0:.1f}s | best_val={best:.4f}")
+    return model
+
+
+@torch.no_grad()
+def predict_gora_v3(
+    model, X_all, g_all, y_all, neigh_idx, edge_wts, te_i, task,
+    view_mask=None, z_arr=None, batch_size=512,
+):
+    """
+    Prediction for MQGoraTransformer.  lbl_nei is always None at inference.
+    """
+    dev = get_device()
+    model = model.to(dev).eval()
+    all_out, all_pi = [], []
+
+    for start in range(0, len(te_i), batch_size):
+        b_idx = te_i[start:start + batch_size]
+        x_a, g_a, x_n, ew_a, _, vm, _, z_b, _ = fetch_batch_v3(
+            b_idx, X_all, g_all, y_all, neigh_idx, edge_wts, dev,
+            view_mask=view_mask, z_arr=z_arr, lbl_nei=None,
+        )
+        result = model(x_a, g_a, x_n, ew_a, view_mask=vm, z_anc=z_b)
+        out, pi = result[0], result[1]
+        all_out.append(out.cpu())
+        all_pi.append(pi.cpu() if pi is not None else None)
+
+    out_all = torch.cat(all_out, dim=0)
+    pi_all = (torch.cat([p for p in all_pi if p is not None], dim=0).numpy()
+              if all_pi and all_pi[0] is not None else None)
+    if task == "classification":
+        proba = torch.softmax(out_all, -1).numpy(); preds = proba.argmax(-1)
+    else:
+        preds = out_all.squeeze(-1).numpy(); proba = None
+    return preds, proba, pi_all

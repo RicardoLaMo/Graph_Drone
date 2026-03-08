@@ -248,3 +248,87 @@ def write_report_v2(name, task, metrics, spec_dict, tau, agree_score, view_tags,
 
     rep_path.write_text("\n".join(lines))
     print(f"[report v2] Saved: {rep_path}")
+
+
+def write_report_v3(name, task, metrics, spec_dict, agree_score, view_tags, n_heads, rep_path):
+    """
+    v3 report: MQ-GoRA ablation ladder (G7→G8→G9→G10).
+
+    Ablation gates checked:
+      G8 > G7: label context helps (dual-duty router + value aug)
+      G9 > G8: teacher query helps (manifold-guided reading > avg-pool)
+      G10 > G9: alpha gate helps (local-vs-transformer blend)
+      G10 > B1: GoRA v3 beats strong tabular baseline
+      G10 > B2: GoRA v3 beats TabPFN
+    """
+    ts = datetime.datetime.now().strftime("%Y-%m-%d")
+    m_df = pd.DataFrame(metrics)
+    key = "rmse" if task == "regression" else "accuracy"
+    better = lambda a, b: (a < b) if task == "regression" else (a > b)
+
+    def _val(model_id):
+        row = m_df[m_df.model == model_id]
+        return float(row[key].values[0]) if len(row) and not pd.isna(row[key].values[0]) else None
+
+    def _fmt(v): return f"{v:.4f}" if v is not None else "N/A"
+
+    g2v  = _val("G2_GoRA_v1")
+    g7v  = _val("G7_RichCtx")
+    g8v  = _val("G8_LabelCtx")
+    g9v  = _val("G9_Teacher")
+    g10v = _val("G10_Full")
+    b1v  = _val("B1_HGBR")
+    b2v  = _val("B2_TabPFN")
+
+    mean_ag = float(np.mean(agree_score)) if agree_score is not None else float("nan")
+
+    ablation_lines = [
+        "\n## Ablation ladder (G7 → G10)\n",
+        "| Gate | Δ component | Result |",
+        "|------|-------------|--------|",
+        f"| G7 vs G2 | +ViewSpecificEmbed +ctx^(m) in router | "
+        f"**{'✅' if g7v is not None and g2v is not None and better(g7v, g2v) else '❌'}** "
+        f"G7={_fmt(g7v)} G2={_fmt(g2v)} |",
+        f"| G8 vs G7 | +label_ctx (router + value aug) | "
+        f"**{'✅' if g8v is not None and g7v is not None and better(g8v, g7v) else '❌'}** "
+        f"G8={_fmt(g8v)} G7={_fmt(g7v)} |",
+        f"| G9 vs G8 | +teacher z_anc as cross-attn query | "
+        f"**{'✅' if g9v is not None and g8v is not None and better(g9v, g8v) else '❌'}** "
+        f"G9={_fmt(g9v)} G8={_fmt(g8v)} |",
+        f"| G10 vs G9 | +alpha-gate prediction fusion | "
+        f"**{'✅' if g10v is not None and g9v is not None and better(g10v, g9v) else '❌'}** "
+        f"G10={_fmt(g10v)} G9={_fmt(g9v)} |",
+        f"| G10 vs B1 | GoRA v3 vs HGBR | "
+        f"**{'✅ MQ-GoRA wins' if g10v is not None and b1v is not None and better(g10v, b1v) else '❌ HGBR still leads'}** "
+        f"G10={_fmt(g10v)} B1={_fmt(b1v)} |",
+        f"| G10 vs B2 | GoRA v3 vs TabPFN | "
+        f"**{'✅ MQ-GoRA wins' if g10v is not None and b2v is not None and better(g10v, b2v) else '❌ TabPFN leads'}** "
+        f"G10={_fmt(g10v)} B2={_fmt(b2v)} |",
+    ]
+
+    lines = [
+        f"# GoRA-Tabular v3 (MQ-GoRA): {name}",
+        f"*{ts}* | Branch: `claude/funny-davinci`\n",
+        "## Architecture: Manifold-Query GoRA",
+        "Teacher f_T: x_i → z_i encodes manifold geometry (agree_score, label centroid, neighbour centroid).",
+        "Student stages:",
+        "  A. ViewSpecificEmbedder: M separate projections → view-discriminative values",
+        "  B. LabelContextEncoder: per-view label stats → router input + value augmentation",
+        "  C. ManifoldReader: z_i-queried cross-attention → ctx_vec (or avg-pool for G7/G8)",
+        "  D. RichMoERouter: [g_anc; z_anc; label_ctx; ctx_vec] → pi, tau",
+        "  E. SparseGeomLayers (unchanged)",
+        "  F. AlphaGate: pred_final = (1-α)·pred_base + α·pred_local (G10 only)\n",
+        "## Metrics\n",
+        m_df.to_markdown(index=False),
+    ] + ablation_lines + [
+        f"\n## View agreement score",
+        f"Mean agree_score = {mean_ag:.3f}",
+        "\n## Head-View Affinity by model\n",
+    ]
+
+    for mname, sp in spec_dict.items():
+        if len(sp):
+            lines += [f"### {mname}", sp.to_markdown(index=False), ""]
+
+    rep_path.write_text("\n".join(lines))
+    print(f"[report v3] Saved: {rep_path}")
