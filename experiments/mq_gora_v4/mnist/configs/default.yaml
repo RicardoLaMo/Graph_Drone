@@ -1,0 +1,26 @@
+dataset: mnist_784
+task: classification
+views:
+  - FULL
+  - BLOCK
+  - PCA
+training:
+  epochs: 100
+  teacher_epochs: 100
+  patience: 20
+  lr: 0.001
+  batch_size: 512
+variants:
+  - G2_ref
+  - G10_ref
+  - MN_v4a
+  - MN_v4b
+  - MN_v4c
+  - MN_v4d
+mnist_protection:
+  preserve_alpha_gate: true
+  diversity_lam_values:
+    MN_v4a: 0.0
+    MN_v4b: 0.003
+    MN_v4c: 0.006
+    MN_v4d: 0.01
