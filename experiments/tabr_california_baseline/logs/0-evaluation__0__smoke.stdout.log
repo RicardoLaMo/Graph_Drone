@@ -1,0 +1,52 @@
+================================================================================
+[>>>] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0__smoke | 2026-03-08 13:01:26.638278
+--------------------------------------------------------------------------------
+{'seed': 0,
+ 'data': {'seed': 0,
+          'cache': True,
+          'path': '/Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/artifacts/data/california_local',
+          'num_policy': 'quantile',
+          'cat_policy': None,
+          'y_policy': 'standard'},
+ 'model': {'num_embeddings': None,
+           'd_main': 303,
+           'context_dropout': 0.23258422826138023,
+           'd_multiplier': 2.0,
+           'encoder_n_blocks': 0,
+           'predictor_n_blocks': 1,
+           'mixer_normalization': 'auto',
+           'dropout0': 0.5508268685197037,
+           'dropout1': 0.0,
+           'normalization': 'LayerNorm',
+           'activation': 'ReLU'},
+ 'context_size': 96,
+ 'optimizer': {'type': 'AdamW', 'lr': 0.000280842117039655, 'weight_decay': 0.0},
+ 'batch_size': 256,
+ 'patience': 2,
+ 'n_epochs': 3}
+--------------------------------------------------------------------------------
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0__smoke | 0:00:00.000075
+(val) -0.512 (test) -0.487 (loss) 0.27806
+🌸 New best epoch! 🌸
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0__smoke | 0:00:10.393717
+(val) -0.488 (test) -0.465 (loss) 0.18617
+🌸 New best epoch! 🌸
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0__smoke | 0:00:20.725958
+(val) -0.466 (test) -0.441 (loss) 0.17116
+🌸 New best epoch! 🌸
+
+
+--------------------------------------------------------------------------------
+{'function': 'bin.tabr.main',
+ 'gpus': [],
+ 'n_parameters': 832948,
+ 'best_epoch': 2,
+ 'scores': {'train': -0.4578767735313797,
+            'val': -0.4663543490149682,
+            'test': -0.44085553303605535},
+ 'time': '0:00:31.026681'}
+--------------------------------------------------------------------------------
+[<<<] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0__smoke | 2026-03-08 13:02:42.408918

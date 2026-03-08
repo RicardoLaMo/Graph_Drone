@@ -1,0 +1,44 @@
+{
+  "config": "0-evaluation/0",
+  "smoke": true,
+  "returncode": 0,
+  "local_config": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0__smoke.toml",
+  "local_data_dir": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/artifacts/data/california_local",
+  "run_output_dir": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0__smoke",
+  "upstream_report_path": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0__smoke/report.json",
+  "summary_path": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0__smoke/summary.json",
+  "duration_seconds": 79.188,
+  "summary": {
+    "function": "bin.tabr.main",
+    "gpus": [],
+    "n_parameters": 832948,
+    "best_epoch": 2,
+    "scores": {
+      "train": -0.4578767735313797,
+      "val": -0.4663543490149682,
+      "test": -0.44085553303605535
+    },
+    "time": "0:00:31.026681"
+  },
+  "metrics": {
+    "train": {
+      "rmse": 0.4578767735313797,
+      "mae": 0.2964655307922719,
+      "r2": 0.8433535099029541,
+      "score": -0.4578767735313797
+    },
+    "val": {
+      "rmse": 0.4663543490149682,
+      "mae": 0.3031966143796332,
+      "r2": 0.8353456854820251,
+      "score": -0.4663543490149682
+    },
+    "test": {
+      "rmse": 0.44085553303605535,
+      "mae": 0.2872080929055514,
+      "r2": 0.8488035798072815,
+      "score": -0.44085553303605535
+    }
+  },
+  "best_epoch": 2
+}

@@ -1,0 +1,7 @@
+run_type,config_name,split,rmse,mae,r2,notes
+upstream_reference,0-evaluation/0,test,0.40711935343331995,0.25423846386472704,0.8728896473803667,shipped upstream reference
+upstream_reference,default-evaluation/0,test,0.41060341538200334,0.26491306610580523,0.8707047609859281,shipped upstream reference
+upstream_reference,2-plr-lite-evaluation/0,test,0.4002716784134621,0.2512467154777376,0.8771296339585459,shipped upstream reference
+local_smoke,0-evaluation/0,train,0.4578767735313797,0.2964655307922719,0.8433535099029541,Apple Silicon CPU smoke run on local California split
+local_smoke,0-evaluation/0,val,0.4663543490149682,0.3031966143796332,0.8353456854820251,Apple Silicon CPU smoke run on local California split
+local_smoke,0-evaluation/0,test,0.44085553303605535,0.2872080929055514,0.8488035798072815,Apple Silicon CPU smoke run on local California split
