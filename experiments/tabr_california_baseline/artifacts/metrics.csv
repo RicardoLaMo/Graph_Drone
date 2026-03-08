@@ -5,3 +5,6 @@ upstream_reference,2-plr-lite-evaluation/0,test,0.4002716784134621,0.25124671547
 local_smoke,0-evaluation/0,train,0.4578767735313797,0.2964655307922719,0.8433535099029541,Apple Silicon CPU smoke run on local California split
 local_smoke,0-evaluation/0,val,0.4663543490149682,0.3031966143796332,0.8353456854820251,Apple Silicon CPU smoke run on local California split
 local_smoke,0-evaluation/0,test,0.44085553303605535,0.2872080929055514,0.8488035798072815,Apple Silicon CPU smoke run on local California split
+local_fixed,0-evaluation/0,train,0.36448236559863745,0.2327483757283595,0.9007394909858704,Apple Silicon CPU fixed-config run on local California split
+local_fixed,0-evaluation/0,val,0.40094805430544206,0.2504651097228443,0.8782925009727478,Apple Silicon CPU fixed-config run on local California split
+local_fixed,0-evaluation/0,test,0.3949403615264023,0.24349869851664607,0.8786578178405762,Apple Silicon CPU fixed-config run on local California split

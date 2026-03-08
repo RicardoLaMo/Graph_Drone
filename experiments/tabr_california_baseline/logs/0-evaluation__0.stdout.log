@@ -1,0 +1,262 @@
+================================================================================
+[>>>] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 2026-03-08 13:06:16.289148
+--------------------------------------------------------------------------------
+{'seed': 0,
+ 'data': {'seed': 0,
+          'cache': True,
+          'path': '/Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/artifacts/data/california_local',
+          'num_policy': 'quantile',
+          'cat_policy': None,
+          'y_policy': 'standard'},
+ 'model': {'num_embeddings': None,
+           'd_main': 303,
+           'context_dropout': 0.23258422826138023,
+           'd_multiplier': 2.0,
+           'encoder_n_blocks': 0,
+           'predictor_n_blocks': 1,
+           'mixer_normalization': 'auto',
+           'dropout0': 0.5508268685197037,
+           'dropout1': 0.0,
+           'normalization': 'LayerNorm',
+           'activation': 'ReLU'},
+ 'context_size': 96,
+ 'optimizer': {'type': 'AdamW', 'lr': 0.000280842117039655, 'weight_decay': 0.0},
+ 'batch_size': 256,
+ 'patience': 16,
+ 'n_epochs': inf}
+--------------------------------------------------------------------------------
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:00:00.000070
+(val) -0.512 (test) -0.487 (loss) 0.27806
+🌸 New best epoch! 🌸
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:00:10.310524
+(val) -0.488 (test) -0.465 (loss) 0.18617
+🌸 New best epoch! 🌸
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:00:20.572918
+(val) -0.466 (test) -0.441 (loss) 0.17116
+🌸 New best epoch! 🌸
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:00:30.800254
+(val) -0.469 (test) -0.444 (loss) 0.16554
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:00:41.299349
+(val) -0.455 (test) -0.431 (loss) 0.16170
+🌸 New best epoch! 🌸
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:00:51.871458
+(val) -0.448 (test) -0.426 (loss) 0.15660
+🌸 New best epoch! 🌸
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:01:02.557421
+(val) -0.457 (test) -0.427 (loss) 0.15240
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:01:13.161478
+(val) -0.448 (test) -0.415 (loss) 0.14959
+🌸 New best epoch! 🌸
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:01:23.756732
+(val) -0.447 (test) -0.419 (loss) 0.14691
+🌸 New best epoch! 🌸
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:01:34.387077
+(val) -0.438 (test) -0.412 (loss) 0.14496
+🌸 New best epoch! 🌸
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:01:44.989348
+(val) -0.434 (test) -0.417 (loss) 0.14335
+🌸 New best epoch! 🌸
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:01:55.537601
+(val) -0.430 (test) -0.410 (loss) 0.14249
+🌸 New best epoch! 🌸
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:02:06.120842
+(val) -0.428 (test) -0.410 (loss) 0.13903
+🌸 New best epoch! 🌸
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:02:16.711406
+(val) -0.428 (test) -0.411 (loss) 0.13880
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:02:27.249646
+(val) -0.426 (test) -0.411 (loss) 0.13609
+🌸 New best epoch! 🌸
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:02:37.857764
+(val) -0.426 (test) -0.408 (loss) 0.13796
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:02:48.507619
+(val) -0.429 (test) -0.423 (loss) 0.13480
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:02:59.161848
+(val) -0.421 (test) -0.404 (loss) 0.13362
+🌸 New best epoch! 🌸
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:03:09.955592
+(val) -0.418 (test) -0.405 (loss) 0.13194
+🌸 New best epoch! 🌸
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:03:20.743519
+(val) -0.414 (test) -0.403 (loss) 0.12997
+🌸 New best epoch! 🌸
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:03:31.316769
+(val) -0.419 (test) -0.404 (loss) 0.12942
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:03:41.768392
+(val) -0.415 (test) -0.402 (loss) 0.12824
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:03:52.293471
+(val) -0.433 (test) -0.417 (loss) 0.13042
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:04:02.796696
+(val) -0.422 (test) -0.411 (loss) 0.12747
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:04:13.303074
+(val) -0.412 (test) -0.399 (loss) 0.12609
+🌸 New best epoch! 🌸
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:04:23.812112
+(val) -0.410 (test) -0.403 (loss) 0.12639
+🌸 New best epoch! 🌸
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:04:34.445357
+(val) -0.413 (test) -0.407 (loss) 0.12536
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:04:44.982667
+(val) -0.424 (test) -0.414 (loss) 0.12395
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:04:55.458666
+(val) -0.408 (test) -0.400 (loss) 0.12419
+🌸 New best epoch! 🌸
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:05:05.968208
+(val) -0.418 (test) -0.404 (loss) 0.12230
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:05:16.492439
+(val) -0.417 (test) -0.405 (loss) 0.12249
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:05:26.990469
+(val) -0.413 (test) -0.401 (loss) 0.11960
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:05:37.532965
+(val) -0.411 (test) -0.398 (loss) 0.11994
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:05:48.047708
+(val) -0.411 (test) -0.397 (loss) 0.12078
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:05:58.607196
+(val) -0.409 (test) -0.400 (loss) 0.12032
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:06:09.112322
+(val) -0.419 (test) -0.402 (loss) 0.12104
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:06:19.806950
+(val) -0.409 (test) -0.400 (loss) 0.12331
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:06:30.424601
+(val) -0.408 (test) -0.400 (loss) 0.11981
+🌸 New best epoch! 🌸
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:06:41.033952
+(val) -0.411 (test) -0.405 (loss) 0.11742
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:06:51.567340
+(val) -0.413 (test) -0.404 (loss) 0.11855
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:07:02.106037
+(val) -0.412 (test) -0.410 (loss) 0.11988
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:07:12.615983
+(val) -0.409 (test) -0.403 (loss) 0.11602
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:07:23.084459
+(val) -0.414 (test) -0.401 (loss) 0.11391
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:07:33.574133
+(val) -0.407 (test) -0.392 (loss) 0.11500
+🌸 New best epoch! 🌸
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:07:44.048604
+(val) -0.421 (test) -0.413 (loss) 0.11785
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:07:54.568002
+(val) -0.403 (test) -0.395 (loss) 0.11767
+🌸 New best epoch! 🌸
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:08:05.084802
+(val) -0.407 (test) -0.398 (loss) 0.11422
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:08:15.587258
+(val) -0.412 (test) -0.401 (loss) 0.11361
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:08:26.120310
+(val) -0.413 (test) -0.396 (loss) 0.11337
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:08:36.584137
+(val) -0.401 (test) -0.395 (loss) 0.11126
+🌸 New best epoch! 🌸
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:08:47.084843
+(val) -0.404 (test) -0.397 (loss) 0.10981
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:08:57.634403
+(val) -0.406 (test) -0.397 (loss) 0.11438
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:09:08.181397
+(val) -0.421 (test) -0.406 (loss) 0.11328
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:09:18.767817
+(val) -0.404 (test) -0.397 (loss) 0.11266
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:09:29.245697
+(val) -0.407 (test) -0.400 (loss) 0.10872
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:09:39.905572
+(val) -0.406 (test) -0.399 (loss) 0.10942
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:09:50.618218
+(val) -0.401 (test) -0.392 (loss) 0.10817
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:10:01.066797
+(val) -0.407 (test) -0.399 (loss) 0.10914
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:10:11.457387
+(val) -0.403 (test) -0.392 (loss) 0.10651
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:10:21.903974
+(val) -0.410 (test) -0.396 (loss) 0.10674
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:10:32.319221
+(val) -0.404 (test) -0.393 (loss) 0.10751
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:10:42.699955
+(val) -0.416 (test) -0.406 (loss) 0.10683
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:10:53.072707
+(val) -0.406 (test) -0.398 (loss) 0.10373
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:11:03.448480
+(val) -0.414 (test) -0.400 (loss) 0.10549
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:11:13.836358
+(val) -0.404 (test) -0.395 (loss) 0.10656
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:11:24.225806
+(val) -0.405 (test) -0.400 (loss) 0.10364
+
+[...] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 0:11:34.617434
+(val) -0.412 (test) -0.393 (loss) 0.10356
+
+--------------------------------------------------------------------------------
+{'function': 'bin.tabr.main',
+ 'gpus': [],
+ 'n_parameters': 832948,
+ 'best_epoch': 49,
+ 'scores': {'train': -0.36448236559863745,
+            'val': -0.40094805430544206,
+            'test': -0.3949403615264023},
+ 'time': '0:11:44.988110'}
+--------------------------------------------------------------------------------
+[<<<] /Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline/experiments/tabr_california_baseline/configs/0-evaluation__0 | 2026-03-08 13:18:40.731781

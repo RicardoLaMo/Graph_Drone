@@ -12,8 +12,10 @@ Scripts:
 Current status:
 - `M0` environment capture: complete
 - `M1` CPU smoke run: complete
+- `M2` fixed-config CPU run: complete
 
-Latest smoke result:
+Latest fixed-config result:
 - config: `0-evaluation/0`
 - device: `cpu`
-- test RMSE: `0.44085553303605535`
+- best epoch: `49`
+- test RMSE: `0.3949403615264023`

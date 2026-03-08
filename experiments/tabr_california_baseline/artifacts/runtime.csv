@@ -1,2 +1,3 @@
 run_type,config_name,wall_clock_seconds,reported_train_seconds,device,faiss,notes
 local_smoke,0-evaluation/0,79.188,31.026681,cpu,faiss-cpu,wrapper wall clock includes final evaluation and report finalization
+local_fixed,0-evaluation/0,747.901,704.988110,cpu,faiss-cpu,full fixed-config run with early stopping at best_epoch 49
