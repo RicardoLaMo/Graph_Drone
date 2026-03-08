@@ -1,157 +1,158 @@
 """
-manifold_teacher_v4.py — V4 teacher training.
+manifold_teacher_v4.py — v4 teacher training.
 
-Key changes vs v3:
-  train_teacher_v4():
-    - skip_centroid_loss (CA_FIX_3): drops L_centroid for regression stability
-    - epochs parameter (CA_FIX_4): default 200 for regression, 100 for classification
-
-The ManifoldTeacher architecture itself is unchanged; only training is modified.
+Key differences from v3:
+  - optional `skip_centroid_loss` for regression-safe teacher-lite
+  - longer default epoch budget for regression
 """
-import sys, os
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_V3_SRC = os.path.normpath(os.path.join(_HERE, '..', '..', '..', 'gora_tabular', 'src'))
-if _V3_SRC not in sys.path:
-    sys.path.insert(0, _V3_SRC)
+from __future__ import annotations
 
+import os
+import sys
 import time
+
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from manifold_teacher import (
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_REPO_ROOT = os.path.normpath(os.path.join(_HERE, "..", "..", "..", ".."))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+from experiments.gora_tabular.src.manifold_teacher import (
     ManifoldTeacher,
     _precompute_label_centroids,
     _precompute_neighbour_centroid,
     get_device,
 )
 
-__all__ = ['ManifoldTeacher', 'train_teacher_v4']
+__all__ = ["ManifoldTeacher", "train_teacher_v4"]
 
 
 def train_teacher_v4(
     teacher: ManifoldTeacher,
-    X: np.ndarray,               # [N, d_x]
-    y: np.ndarray,               # [N]  float (reg) or int (clf)
-    neigh_idx: np.ndarray,       # [N, P]
-    edge_wts: np.ndarray,        # [N, P, M]
-    view_mask: np.ndarray,       # [N, P, M]
-    agree_score: np.ndarray,     # [N]
+    X: np.ndarray,
+    y: np.ndarray,
+    neigh_idx: np.ndarray,
+    edge_wts: np.ndarray,
+    view_mask: np.ndarray,
+    agree_score: np.ndarray,
     tr_i: np.ndarray,
     task: str = "regression",
     n_classes: int = 1,
-    epochs: int = 200,           # CA_FIX_4: 200 epochs default for regression
+    epochs: int = 200,
     lr: float = 1e-3,
     batch_size: int = 512,
     lam_agree: float = 1.0,
     lam_label: float = 0.5,
     lam_centroid: float = 0.1,
-    skip_centroid_loss: bool = False,   # CA_FIX_3: disable L_centroid
+    skip_centroid_loss: bool = False,
 ) -> np.ndarray:
-    """
-    Train ManifoldTeacher and return z_arr [N, d_z] for all rows.
-
-    V4 changes vs v3:
-      - skip_centroid_loss=True removes L_centroid (neighbour feature centroid).
-        Recommended for regression: centroid loss on raw feature space adds
-        noise and the loss doesn't converge well on low-dim tabular data.
-      - epochs defaults to 200 to allow the regression teacher more room.
-
-    Loss schedule (v4 lite mode, skip_centroid_loss=True):
-      L = lam_agree * L_agree + lam_label * L_label_m
-
-    Loss schedule (full mode):
-      L = lam_agree * L_agree + lam_label * L_label_m + lam_centroid * L_centroid
-    """
     t0 = time.time()
     dev = get_device()
-    N, d_x = X.shape
-    M = edge_wts.shape[2]
+    n_rows, d_x = X.shape
+    n_views = edge_wts.shape[2]
+    d_z = teacher.d_z
+    regression = task == "regression"
 
-    print(f"  [teacher-v4] Precomputing label centroids...")
-    y_bar = _precompute_label_centroids(y, neigh_idx, edge_wts, view_mask, n_classes)
+    print("  [teacher-v4] Precomputing label centroids...")
+    y_bar = _precompute_label_centroids(y.astype(np.float32), neigh_idx, edge_wts, view_mask, n_classes)
 
     if not skip_centroid_loss:
-        print(f"  [teacher-v4] Precomputing neighbour centroids...")
+        print("  [teacher-v4] Precomputing neighbour centroids...")
         x_bar = _precompute_neighbour_centroid(X, neigh_idx, edge_wts, primary_view=0)
     else:
         x_bar = None
 
+    ag_mean = agree_score[tr_i].mean()
+    ag_std = agree_score[tr_i].std() + 1e-8
+    ag_norm = ((agree_score - ag_mean) / ag_std).astype(np.float32)
+
     teacher = teacher.to(dev)
-    tr_idx_set = set(tr_i.tolist())
-    tr_mask = np.array([i in tr_idx_set for i in range(N)], dtype=bool)
+    agree_head = nn.Linear(d_z, 1).to(dev)
+    if regression:
+        label_heads = nn.ModuleList([nn.Linear(d_z, 1) for _ in range(n_views)]).to(dev)
+    else:
+        label_heads = nn.ModuleList([nn.Linear(d_z, n_classes) for _ in range(n_views)]).to(dev)
+    centroid_head = nn.Linear(d_z, d_x).to(dev)
 
-    opt = torch.optim.AdamW(teacher.parameters(), lr=lr, weight_decay=1e-4)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
+    params = list(teacher.parameters()) + list(agree_head.parameters()) + list(label_heads.parameters())
+    if not skip_centroid_loss:
+        params += list(centroid_head.parameters())
 
-    print(f"  [teacher-v4] Training for {epochs} epochs on {len(tr_i)} rows "
-          f"({'lite: L_agree+L_label' if skip_centroid_loss else 'full: L_agree+L_label+L_centroid'})...")
+    opt = torch.optim.Adam(params, lr=lr, weight_decay=1e-5)
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs, eta_min=lr * 0.01)
 
-    tr_i_arr = tr_i.copy()
+    print(
+        f"  [teacher-v4] Training for {epochs} epochs on {len(tr_i)} rows "
+        f"({'lite: L_agree+L_label' if skip_centroid_loss else 'full: L_agree+L_label+L_centroid'})..."
+    )
+
+    train_indices = tr_i.copy()
     for ep in range(epochs):
+        np.random.shuffle(train_indices)
         teacher.train()
-        np.random.shuffle(tr_i_arr)
+        agree_head.train()
+        label_heads.train()
+        centroid_head.train()
+
         total_loss = 0.0
         n_batches = 0
 
-        for start in range(0, len(tr_i_arr), batch_size):
-            b_idx = tr_i_arr[start:start + batch_size]
-            x_b   = torch.from_numpy(X[b_idx]).float().to(dev)
-            ag_b  = torch.from_numpy(agree_score[b_idx]).float().to(dev)
+        for start in range(0, len(train_indices), batch_size):
+            b_idx = train_indices[start : start + batch_size]
+            x_b = torch.from_numpy(X[b_idx]).float().to(dev)
+            ag_b = torch.from_numpy(ag_norm[b_idx]).float().to(dev)
+            z_b = teacher(x_b)
 
-            z = teacher(x_b)                                 # [B, d_z]
+            l_agree = F.mse_loss(agree_head(z_b).squeeze(-1), ag_b)
 
-            # L_agree: predict per-row agree_score
-            l_agree = F.mse_loss(teacher.head_agree(z).squeeze(-1), ag_b)
-
-            # L_label: predict per-view label centroid
-            if n_classes == 1:
-                # Regression: y_bar [N, M] → predict each view centroid
-                yb_b = torch.from_numpy(y_bar[b_idx]).float().to(dev)   # [B, M]
-                pred_label = teacher.head_label(z)                        # [B, M]
-                l_label = F.mse_loss(pred_label, yb_b)
+            if regression:
+                target = torch.from_numpy(y_bar[b_idx]).float().to(dev)
+                l_label = torch.tensor(0.0, device=dev)
+                for view_idx, head in enumerate(label_heads):
+                    l_label = l_label + F.mse_loss(head(z_b).squeeze(-1), target[:, view_idx])
+                l_label = l_label / n_views
             else:
-                # Classification: y_bar [N, M, C] → cross-entropy per view
-                yb_b = torch.from_numpy(y_bar[b_idx]).float().to(dev)   # [B, M, C]
-                pred_label = teacher.head_label(z).view(len(b_idx), M, n_classes)
-                l_label = F.cross_entropy(
-                    pred_label.reshape(-1, n_classes),
-                    yb_b.reshape(-1, n_classes).argmax(-1),
-                )
+                target = torch.from_numpy(y_bar[b_idx]).float().to(dev)
+                l_label = torch.tensor(0.0, device=dev)
+                for view_idx, head in enumerate(label_heads):
+                    pred_log = F.log_softmax(head(z_b), dim=-1)
+                    tgt = target[:, view_idx, :].clamp(min=1e-9)
+                    tgt = tgt / tgt.sum(dim=-1, keepdim=True)
+                    l_label = l_label + F.kl_div(pred_log, tgt, reduction="batchmean")
+                l_label = l_label / n_views
 
             loss = lam_agree * l_agree + lam_label * l_label
 
             if not skip_centroid_loss and x_bar is not None:
-                xb_b = torch.from_numpy(x_bar[b_idx]).float().to(dev)   # [B, d_x]
-                pred_centroid = teacher.head_centroid(z)                  # [B, d_x]
-                l_centroid = F.mse_loss(pred_centroid, xb_b)
+                xb_bar = torch.from_numpy(x_bar[b_idx]).float().to(dev)
+                l_centroid = F.mse_loss(centroid_head(z_b), xb_bar)
                 loss = loss + lam_centroid * l_centroid
 
             opt.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(teacher.parameters(), 1.0)
+            torch.nn.utils.clip_grad_norm_(params, 1.0)
             opt.step()
-
-            total_loss += loss.item()
+            total_loss += float(loss.item())
             n_batches += 1
 
-        scheduler.step()
-
-        if ep % 20 == 0:
-            avg = total_loss / max(n_batches, 1)
-            print(f"  [teacher-v4] ep={ep:4d} loss={avg:.4f}")
+        sched.step()
+        if ep % 20 == 0 or ep == epochs - 1:
+            print(f"  [teacher-v4] ep={ep:4d} loss={total_loss / max(n_batches, 1):.4f}")
 
     elapsed = time.time() - t0
     print(f"  [teacher-v4] Done in {elapsed:.1f}s")
 
-    # Precompute z for all rows
     teacher.eval()
     all_z = []
     with torch.no_grad():
-        for start in range(0, N, batch_size):
-            x_b = torch.from_numpy(X[start:start + batch_size]).float().to(dev)
+        for start in range(0, n_rows, batch_size):
+            x_b = torch.from_numpy(X[start : start + batch_size]).float().to(dev)
             all_z.append(teacher(x_b).cpu().numpy())
     z_arr = np.concatenate(all_z, axis=0)
     print(f"  [teacher-v4] z_arr: {z_arr.shape}, mean_norm={np.linalg.norm(z_arr, axis=1).mean():.3f}")

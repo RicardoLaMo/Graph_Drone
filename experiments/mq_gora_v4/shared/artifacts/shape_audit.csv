@@ -1,0 +1,2 @@
+model,status,note
+MQGoraV4,PASS,"pred=(8, 1) pi_std=0.0156 beta_std=0.0222"
