@@ -56,7 +56,7 @@ REFERENCE_BASELINES = {
     "GoRA v5 A0":        0.4738,
 }
 
-ALL_ABLATIONS = ["A0", "A1", "A2", "A3", "A4", "A5", "A6"]
+ALL_ABLATIONS = ["A0", "A1", "A2", "A3", "A4", "A5", "A6", "A4f", "A5f", "A6f"]
 
 ABLATION_DESCRIPTIONS = {
     "A0": "Global kNN (FULL view), uniform attention, label in KV",
@@ -66,6 +66,10 @@ ABLATION_DESCRIPTIONS = {
     "A4": "A3 + Q(q_i^v, q_j^v) quality-pair encoding in value",
     "A5": "A4 + learned routing MLP",
     "A6": "A5 + CrossViewMixer + β-gate (isolation/interaction blend)",
+    # Fixed (no Q in value; Q hurt in run 1)
+    "A4f": "A3 + learned routing (no Q in value) [fixed]",
+    "A5f": "A3 + CrossViewMixer + β-gate (no Q in value) [fixed]",
+    "A6f": "A3 + learned routing + CrossViewMixer + β-gate (no Q) [fixed]",
 }
 
 

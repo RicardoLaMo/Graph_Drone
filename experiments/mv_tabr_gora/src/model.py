@@ -532,6 +532,17 @@ def ablation_config(
         "A6": dict(use_per_view=True,  use_sigma2_routing=True,
                    use_direction_enc=True, use_quality_pair=True,
                    use_learned_routing=True, use_cross_view_mixer=True),
+        # Fixed variants: A4/A5/A6 without Q encoding in value
+        # (Q(q_i,q_j) found to hurt in first run; sigma2_v for routing only)
+        "A4f": dict(use_per_view=True, use_sigma2_routing=True,
+                    use_direction_enc=True, use_quality_pair=False,
+                    use_learned_routing=True, use_cross_view_mixer=False),
+        "A5f": dict(use_per_view=True, use_sigma2_routing=True,
+                    use_direction_enc=True, use_quality_pair=False,
+                    use_learned_routing=False, use_cross_view_mixer=True),
+        "A6f": dict(use_per_view=True, use_sigma2_routing=True,
+                    use_direction_enc=True, use_quality_pair=False,
+                    use_learned_routing=True, use_cross_view_mixer=True),
     }
     if name not in ablations:
         raise ValueError(f"Unknown ablation '{name}'. Choose from {list(ablations)}")
