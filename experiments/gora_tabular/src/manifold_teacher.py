@@ -74,34 +74,30 @@ def _precompute_label_centroids(
     n_classes: int = 1,
 ) -> np.ndarray:
     """
-    Precompute per-view label centroid for each anchor.
+    Precompute per-view label centroid for each anchor (vectorised).
     Returns y_bar [N, M] (regression) or [N, M, C] (classification).
     """
     N, P, M = edge_wts.shape
     regression = (n_classes == 1)
 
-    if regression:
-        y_bar = np.zeros((N, M), dtype=np.float32)
-        for i in range(N):
-            for vi in range(M):
-                wts = edge_wts[i, :, vi] * view_mask[i, :, vi]   # [P]
-                w_sum = wts.sum() + 1e-8
-                valid = neigh_idx[i] >= 0
-                y_vals = np.where(valid, y[np.clip(neigh_idx[i], 0, None)], 0.0)
-                y_bar[i, vi] = (wts * y_vals).sum() / w_sum
-    else:
-        y_bar = np.zeros((N, M, n_classes), dtype=np.float32)
-        y_onehot = np.eye(n_classes, dtype=np.float32)[y.astype(int)]   # [N, C]
-        for i in range(N):
-            for vi in range(M):
-                wts = edge_wts[i, :, vi] * view_mask[i, :, vi]   # [P]
-                w_sum = wts.sum() + 1e-8
-                valid = neigh_idx[i] >= 0
-                valid_idx = np.where(valid, neigh_idx[i], 0)
-                y_vals = y_onehot[valid_idx]   # [P, C]
-                y_bar[i, vi] = (wts[:, None] * y_vals).sum(0) / w_sum
+    idx_safe = np.where(neigh_idx >= 0, neigh_idx, 0)   # [N, P]
+    valid = (neigh_idx >= 0).astype(np.float32)         # [N, P]
+    wm = edge_wts * view_mask * valid[:, :, None]        # [N, P, M]  zero out pads
+    w_sum = wm.sum(axis=1, keepdims=True).clip(1e-8)    # [N, 1, M]
 
-    return y_bar
+    if regression:
+        y_nei = y[idx_safe] * valid                      # [N, P]  pad → 0
+        # Weighted mean per view: (wm · y_nei) / w_sum
+        y_bar = (wm * y_nei[:, :, None]).sum(axis=1) / w_sum.squeeze(1)  # [N, M]
+    else:
+        y_onehot = np.eye(n_classes, dtype=np.float32)[y[idx_safe].astype(int)]  # [N, P, C]
+        y_onehot *= valid[:, :, None]                                              # zero pads
+        # wm: [N, P, M], y_onehot: [N, P, C] → need [N, M, C]
+        # einsum: sum over P, weighted by wm per view
+        numerator = np.einsum('npm,npc->nmc', wm, y_onehot)                      # [N, M, C]
+        y_bar = numerator / w_sum.squeeze(1)[:, :, None]                          # [N, M, C]
+
+    return y_bar.astype(np.float32)
 
 
 def _precompute_neighbour_centroid(
@@ -111,20 +107,16 @@ def _precompute_neighbour_centroid(
     primary_view: int = 0,
 ) -> np.ndarray:
     """
-    x̄^(0)_i = Σ_{j∈pool} w^(0)_ij · x_j  — primary-view weighted centroid.
+    x̄^(0)_i = Σ_{j∈pool} w^(0)_ij · x_j  — primary-view weighted centroid (vectorised).
     Returns [N, d_x].
     """
-    N, P, M = edge_wts.shape
-    centroid = np.zeros((N, X.shape[1]), dtype=np.float32)
-    wts_pv = edge_wts[:, :, primary_view]   # [N, P]
-    for i in range(N):
-        total = wts_pv[i].sum() + 1e-8
-        for pi_idx in range(P):
-            j = neigh_idx[i, pi_idx]
-            if j >= 0:
-                centroid[i] += wts_pv[i, pi_idx] * X[j]
-        centroid[i] /= total
-    return centroid
+    idx_safe = np.where(neigh_idx >= 0, neigh_idx, 0)    # [N, P]
+    valid = (neigh_idx >= 0).astype(np.float32)          # [N, P]
+    wts_pv = edge_wts[:, :, primary_view] * valid        # [N, P]  zero pads
+    w_sum = wts_pv.sum(axis=1, keepdims=True).clip(1e-8) # [N, 1]
+    x_nei = X[idx_safe]                                  # [N, P, d_x]
+    centroid = (wts_pv[:, :, None] * x_nei).sum(axis=1) / w_sum  # [N, d_x]
+    return centroid.astype(np.float32)
 
 
 def train_teacher(

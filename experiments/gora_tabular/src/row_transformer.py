@@ -60,7 +60,7 @@ class GoraTransformer(nn.Module):
             nn.GELU(), nn.Linear(d_model // 2, out_dim),
         )
 
-    def forward(self, x_anc, g_anc, x_nei, ew_anc):
+    def forward(self, x_anc, g_anc, x_nei, ew_anc, **_):
         """
         x_anc:  [B, n_features]   anchor row raw features
         g_anc:  [B, obs_dim]      observer vector for anchor rows
@@ -95,7 +95,7 @@ class StandardTransformer(nn.Module):
             nn.GELU(), nn.Linear(d_model // 2, out_dim),
         )
 
-    def forward(self, x_anc, g_anc, x_nei, ew_anc):
+    def forward(self, x_anc, g_anc, x_nei, ew_anc, **_):
         B, K, _ = x_nei.shape
         h_anc = self.embed(x_anc)
         h_nei = self.embed(x_nei.reshape(B * K, -1)).view(B, K, -1)
@@ -123,7 +123,7 @@ class SingleViewTransformer(nn.Module):
             nn.GELU(), nn.Linear(d_model // 2, out_dim),
         )
 
-    def forward(self, x_anc, g_anc, x_nei, ew_anc):
+    def forward(self, x_anc, g_anc, x_nei, ew_anc, **_):
         B, K, _ = x_nei.shape
         pi = torch.zeros(B, self.n_heads, self.n_views, device=x_anc.device)
         pi[:, :, self.fixed_view] = 1.0

@@ -291,25 +291,21 @@ def compute_label_ctx_per_view(
     view_mask: np.ndarray,    # [N, P, M]
 ) -> np.ndarray:
     """
-    Precompute lbl_nei [N, P, M]: per-slot weighted neighbour label
-    for each view m.  Used in fetch_batch_v3 for LabelContextEncoder.
+    Precompute lbl_nei [N, P, M]: per-slot neighbour label masked per view.
 
     lbl_nei[i, p, m] = y_all[neigh_idx[i,p]] * view_mask[i,p,m]
                        (0 if slot is padded or not in view m's kNN)
 
-    Regression: y_all float, n_classes=1
-    Classification: caller should pass one-hot or integer y (LabelContextEncoder
-                    handles normalisation internally).
+    Vectorised — no Python loops, safe for N=20k.
     """
     N, P, M = edge_wts.shape
-    lbl_nei = np.zeros((N, P, M), dtype=np.float32)
-    for i in range(N):
-        for pi_idx in range(P):
-            j = neigh_idx[i, pi_idx]
-            if j >= 0:
-                for vi in range(M):
-                    lbl_nei[i, pi_idx, vi] = float(y_all[j]) * view_mask[i, pi_idx, vi]
-    return lbl_nei
+    # Gather y_all for every pool slot (-1 pads → clamp to 0, then zero via valid_mask)
+    idx_safe = np.where(neigh_idx >= 0, neigh_idx, 0)   # [N, P]  no negative indexing
+    y_nei = y_all[idx_safe].astype(np.float32)           # [N, P]
+    valid = (neigh_idx >= 0).astype(np.float32)          # [N, P]  1 for non-padded
+    # Broadcast y_nei over M views and apply both validity and view mask
+    lbl_nei = (y_nei * valid)[:, :, None] * view_mask   # [N, P, M]
+    return lbl_nei.astype(np.float32)
 
 
 # ─── v3: Extended fetch_batch ──────────────────────────────────────────────────
