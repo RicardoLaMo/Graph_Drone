@@ -1,0 +1,9 @@
+stage,model,test_rmse,val_rmse,best_step_or_epoch,source,notes
+M4,TabR_CPU_fixed_upstream_style,0.3949403615264023,0.40094805430544206,49,feature/tabr-california-baseline local fixed run,Locked CPU champion from the prior TabR baseline branch
+M4,TabM_upstream_reference_seed0,0.4417858517027938,,,upstream shipped report,Seed-0 paper reference exported from upstream TabM repo
+C1,TabR_on_our_split,0.382893598092279,0.41535373525333674,62,current aligned run snapshot,Aligned to repo California split and transforms
+C1,TabM_on_our_split,0.42902614675661677,0.4537707364517,12426,current aligned run snapshot,Aligned to repo California split and transforms
+C1,B1_HGBR,0.4430,,,repo reference,Current repo California baseline
+C1,G2_GoRA_v1_ref,0.4546,,,repo reference,Saved v3 reference
+C1,HR_v4_headgated_diverse,0.4722,,,repo reference,Best prior head-routing result in repo lineage
+C1,CA_v35b,0.4762,,,repo reference,Regression-safe routed baseline without label-context

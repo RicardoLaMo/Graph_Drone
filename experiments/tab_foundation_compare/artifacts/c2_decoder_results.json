@@ -1,0 +1,83 @@
+{
+  "smoke": false,
+  "train_config": {
+    "batch_size": 256,
+    "max_epochs": 80,
+    "patience": 16,
+    "lr": 0.000872489003621806,
+    "weight_decay": 0.03777165108799435,
+    "seed": 0,
+    "smoke": false
+  },
+  "decoder_config": {
+    "n_num_features": 8,
+    "k": 32,
+    "d_block": 400,
+    "n_blocks": 3,
+    "dropout": 0.20769705860329654
+  },
+  "results": [
+    {
+      "model": "C2a_TabM_mean_heads",
+      "best_epoch": 72,
+      "duration_seconds": 406.493,
+      "train": {
+        "rmse": 0.38493291248673017,
+        "mae": 0.26290759444236755,
+        "r2": 0.8893977403640747,
+        "score": -0.38493291248673017
+      },
+      "val": {
+        "rmse": 0.48702839145304927,
+        "mae": 0.31726086139678955,
+        "r2": 0.817928671836853,
+        "score": -0.48702839145304927
+      },
+      "test": {
+        "rmse": 0.4577521482924547,
+        "mae": 0.305839866399765,
+        "r2": 0.8415372371673584,
+        "score": -0.4577521482924547
+      },
+      "diagnostics": {
+        "train_head_prediction_std": 1.2201945781707764,
+        "val_head_prediction_std": 1.2042385339736938,
+        "test_head_prediction_std": 1.2274614572525024
+      }
+    },
+    {
+      "model": "C2b_TabM_gated_heads",
+      "best_epoch": 63,
+      "duration_seconds": 290.524,
+      "train": {
+        "rmse": 0.3783772502034538,
+        "mae": 0.2594616413116455,
+        "r2": 0.8931329250335693,
+        "score": -0.3783772502034538
+      },
+      "val": {
+        "rmse": 0.4889939104678112,
+        "mae": 0.3192974627017975,
+        "r2": 0.816456139087677,
+        "score": -0.4889939104678112
+      },
+      "test": {
+        "rmse": 0.46135700661922135,
+        "mae": 0.30709129571914673,
+        "r2": 0.8390315175056458,
+        "score": -0.46135700661922135
+      },
+      "diagnostics": {
+        "train_gate_entropy": 3.2089130878448486,
+        "train_gate_top1_mass": 0.10534064471721649,
+        "train_head_prediction_std": 1.3520874977111816,
+        "val_gate_entropy": 3.2081472873687744,
+        "val_gate_top1_mass": 0.10562579333782196,
+        "val_head_prediction_std": 1.3493154048919678,
+        "test_gate_entropy": 3.204056739807129,
+        "test_gate_top1_mass": 0.10671038180589676,
+        "test_head_prediction_std": 1.3488709926605225
+      }
+    }
+  ]
+}

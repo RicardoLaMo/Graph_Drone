@@ -1,0 +1,5 @@
+family,stage,data_path,split_policy,feature_edit,num_policy,y_policy,metric,notes
+TabR,M4 upstream_style,california_local,upstream local export path,upstream local export preprocessing,quantile,standard,RMSE,Locked CPU champion from prior worktree
+TabR,M5 aligned_ours,california_aligned_ours,repo 70/15/15 split seed42,log1p cols 2 and 4 only,quantile,standard,RMSE,Fair comparison path for repo challengers
+TabM,M4 upstream_reference,upstream shipped paper dataset,upstream paper split,upstream paper preprocessing,noisy-quantile,implicit regression labels,RMSE,Used shipped reference because the immediate objective was aligned comparison
+TabM,M5 aligned_ours,california_aligned_ours,repo 70/15/15 split seed42,log1p cols 2 and 4 only,noisy-quantile,raw labels with RMSE evaluation,RMSE,Fair comparison path for repo challengers
