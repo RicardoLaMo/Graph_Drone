@@ -91,7 +91,7 @@ def _precompute_label_centroids(
                 y_bar[i, vi] = (wts * y_vals).sum() / w_sum
     else:
         y_bar = np.zeros((N, M, n_classes), dtype=np.float32)
-        y_onehot = np.eye(n_classes, dtype=np.float32)[y]   # [N, C]
+        y_onehot = np.eye(n_classes, dtype=np.float32)[y.astype(int)]   # [N, C]
         for i in range(N):
             for vi in range(M):
                 wts = edge_wts[i, :, vi] * view_mask[i, :, vi]   # [P]

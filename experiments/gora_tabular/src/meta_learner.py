@@ -141,8 +141,14 @@ class LabelContextEncoder(nn.Module):
             # Inference: zeros everywhere (W_lbl_v zero-init → lbl_delta=0; mlp bias gives ctx_vec)
             lbl_nei = torch.zeros(B, K, M, self.n_out, device=device)
         elif lbl_nei.dim() == 3:
-            # Regression: [B, K, M] → [B, K, M, 1]
-            lbl_nei = lbl_nei.unsqueeze(-1)
+            if self.n_out == 1:
+                # Regression: [B, K, M] → [B, K, M, 1]
+                lbl_nei = lbl_nei.unsqueeze(-1)
+            else:
+                # Classification: integer labels [B, K, M] → one-hot [B, K, M, n_out]
+                idx = lbl_nei.long().clamp(0, self.n_out - 1)
+                lbl_nei = torch.zeros(B, K, M, self.n_out, device=device).scatter_(
+                    -1, idx.unsqueeze(-1), 1.0)
         # lbl_nei: [B, K, M, n_out]
 
         # Per-view label centroid (edge-weight-masked mean)
