@@ -20,8 +20,8 @@
 | G10_Full    | saved_v3    | —         | —         | False       | saved reference                            | Historical v3 result                                                   |   0.938    |   0.937367 |   0.237162 |
 
 ## Reference Reproduction
-| model   | metric   |   current |   reference |      delta | status   |
-|:--------|:---------|----------:|------------:|-----------:|:---------|
-| B1_HGBR | accuracy |  0.873333 |       0.958 | -0.0846667 | DRIFT    |
-| G2_ref  | accuracy |  0.493333 |       0.93  | -0.436667  | DRIFT    |
-| G10_ref | accuracy |  0.64     |       0.938 | -0.298     | DRIFT    |
+| model   | metric   |   current |   reference |      delta | status     |
+|:--------|:---------|----------:|------------:|-----------:|:-----------|
+| B1_HGBR | accuracy |  0.873333 |       0.958 | -0.0846667 | SMOKE_ONLY |
+| G2_ref  | accuracy |  0.493333 |       0.93  | -0.436667  | SMOKE_ONLY |
+| G10_ref | accuracy |  0.64     |       0.938 | -0.298     | SMOKE_ONLY |

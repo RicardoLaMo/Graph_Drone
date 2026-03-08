@@ -2,16 +2,17 @@
 *2026-03-07*
 
 ## Executive Summary
+Run mode: `smoke`.
 Best California v4 variant: `CA_v4d` with RMSE `1.2790`.
 Saved v3 G2 reference RMSE: `0.4546`; saved bad rich-context band best: `0.5099`.
 Interpretation stays skeptical: the California question is whether regression-safe routing recovers toward G2, not whether extra components merely move numbers around.
 
 ## Integrity Confirmation
-| model   | metric   |   current |   reference |    delta | status   |
-|:--------|:---------|----------:|------------:|---------:|:---------|
-| B1_HGBR | rmse     |  0.628481 |    0.443292 | 0.185189 | DRIFT    |
-| G2_ref  | rmse     |  2.31796  |    0.454643 | 1.86331  | DRIFT    |
-| G10_ref | rmse     |  2.32308  |    0.520906 | 1.80218  | DRIFT    |
+| model   | metric   |   current |   reference |    delta | status     |
+|:--------|:---------|----------:|------------:|---------:|:-----------|
+| B1_HGBR | rmse     |  0.628481 |    0.443292 | 0.185189 | SMOKE_ONLY |
+| G2_ref  | rmse     |  2.31796  |    0.454643 | 1.86331  | SMOKE_ONLY |
+| G10_ref | rmse     |  2.32308  |    0.520906 | 1.80218  | SMOKE_ONLY |
 
 ## What Changed From v3
 - California v4 removes raw label-context dependence from the primary baseline path.
@@ -38,7 +39,7 @@ Interpretation stays skeptical: the California question is whether regression-sa
 ## Gate Results
 | gate                                        | status   | evidence                                                                             |
 |:--------------------------------------------|:---------|:-------------------------------------------------------------------------------------|
-| S1 — Integrity Confirmed                    | PARTIAL  | B1/G2/G10 current-vs-v3 comparison plus shared shape/interface checks                |
+| S1 — Integrity Confirmed                    | PARTIAL  | Smoke mode uses provisional reference comparison plus shared shape/interface checks  |
 | C1 — California Training Health             | FAIL     | best CA_v4 stop epoch=4                                                              |
 | C2 — California Regression-Safe Improvement | PARTIAL  | best CA_v4 RMSE=1.2790 vs best bad-v3=0.5099                                         |
 | C3 — California Toward G2                   | FAIL     | best CA_v4 RMSE=1.2790 vs G2=0.4546                                                  |
@@ -79,7 +80,7 @@ Interpretation stays skeptical: the California question is whether regression-sa
 ## Recommendation Before v5
 | failed_gate                                 | observed_evidence                                                                    | likely_cause                 | minimal_next_fix                                                                       | priority   | should_fix_before_v5   |
 |:--------------------------------------------|:-------------------------------------------------------------------------------------|:-----------------------------|:---------------------------------------------------------------------------------------|:-----------|:-----------------------|
-| S1 — Integrity Confirmed                    | B1/G2/G10 current-vs-v3 comparison plus shared shape/interface checks                | implementation/reporting gap | rerun full reference reproduction and investigate drift before architectural claims    | high       | yes                    |
+| S1 — Integrity Confirmed                    | Smoke mode uses provisional reference comparison plus shared shape/interface checks  | implementation/reporting gap | rerun full reference reproduction and investigate drift before architectural claims    | high       | yes                    |
 | C1 — California Training Health             | best CA_v4 stop epoch=4                                                              | training dynamics issue      | increase patience / inspect routing collapse                                           | medium     | no                     |
 | C2 — California Regression-Safe Improvement | best CA_v4 RMSE=1.2790 vs best bad-v3=0.5099                                         | training dynamics issue      | remove or further constrain regression label-context / teacher dependence              | high       | yes                    |
 | C3 — California Toward G2                   | best CA_v4 RMSE=1.2790 vs G2=0.4546                                                  | training dynamics issue      | simplify California path toward CA_v4a/CA_v4c and avoid unnecessary teacher complexity | high       | yes                    |

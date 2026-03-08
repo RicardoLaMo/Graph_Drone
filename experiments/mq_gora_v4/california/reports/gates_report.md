@@ -3,7 +3,7 @@
 
 | gate                                        | status   | evidence                                                                             |
 |:--------------------------------------------|:---------|:-------------------------------------------------------------------------------------|
-| S1 — Integrity Confirmed                    | PARTIAL  | B1/G2/G10 current-vs-v3 comparison plus shared shape/interface checks                |
+| S1 — Integrity Confirmed                    | PARTIAL  | Smoke mode uses provisional reference comparison plus shared shape/interface checks  |
 | C1 — California Training Health             | FAIL     | best CA_v4 stop epoch=4                                                              |
 | C2 — California Regression-Safe Improvement | PARTIAL  | best CA_v4 RMSE=1.2790 vs best bad-v3=0.5099                                         |
 | C3 — California Toward G2                   | FAIL     | best CA_v4 RMSE=1.2790 vs G2=0.4546                                                  |
@@ -16,7 +16,7 @@
 
 | failed_gate                                 | observed_evidence                                                                    | likely_cause                 | minimal_next_fix                                                                       | priority   | should_fix_before_v5   |
 |:--------------------------------------------|:-------------------------------------------------------------------------------------|:-----------------------------|:---------------------------------------------------------------------------------------|:-----------|:-----------------------|
-| S1 — Integrity Confirmed                    | B1/G2/G10 current-vs-v3 comparison plus shared shape/interface checks                | implementation/reporting gap | rerun full reference reproduction and investigate drift before architectural claims    | high       | yes                    |
+| S1 — Integrity Confirmed                    | Smoke mode uses provisional reference comparison plus shared shape/interface checks  | implementation/reporting gap | rerun full reference reproduction and investigate drift before architectural claims    | high       | yes                    |
 | C1 — California Training Health             | best CA_v4 stop epoch=4                                                              | training dynamics issue      | increase patience / inspect routing collapse                                           | medium     | no                     |
 | C2 — California Regression-Safe Improvement | best CA_v4 RMSE=1.2790 vs best bad-v3=0.5099                                         | training dynamics issue      | remove or further constrain regression label-context / teacher dependence              | high       | yes                    |
 | C3 — California Toward G2                   | best CA_v4 RMSE=1.2790 vs G2=0.4546                                                  | training dynamics issue      | simplify California path toward CA_v4a/CA_v4c and avoid unnecessary teacher complexity | high       | yes                    |

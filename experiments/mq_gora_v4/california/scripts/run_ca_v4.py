@@ -297,7 +297,7 @@ def _run_g10_reference(
     )
 
 
-def _reference_reproduction_rows(current_results: pd.DataFrame, saved_v3: pd.DataFrame):
+def _reference_reproduction_rows(current_results: pd.DataFrame, saved_v3: pd.DataFrame, smoke: bool = False):
     rows = []
     pairs = [
         ("B1_HGBR", "B1_HGBR"),
@@ -312,6 +312,7 @@ def _reference_reproduction_rows(current_results: pd.DataFrame, saved_v3: pd.Dat
         current_val = float(cur.iloc[0]["rmse"])
         reference_val = float(ref.iloc[0]["rmse"])
         delta = current_val - reference_val
+        status = "SMOKE_ONLY" if smoke else ("MATCH" if abs(delta) <= 0.01 else "DRIFT")
         rows.append(
             {
                 "model": current_name,
@@ -319,7 +320,7 @@ def _reference_reproduction_rows(current_results: pd.DataFrame, saved_v3: pd.Dat
                 "current": current_val,
                 "reference": reference_val,
                 "delta": delta,
-                "status": "MATCH" if abs(delta) <= 0.01 else "DRIFT",
+                "status": status,
             }
         )
     return pd.DataFrame(rows)
@@ -361,7 +362,7 @@ def _root_cause_rows(best_v4_tag: str, routing_df: pd.DataFrame, beta_regime_df:
     ]
 
 
-def _gate_rows(current_results: pd.DataFrame, saved_v3: pd.DataFrame, integrity_rows: pd.DataFrame, routing_df: pd.DataFrame, beta_regime_df: pd.DataFrame):
+def _gate_rows(current_results: pd.DataFrame, saved_v3: pd.DataFrame, integrity_rows: pd.DataFrame, routing_df: pd.DataFrame, beta_regime_df: pd.DataFrame, smoke: bool = False):
     v4_rows = current_results[current_results["tag"].str.startswith("CA_v4")].copy()
     best_v4 = v4_rows.sort_values("rmse").iloc[0]
     bad_v3_best = min(
@@ -372,6 +373,7 @@ def _gate_rows(current_results: pd.DataFrame, saved_v3: pd.DataFrame, integrity_
     g2_saved = _metric_for(saved_v3, "G2_GoRA_v1")
     best_stop = pd.to_numeric(v4_rows["stop_ep"], errors="coerce").fillna(0).max()
     integrity_pass = not integrity_rows.empty and (integrity_rows["status"] == "MATCH").all()
+    integrity_status = "PARTIAL" if smoke else ("PASS" if integrity_pass else "PARTIAL")
     beta_active = ("beta_std" in routing_df) and bool((routing_df["beta_std"] > 0.02).any())
     rich_input_active = ("routing_entropy" in routing_df) and bool((routing_df["routing_entropy"] > 0.05).any())
     view_distinct = routing_df["dominant_view"].nunique() > 1 if "dominant_view" in routing_df else False
@@ -379,8 +381,8 @@ def _gate_rows(current_results: pd.DataFrame, saved_v3: pd.DataFrame, integrity_
     return [
         {
             "gate": "S1 — Integrity Confirmed",
-            "status": "PASS" if integrity_pass else "PARTIAL",
-            "evidence": "B1/G2/G10 current-vs-v3 comparison plus shared shape/interface checks",
+            "status": integrity_status,
+            "evidence": "Smoke mode uses provisional reference comparison plus shared shape/interface checks" if smoke else "B1/G2/G10 current-vs-v3 comparison plus shared shape/interface checks",
         },
         {
             "gate": "C1 — California Training Health",
@@ -690,7 +692,7 @@ def run_california(smoke: bool = False):
 
     saved_v3 = _load_v3_metrics()
     results_df = pd.DataFrame(results)
-    reference_df = _reference_reproduction_rows(results_df, saved_v3)
+    reference_df = _reference_reproduction_rows(results_df, saved_v3, smoke=smoke)
     routing_stats_df = pd.concat(routing_frames, ignore_index=True) if routing_frames else pd.DataFrame()
     regime_metrics_df = pd.concat(regime_frames, ignore_index=True) if regime_frames else pd.DataFrame()
 
@@ -723,7 +725,7 @@ def run_california(smoke: bool = False):
         best_variant_payload["beta_regime_df"],
         best_variant_payload["view_similarity"],
     )
-    gate_rows = _gate_rows(results_df, saved_v3, reference_df, best_variant_payload["routing_df"], best_variant_payload["beta_regime_df"])
+    gate_rows = _gate_rows(results_df, saved_v3, reference_df, best_variant_payload["routing_df"], best_variant_payload["beta_regime_df"], smoke=smoke)
     failure_rows = _failure_rows(gate_rows)
     triage_df = _triage_rows(results_df, saved_v3)
 
@@ -742,6 +744,7 @@ def run_california(smoke: bool = False):
         verdict = "v4 changed architecture but did not solve the main problems"
 
     executive_summary = [
+        f"Run mode: `{'smoke' if smoke else 'full'}`.",
         f"Best California v4 variant: `{best_variant_payload['result']['tag']}` with RMSE `{best_v4_rmse:.4f}`.",
         f"Saved v3 G2 reference RMSE: `{_metric_for(saved_v3, 'G2_GoRA_v1'):.4f}`; saved bad rich-context band best: `{min(_metric_for(saved_v3, 'G8_LabelCtx'), _metric_for(saved_v3, 'G9_Teacher'), _metric_for(saved_v3, 'G10_Full')):.4f}`.",
         "Interpretation stays skeptical: the California question is whether regression-safe routing recovers toward G2, not whether extra components merely move numbers around.",

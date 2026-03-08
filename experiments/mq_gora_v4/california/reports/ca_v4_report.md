@@ -32,8 +32,8 @@
 | CA_v4e  | 1.39624 | 4         | 4         | True        | Longer patience with cosine schedule                             |
 
 ## Reference Reproduction
-| model   | metric   |   current |   reference |    delta | status   |
-|:--------|:---------|----------:|------------:|---------:|:---------|
-| B1_HGBR | rmse     |  0.628481 |    0.443292 | 0.185189 | DRIFT    |
-| G2_ref  | rmse     |  2.31796  |    0.454643 | 1.86331  | DRIFT    |
-| G10_ref | rmse     |  2.32308  |    0.520906 | 1.80218  | DRIFT    |
+| model   | metric   |   current |   reference |    delta | status     |
+|:--------|:---------|----------:|------------:|---------:|:-----------|
+| B1_HGBR | rmse     |  0.628481 |    0.443292 | 0.185189 | SMOKE_ONLY |
+| G2_ref  | rmse     |  2.31796  |    0.454643 | 1.86331  | SMOKE_ONLY |
+| G10_ref | rmse     |  2.32308  |    0.520906 | 1.80218  | SMOKE_ONLY |
