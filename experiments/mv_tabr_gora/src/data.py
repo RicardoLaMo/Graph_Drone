@@ -103,6 +103,29 @@ def _compute_sigma2_v(
     return sigma2_norm
 
 
+def _jaccard_pair_vectorized(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """
+    Vectorised Jaccard between rows of a [N, K] and b [N, K].
+    Uses sorted membership test: for each row, sort a and b, then
+    count |intersection| = count of elements in a that appear in b via searchsorted.
+    This avoids a Python loop over N rows.
+    """
+    N, K = a.shape
+    # For each row: |intersection| via broadcast comparison [N, K_a, K_b]
+    # is too large, so use sorting trick instead.
+    a_sorted = np.sort(a, axis=1)    # [N, K]
+    b_sorted = np.sort(b, axis=1)    # [N, K]
+    # Count matches using searchsorted per row
+    inter = np.zeros(N, dtype=np.float32)
+    for n in range(N):
+        # Count elements of a_sorted[n] that appear in b_sorted[n]
+        idx = np.searchsorted(b_sorted[n], a_sorted[n])
+        idx_clipped = np.clip(idx, 0, K - 1)
+        inter[n] = float(np.sum(b_sorted[n][idx_clipped] == a_sorted[n]))
+    union = 2 * K - inter   # |A∪B| = |A| + |B| - |A∩B|
+    return inter / np.maximum(union, 1.0)
+
+
 def _compute_jaccard(
     per_view_knn: Dict[str, Tuple[np.ndarray, np.ndarray]],
     view_names: List[str],
@@ -112,23 +135,16 @@ def _compute_jaccard(
     Returns:
         J_flat : [N, n_pairs]  each column = |A∩B|/|A∪B| for a pair of views
         mean_J : [N]
+    Uses vectorised searchsorted instead of Python set loop.
     """
     n_views = len(view_names)
     knn_sets = [per_view_knn[v][0] for v in view_names]   # list of [N, K]
-    N = knn_sets[0].shape[0]
 
     pairs = [(i, j) for i in range(n_views) for j in range(i + 1, n_views)]
-    J_cols = []
-    for i, j in pairs:
-        a = knn_sets[i]   # [N, K]
-        b = knn_sets[j]   # [N, K]
-        j_vals = np.zeros(N, dtype=np.float32)
-        for n in range(N):
-            sa, sb = set(a[n].tolist()), set(b[n].tolist())
-            union = sa | sb
-            inter = sa & sb
-            j_vals[n] = len(inter) / max(len(union), 1)
-        J_cols.append(j_vals)
+    J_cols = [
+        _jaccard_pair_vectorized(knn_sets[i], knn_sets[j])
+        for i, j in pairs
+    ]
 
     J_flat = np.stack(J_cols, axis=1).astype(np.float32)   # [N, n_pairs]
     mean_J = J_flat.mean(axis=1)                            # [N]
