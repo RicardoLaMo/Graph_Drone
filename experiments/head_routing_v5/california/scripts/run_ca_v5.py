@@ -4,15 +4,19 @@ run_ca_v5.py — v5 California Housing experiment.
 Ablation ladder (PRD 2026-03-08):
   A0  backbone_v5_ref    : HeadRoutingBackboneV5 + FlatRegressionHead (reproduces worktree behaviour)
   A1  v5_head_gated      : + HeadGatedRegressor (Gap 6) ← primary hypothesis test
+  B0  v5_probe_a0        : freeze A0 backbone, HGBR on head_repr (baseline probe)
   B1  v5_probe           : freeze A1 backbone, fit HGBR on head_repr (diagnostic)
   C1  v5_per_view_obs    : + per-view quality prior q[B,V] into pi (Gap 1)
   C2  v5_jaccard_beta    : + Jaccard-anchored beta prior (Gap 2)
   C3  v5_sigma2          : + sigma2_v router input (Gap 13)
   D1  v5_adaptive_tau    : + row-adaptive geom_scale (Gap 3)
   D2  v5_pdiv_lb         : + L_pdiv + L_lb regularizers (Gap 4)
+  E1  v5_orth            : A1 + L_orth=0.02 (attention head diversity, like HR_v2_diverse)
+  E2  v5_orth_init       : E1 + head-specific view bias initialization (break symmetry)
+  E3  v5_orth_pdiv       : E2 + L_pdiv=0.05 (prediction diversity on top of diversity)
 
 Gate:  A1 RMSE < G2_ref=0.4546  ← primary blocker
-Stretch: any C* or D* beats HGBR=0.4433
+Stretch: any C* or D* or E* beats HGBR=0.4433
 """
 from __future__ import annotations
 
@@ -70,8 +74,8 @@ def parse_args():
     p.add_argument(
         "--experiments",
         nargs="+",
-        default=["A0", "A1", "B1", "C1", "C2", "C3", "D1", "D2"],
-        help="Which experiments to run (subset of A0 A1 B1 C1 C2 C3 D1 D2)"
+        default=["A0", "A1", "B0", "B1", "C1", "C2", "C3", "D1", "D2", "E1", "E2", "E3"],
+        help="Which experiments to run"
     )
     return p.parse_args()
 
@@ -112,6 +116,8 @@ def build_model(
     use_view_embed: bool = False,
     # Head type
     use_head_gate: bool = False,
+    # Initialization
+    use_head_view_bias_init: bool = False,
 ) -> V5Model:
     backbone = HeadRoutingBackboneV5(
         view_input_dims=view_input_dims,
@@ -147,6 +153,9 @@ def build_model(
             hidden_dim=128,
             dropout=DROPOUT,
         )
+    if use_head_view_bias_init:
+        backbone.router.init_head_view_biases(strength=2.0)
+
     return V5Model(backbone, head)
 
 
@@ -374,19 +383,22 @@ def main():
     metrics_rows.append({"model": "B1_HGBR", **hgbr_metrics, "best_epoch": "—", "stop_epoch": "—"})
     print(f"  HGBR RMSE={hgbr_metrics['rmse']:.4f}")
 
-    def _run(label, backbone_flags, use_head_gate, config_overrides=None, extras=None):
+    def _run(label, backbone_flags, use_head_gate, config_overrides=None,
+             use_head_view_bias_init=False, extras=None):
         """Run one experiment variant."""
         set_seed(42)
         cfg = config_base
         if config_overrides:
             cfg = TrainConfigV5(**{**cfg.__dict__, **config_overrides})
 
-        print(f"\n[{label}] backbone_flags={backbone_flags}, head_gate={use_head_gate}")
+        print(f"\n[{label}] backbone_flags={backbone_flags}, head_gate={use_head_gate}"
+              f"{', head_init=True' if use_head_view_bias_init else ''}")
         model = build_model(
             view_input_dims=view_input_dims,
             obs_dim=obs_dim,
             n_views=n_views,
             use_head_gate=use_head_gate,
+            use_head_view_bias_init=use_head_view_bias_init,
             **backbone_flags,
         )
 
@@ -430,11 +442,14 @@ def main():
         return model, routing, qs, qn, jf, mj, sv
 
     # ---- A0: reference (flat head, no quality prior) ----
-    a1_model = None
+    a0_model = a1_model = None
+    a0_qs = a0_qn = a0_jf = a0_mj = a0_sv = None
     a1_qs = a1_qn = a1_jf = a1_mj = a1_sv = None
 
     if "A0" in run_exps:
-        _run("A0_ref", {}, use_head_gate=False)
+        a0_model, _, a0_qs, a0_qn, a0_jf, a0_mj, a0_sv = _run(
+            "A0_ref", {}, use_head_gate=False
+        )
 
     # ---- A1: head-gated (Gap 6) ----
     if "A1" in run_exps:
@@ -442,9 +457,24 @@ def main():
             "A1_head_gated", {}, use_head_gate=True
         )
 
-    # ---- B1: backbone probe ----
+    # ---- B0: backbone probe on A0 (baseline — how good is A0's backbone?) ----
+    if "B0" in run_exps and a0_model is not None:
+        print("\n[B0] Backbone probe on A0 backbone (baseline: what is A0 head_repr worth?)...")
+        probe_metrics = run_probe(
+            a0_model, view_feats, per_view_knn, g_scaled, y,
+            train_idx, test_idx, target_stats,
+            a0_qs, a0_qn, a0_jf, a0_mj, a0_sv,
+        )
+        metrics_rows.append({"model": "B0_probe_a0", **probe_metrics, "best_epoch": "—", "stop_epoch": "—"})
+        print(f"  Probe RMSE={probe_metrics['rmse']:.4f}")
+        a0_rmse = next((r["rmse"] for r in metrics_rows if r["model"] == "A0_ref"), None)
+        if a0_rmse:
+            gap = probe_metrics["rmse"] - a0_rmse
+            print(f"  Gap (probe - A0_e2e) = {gap:.4f}  {'→ A0 flat head is efficient' if gap < 0.01 else '→ HGBR probe beats A0 flat head'}")
+
+    # ---- B1: backbone probe on A1 ----
     if "B1" in run_exps and a1_model is not None:
-        print("\n[B1] Backbone probe (frozen backbone + HGBR on head_repr)...")
+        print("\n[B1] Backbone probe (frozen A1 backbone + HGBR on head_repr)...")
         probe_metrics = run_probe(
             a1_model, view_feats, per_view_knn, g_scaled, y,
             train_idx, test_idx, target_stats,
@@ -490,6 +520,30 @@ def main():
              {"use_quality_prior": True, "use_jaccard_prior": True, "use_adaptive_tau": True},
              use_head_gate=True,
              config_overrides={"lambda_pdiv": 0.05, "lambda_lb": 0.01})
+
+    # ---- E1: A1 + L_orth (attention diversity, like HR_v2_diverse) ----
+    # Hypothesis: diversity loss forces head_repr differentiation → gate can work
+    if "E1" in run_exps:
+        _run("E1_orth",
+             {},
+             use_head_gate=True,
+             config_overrides={"lambda_orth": 0.02})
+
+    # ---- E2: E1 + head-specific view bias init (break symmetry at t=0) ----
+    if "E2" in run_exps:
+        _run("E2_orth_init",
+             {},
+             use_head_gate=True,
+             use_head_view_bias_init=True,
+             config_overrides={"lambda_orth": 0.02})
+
+    # ---- E3: E2 + L_pdiv=0.05 (prediction diversity on top of representation diversity) ----
+    if "E3" in run_exps:
+        _run("E3_orth_pdiv",
+             {},
+             use_head_gate=True,
+             use_head_view_bias_init=True,
+             config_overrides={"lambda_orth": 0.02, "lambda_pdiv": 0.05})
 
     # ---- Write results ----
     write_results(metrics_rows, routing_rows, output_root)

@@ -216,6 +216,20 @@ class QualityAwareRouter(nn.Module):
         if use_jaccard_prior:
             self.w_beta = nn.Parameter(torch.zeros(1))  # starts at 0 (no prior)
 
+    def init_head_view_biases(self, strength: float = 2.0) -> None:
+        """
+        Initialize each head to prefer a different view at t=0.
+        Head h starts with logit bias of `strength` toward view h % n_views.
+        Breaks router symmetry without constraining eventual learning.
+        """
+        with torch.no_grad():
+            bias = torch.zeros(self.n_heads * self.n_views)
+            for h in range(self.n_heads):
+                preferred = h % self.n_views
+                bias[h * self.n_views + preferred] = strength
+            if self.view_head.bias is not None:
+                self.view_head.bias.data.copy_(bias)
+
     def forward(
         self,
         g: torch.Tensor,                                  # [B, obs_dim]
