@@ -100,6 +100,19 @@ This repo has two different kinds of experiment history:
 - status: **scaffolding complete — ready for full run**
 - run: `python .worktrees/mv-tabr-gora-c1e0/experiments/mv_tabr_gora/scripts/run_mv_tabr_gora.py --ablation A6f C1 E0 C1E0`
 
+### MV-TabR-GoRA E1+D0 (gated decoder + deep view encoder)
+- path: `.worktrees/mv-tabr-gora-e1d0`
+- branch: `feature/mv-tabr-gora-e1d0`
+- base: `feature/mv-tabr-gora-c1e0` (inherits A6f/C1/E0/C1E0 baselines)
+- hypothesis:
+  - E1: gate M=4 decoder head weights on {pi, mean_J} → routing co-trains with head selection
+  - D0: 2-layer GELU ViewEncoder → GEO view discovers implicit cluster structure
+  - Motivated by geo segmentation experiment: H5 structure-only priors (0.4251) show geometry carries signal
+- ablations: E1 (gated heads), D0 (deep encoder), E1D0 (both)
+- smoke test: ✅ A6f/E1/D0/E1D0 pass, param deltas verified (+12K/+16K/+29K)
+- status: **scaffolding complete — ready for full run**
+- run: `cd .worktrees/mv-tabr-gora-e1d0 && python experiments/mv_tabr_gora/scripts/run_mv_tabr_gora.py --ablation A6f E0 E1 D0 E1D0 --output experiments/mv_tabr_gora/reports/e1d0_full`
+
 ### MV-TabR-GoRA DRST (dynamic candidate-pool retriever + EdgeMLP encoding)
 - path: `.worktrees/mv-tabr-gora-drst`
 - branch: `feature/mv-tabr-gora-drst`
