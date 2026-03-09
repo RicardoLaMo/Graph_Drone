@@ -1,0 +1,112 @@
+{
+  "seed": 42,
+  "n_estimators": 1,
+  "view_names": [
+    "FULL",
+    "GEO",
+    "SOCIO",
+    "LOWRANK"
+  ],
+  "results": [
+    {
+      "model": "P0_FULL",
+      "val_rmse": 0.4111109204478008,
+      "test_rmse": 0.3891207532666274,
+      "val_mae": 0.24573558568954468,
+      "test_mae": 0.2416056990623474,
+      "notes": "single-view TabPFN expert"
+    },
+    {
+      "model": "P0_GEO",
+      "val_rmse": 0.5422451219528367,
+      "test_rmse": 0.520823856903332,
+      "val_mae": 0.3510758876800537,
+      "test_mae": 0.3475954830646515,
+      "notes": "single-view TabPFN expert"
+    },
+    {
+      "model": "P0_SOCIO",
+      "val_rmse": 0.7120506459102162,
+      "test_rmse": 0.6771373042579688,
+      "val_mae": 0.4968239367008209,
+      "test_mae": 0.47705575823783875,
+      "notes": "single-view TabPFN expert"
+    },
+    {
+      "model": "P0_LOWRANK",
+      "val_rmse": 0.5923854557409783,
+      "test_rmse": 0.5621682884407042,
+      "val_mae": 0.391033411026001,
+      "test_mae": 0.3765389025211334,
+      "notes": "single-view TabPFN expert"
+    },
+    {
+      "model": "P0_uniform",
+      "val_rmse": 0.46858384048449847,
+      "test_rmse": 0.435869328490659,
+      "val_mae": 0.3038202226161957,
+      "test_mae": 0.29091840982437134,
+      "notes": "uniform mean over four TabPFN view experts"
+    },
+    {
+      "model": "P0_sigma2",
+      "val_rmse": 0.469412303971105,
+      "test_rmse": 0.43614643039788537,
+      "val_mae": 0.3027329444885254,
+      "test_mae": 0.2893196642398834,
+      "notes": "inverse-sigma2 routing over view experts"
+    },
+    {
+      "model": "P0_router",
+      "val_rmse": 0.39886769276867984,
+      "test_rmse": 0.3772867337386579,
+      "val_mae": 0.24218890070915222,
+      "test_mae": 0.23797425627708435,
+      "notes": "softmax router on sigma2_v + J_flat + mean_J (best_epoch=399)"
+    }
+  ],
+  "weights_summary": {
+    "uniform": [
+      0.25,
+      0.25
+    ],
+    "sigma2_FULL": [
+      0.25082582235336304,
+      0.25093314051628113
+    ],
+    "sigma2_GEO": [
+      0.24643024802207947,
+      0.2455616593360901
+    ],
+    "sigma2_SOCIO": [
+      0.2513478696346283,
+      0.25145116448402405
+    ],
+    "sigma2_LOWRANK": [
+      0.2513960897922516,
+      0.25205403566360474
+    ],
+    "router_FULL": [
+      0.7166049480438232,
+      0.7203447222709656
+    ],
+    "router_GEO": [
+      0.23502162098884583,
+      0.23084132373332977
+    ],
+    "router_SOCIO": [
+      0.025157518684864044,
+      0.02538669854402542
+    ],
+    "router_LOWRANK": [
+      0.023215878754854202,
+      0.02342725358903408
+    ]
+  },
+  "references": {
+    "tabr_rmse": 0.3829,
+    "tabpfn_full_best": 0.3891,
+    "tabpfn_full_mean": 0.3932,
+    "a6f_artifact": 0.4063
+  }
+}
