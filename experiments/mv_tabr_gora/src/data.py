@@ -7,6 +7,7 @@ the complete Bundle needed for training and inference:
   X           [N, F]        raw features (RobustScaler'd, log1p on cols 2,4)
   y           [N]           raw targets
   y_norm      [N]           standardised targets
+  target_offset [N]         per-row offset used before standardisation
   train_idx   [n_train]     global training indices
   val_idx     [n_val]       global validation indices
   test_idx    [n_test]      global test indices
@@ -57,6 +58,7 @@ class MVDataBundle:
     X: np.ndarray              # [N, F]  float32
     y: np.ndarray              # [N]     float32 (raw)
     y_norm: np.ndarray         # [N]     float32 (standardised)
+    target_offset: np.ndarray  # [N]     float32 (global mean or cohort mean)
     train_idx: np.ndarray      # [n_train]
     val_idx: np.ndarray        # [n_val]
     test_idx: np.ndarray       # [n_test]
@@ -177,6 +179,47 @@ def _build_geo_segment_ids(
     km = KMeans(n_clusters=n_clusters, n_init=20, random_state=seed)
     km.fit(raw_geo[train_idx])
     return km.predict(raw_geo).astype(np.int64)
+
+
+def _compute_segment_target_offsets(
+    y: np.ndarray,
+    train_idx: np.ndarray,
+    segment_ids: np.ndarray,
+    fallback_mean: float,
+) -> np.ndarray:
+    """
+    Train-only cohort mean per row.
+
+    - train rows use leave-one-out segment means
+    - val/test rows use the train-segment mean
+    - singleton train segments fall back to the global train mean
+    """
+    offsets = np.full_like(y, fallback_mean, dtype=np.float32)
+
+    train_seg = segment_ids[train_idx]
+    unique_seg, inverse = np.unique(train_seg, return_inverse=True)
+    seg_sum = np.zeros(len(unique_seg), dtype=np.float64)
+    seg_count = np.zeros(len(unique_seg), dtype=np.int64)
+    np.add.at(seg_sum, inverse, y[train_idx].astype(np.float64))
+    np.add.at(seg_count, inverse, 1)
+
+    seg_mean = seg_sum / np.maximum(seg_count, 1)
+    seg_to_mean = {int(seg): float(seg_mean[pos]) for pos, seg in enumerate(unique_seg)}
+    seg_to_sum = {int(seg): float(seg_sum[pos]) for pos, seg in enumerate(unique_seg)}
+    seg_to_count = {int(seg): int(seg_count[pos]) for pos, seg in enumerate(unique_seg)}
+
+    for idx in range(len(y)):
+        offsets[idx] = float(seg_to_mean.get(int(segment_ids[idx]), fallback_mean))
+
+    for idx in train_idx:
+        seg = int(segment_ids[idx])
+        count = seg_to_count.get(seg, 0)
+        if count > 1:
+            offsets[idx] = float((seg_to_sum[seg] - float(y[idx])) / (count - 1))
+        else:
+            offsets[idx] = float(fallback_mean)
+
+    return offsets.astype(np.float32)
 
 
 def _apply_same_segment_weight_bias(
@@ -411,6 +454,7 @@ def build_geo_segmented_bundle(
         X=base.X,
         y=base.y,
         y_norm=base.y_norm,
+        target_offset=base.target_offset,
         train_idx=base.train_idx,
         val_idx=base.val_idx,
         test_idx=base.test_idx,
@@ -453,6 +497,7 @@ def build_mv_data_bundle(
     mean_t = float(target_stats["mean"])
     std_t = float(target_stats["std"])
     y_norm = ((y - mean_t) / std_t).astype(np.float32)
+    target_offset = np.full_like(y, mean_t, dtype=np.float32)
 
     # ---- Optional smoke subsetting ---------------------------------------
     train_idx, val_idx, test_idx = maybe_truncate_splits(
@@ -479,6 +524,7 @@ def build_mv_data_bundle(
         X=X,
         y=y,
         y_norm=y_norm,
+        target_offset=target_offset,
         train_idx=train_idx,
         val_idx=val_idx,
         test_idx=test_idx,
@@ -493,4 +539,74 @@ def build_mv_data_bundle(
         J_flat=J_flat,
         raw_geo=raw_geo,
         geo_segment_ids=None,
+    )
+
+
+def build_cohort_residual_bundle(
+    K: int = 24,
+    smoke: bool = False,
+    smoke_train: int = 500,
+    smoke_val: int = 200,
+    smoke_test: int = 200,
+    seed: int = 42,
+    n_clusters: int = 96,
+    append_seg_mean_to_geo: bool = True,
+) -> MVDataBundle:
+    """
+    Cohort-residual target normalisation based on train-only geo segments.
+    """
+    ds = build_california_dataset(seed=seed)
+    X, y = ds["X"], ds["y"]
+    train_idx = ds["train_idx"]
+    val_idx = ds["val_idx"]
+    test_idx = ds["test_idx"]
+    target_stats = ds["target_stats"]
+
+    mean_t = float(target_stats["mean"])
+    std_t = float(target_stats["std"])
+
+    from sklearn.datasets import fetch_california_housing
+    raw_geo = fetch_california_housing().data[:, [6, 7]].astype(np.float32)
+    segment_ids = _build_geo_segment_ids(raw_geo, train_idx, n_clusters=n_clusters, seed=seed)
+    target_offset = _compute_segment_target_offsets(y, train_idx, segment_ids, fallback_mean=mean_t)
+    y_residual = (y - target_offset).astype(np.float32)
+    y_norm = (y_residual / std_t).astype(np.float32)
+
+    train_idx, val_idx, test_idx = maybe_truncate_splits(
+        train_idx, val_idx, test_idx,
+        smoke, smoke_train, smoke_val, smoke_test,
+    )
+
+    view_feats = build_california_views(X, train_idx=train_idx)
+    if append_seg_mean_to_geo:
+        view_feats["GEO"] = np.concatenate(
+            [view_feats["GEO"], target_offset[:, None].astype(np.float32)],
+            axis=1,
+        ).astype(np.float32)
+
+    view_names = list(view_feats.keys())
+    view_dims = {name: view_feats[name].shape[1] for name in view_names}
+    per_view_knn = build_per_view_knn(view_feats, k=K, train_idx=train_idx)
+    sigma2_v = _compute_sigma2_v(y_residual, per_view_knn, train_idx, view_names)
+    J_flat, mean_J = _compute_jaccard(per_view_knn, view_names)
+
+    return MVDataBundle(
+        X=X,
+        y=y,
+        y_norm=y_norm,
+        target_offset=target_offset,
+        train_idx=train_idx,
+        val_idx=val_idx,
+        test_idx=test_idx,
+        target_stats=target_stats,
+        view_feats=view_feats,
+        view_names=view_names,
+        view_dims=view_dims,
+        per_view_knn=per_view_knn,
+        K=K,
+        sigma2_v=sigma2_v,
+        mean_J=mean_J,
+        J_flat=J_flat,
+        raw_geo=raw_geo,
+        geo_segment_ids=segment_ids,
     )

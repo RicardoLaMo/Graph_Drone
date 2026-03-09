@@ -180,7 +180,6 @@ def predict_split(
     Returns (y_true_raw [n], y_pred_raw [n]).
     """
     model.eval()
-    mean_t = float(bundle.target_stats["mean"])
     std_t = float(bundle.target_stats["std"])
 
     preds_norm: List[np.ndarray] = []
@@ -191,7 +190,7 @@ def predict_split(
         preds_norm.append(pred_norm.detach().cpu().numpy())
 
     y_pred_norm = np.concatenate(preds_norm)
-    y_pred_raw = y_pred_norm * std_t + mean_t
+    y_pred_raw = y_pred_norm * std_t + bundle.target_offset[idx]
     y_true_raw = bundle.y[idx]
     return y_true_raw.astype(np.float32), y_pred_raw.astype(np.float32)
 
