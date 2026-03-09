@@ -19,7 +19,10 @@ from experiments.tabpfn_view_router.src.data import (
     build_view_data,
 )
 from experiments.tabpfn_view_router.src.router import (
+    CrossfitRouterResult,
+    fit_crossfit_router,
     fit_soft_router,
+    gora_mix,
     score_regression,
     sigma2_mix,
     uniform_mix,
@@ -167,11 +170,27 @@ def main() -> None:
             "test_rmse": score_regression(split.y_test, pred_sigma_test)["rmse"],
             "val_mae": score_regression(split.y_val, pred_sigma_val)["mae"],
             "test_mae": score_regression(split.y_test, pred_sigma_test)["mae"],
-            "notes": "inverse-sigma2 routing over view experts",
+            "notes": "inverse-sigma2 routing — no val labels used",
         }
     )
     for i, name in enumerate(view_order):
         weights_summary[f"sigma2_{name}"] = [float(w_sigma_val[:, i].mean()), float(w_sigma_test[:, i].mean())]
+
+    # Option A: GoRA analytical routing — zero free parameters, no val labels
+    pred_gora_val, w_gora_val = gora_mix(pred_val, quality.sigma2_val, quality.mean_j_val)
+    pred_gora_test, w_gora_test = gora_mix(pred_test, quality.sigma2_test, quality.mean_j_test)
+    model_rows.append(
+        {
+            "model": "P0_gora",
+            "val_rmse": score_regression(split.y_val, pred_gora_val)["rmse"],
+            "test_rmse": score_regression(split.y_test, pred_gora_test)["rmse"],
+            "val_mae": score_regression(split.y_val, pred_gora_val)["mae"],
+            "test_mae": score_regression(split.y_test, pred_gora_test)["mae"],
+            "notes": "GoRA analytical routing: softmax(-sigma2*tau), tau=1/(mean_J+eps) — zero params, no val labels",
+        }
+    )
+    for i, name in enumerate(view_order):
+        weights_summary[f"gora_{name}"] = [float(w_gora_val[:, i].mean()), float(w_gora_test[:, i].mean())]
 
     router = fit_soft_router(
         x_val=quality.val,
@@ -195,6 +214,31 @@ def main() -> None:
         weights_summary[f"router_{name}"] = [
             float(router.weights_val[:, i].mean()),
             float(router.weights_test[:, i].mean()),
+        ]
+
+    # Option B: 5-fold cross-fit router — clean OOF val RMSE, no val-label leakage
+    crossfit = fit_crossfit_router(
+        x_val=quality.val,
+        pred_val=pred_val,
+        y_val=split.y_val,
+        x_test=quality.test,
+        pred_test=pred_test,
+        seed=args.seed,
+    )
+    model_rows.append(
+        {
+            "model": "P0_crossfit",
+            "val_rmse": score_regression(split.y_val, crossfit.pred_val_oof)["rmse"],
+            "test_rmse": score_regression(split.y_test, crossfit.pred_test)["rmse"],
+            "val_mae": score_regression(split.y_val, crossfit.pred_val_oof)["mae"],
+            "test_mae": score_regression(split.y_test, crossfit.pred_test)["mae"],
+            "notes": f"5-fold OOF router — val RMSE is clean (unbiased); test uses router trained on all val (n_splits={crossfit.n_splits})",
+        }
+    )
+    for i, name in enumerate(view_order):
+        weights_summary[f"crossfit_{name}"] = [
+            float(crossfit.weights_test[:, i].mean()),
+            float(crossfit.weights_test[:, i].mean()),
         ]
 
     payload = {

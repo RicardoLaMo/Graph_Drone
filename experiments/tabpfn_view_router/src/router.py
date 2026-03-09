@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import KFold, train_test_split
 
 
 def score_regression(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
@@ -26,6 +26,27 @@ def sigma2_mix(preds: np.ndarray, sigma2_v: np.ndarray) -> tuple[np.ndarray, np.
     weights = inv / (inv.sum(axis=1, keepdims=True) + 1e-8)
     pred = (weights * preds).sum(axis=1)
     return pred.astype(np.float32), weights.astype(np.float32)
+
+
+def gora_mix(
+    preds: np.ndarray,
+    sigma2_v: np.ndarray,
+    mean_j: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Analytical GoRA-style routing — zero free parameters, no val labels used.
+
+    weights = softmax(-sigma2_v / tau)  where tau = 1 / (mean_J + eps)
+
+    High view-agreement (mean_J↑) → smaller tau → sharper softmax → more decisive routing.
+    Low sigma2 views (label-predictive neighbours) get higher weight.
+    """
+    tau = 1.0 / (np.maximum(mean_j, 0.0)[:, None] + 1e-8)   # [N, 1]
+    logits = -sigma2_v * tau                                   # [N, V]
+    logits -= logits.max(axis=1, keepdims=True)                # numerical stability
+    exp_l = np.exp(np.clip(logits, -30.0, 0.0))
+    weights = (exp_l / (exp_l.sum(axis=1, keepdims=True) + 1e-8)).astype(np.float32)
+    return (weights * preds).sum(axis=1).astype(np.float32), weights
 
 
 @dataclass(frozen=True)
@@ -122,4 +143,78 @@ def fit_soft_router(
         weights_val=weights_val,
         weights_test=weights_test,
         best_epoch=best_epoch,
+    )
+
+
+@dataclass(frozen=True)
+class CrossfitRouterResult:
+    pred_val_oof: np.ndarray   # clean OOF val predictions — unbiased val RMSE
+    pred_test: np.ndarray      # final model predictions on test (router trained on all val)
+    weights_test: np.ndarray   # final model weights on test
+    n_splits: int
+
+
+def fit_crossfit_router(
+    x_val: np.ndarray,
+    pred_val: np.ndarray,
+    y_val: np.ndarray,
+    x_test: np.ndarray,
+    pred_test: np.ndarray,
+    n_splits: int = 5,
+    seed: int = 42,
+    hidden_dim: int = 32,
+    lr: float = 1e-3,
+    weight_decay: float = 1e-4,
+    max_epochs: int = 400,
+    patience: int = 40,
+) -> CrossfitRouterResult:
+    """
+    5-fold cross-fit soft router.
+
+    OOF val predictions: each val row predicted by a router never trained on it →
+    val RMSE is a clean, unbiased estimate (no val-label leakage into the reported metric).
+
+    Final test predictions: router trained on all val rows via fit_soft_router (70/30 split
+    for early stopping) — identical protocol to P0_router, so test RMSEs are comparable.
+    """
+    kf = KFold(n_splits=n_splits, shuffle=True, random_state=seed)
+    oof_preds = np.zeros(len(y_val), dtype=np.float32)
+
+    for fold, (fold_tr_idx, fold_oof_idx) in enumerate(kf.split(x_val)):
+        # fit_soft_router internally splits fold_tr 70/30 for training / early-stopping
+        fold_result = fit_soft_router(
+            x_val=x_val[fold_tr_idx],
+            pred_val=pred_val[fold_tr_idx],
+            y_val=y_val[fold_tr_idx],
+            x_test=x_val[fold_oof_idx],
+            pred_test=pred_val[fold_oof_idx],
+            seed=seed + fold,          # different seed per fold avoids systematic bias
+            hidden_dim=hidden_dim,
+            lr=lr,
+            weight_decay=weight_decay,
+            max_epochs=max_epochs,
+            patience=patience,
+        )
+        oof_preds[fold_oof_idx] = fold_result.pred_test   # OOF slot used as "test" here
+
+    # Final router on all val → actual test predictions
+    final = fit_soft_router(
+        x_val=x_val,
+        pred_val=pred_val,
+        y_val=y_val,
+        x_test=x_test,
+        pred_test=pred_test,
+        seed=seed,
+        hidden_dim=hidden_dim,
+        lr=lr,
+        weight_decay=weight_decay,
+        max_epochs=max_epochs,
+        patience=patience,
+    )
+
+    return CrossfitRouterResult(
+        pred_val_oof=oof_preds,
+        pred_test=final.pred_test,
+        weights_test=final.weights_test,
+        n_splits=n_splits,
     )
