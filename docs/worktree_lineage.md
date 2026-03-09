@@ -110,8 +110,9 @@ This repo has two different kinds of experiment history:
   - Motivated by geo segmentation experiment: H5 structure-only priors (0.4251) show geometry carries signal
 - ablations: E1 (gated heads), D0 (deep encoder), E1D0 (both)
 - smoke test: ✅ A6f/E1/D0/E1D0 pass, param deltas verified (+12K/+16K/+29K)
-- status: **scaffolding complete — ready for full run**
-- run: `cd .worktrees/mv-tabr-gora-e1d0 && python experiments/mv_tabr_gora/scripts/run_mv_tabr_gora.py --ablation A6f E0 E1 D0 E1D0 --output experiments/mv_tabr_gora/reports/e1d0_full`
+- result: A6f=0.4081 | E0=0.4091 | E1=0.4115 | D0=0.4161 | E1D0=0.4121 (test RMSE)
+- finding: consumption side exhausted — A6f stays best; see findings for root cause analysis
+- status: **complete**
 
 ### MV-TabR-GoRA DRST (dynamic candidate-pool retriever + EdgeMLP encoding)
 - path: `.worktrees/mv-tabr-gora-drst`
