@@ -1,0 +1,5 @@
+stage,model,test_rmse,val_rmse,best_step_or_epoch,source,notes
+C1,TabPFN_on_our_split_full_e1,0.3891207533,0.4111109204,,current aligned run snapshot,TabPFN 6.4.1 CPU full aligned split n_estimators=1
+C1,TabR_on_our_split,0.3829000000,,,prior aligned run snapshot,Reference from comparison branch
+C1,TabM_on_our_split,0.4290000000,,,prior aligned run snapshot,Reference from comparison branch
+C1,A6f,0.4063000000,,,mv-tabr-gora branch-local reference,Current MV-TabR-GoRA champion
