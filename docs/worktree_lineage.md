@@ -85,6 +85,21 @@ This repo has two different kinds of experiment history:
 - status: **ready to run** (smoke test ✅ — rebuild fires correctly, ~1.4s per rebuild)
 - run: `python experiments/mv_tabr_gora/scripts/run_mv_tabr_gora.py --ablation A6f A10b --rebuild_interval 10 --output reports/a10b_dynknn`
 
+### MV-TabR-GoRA C1/E0 (consumption bottleneck diagnosis)
+- path: `.worktrees/mv-tabr-gora-c1e0`
+- branch: `feature/mv-tabr-gora-c1e0`
+- base: `feature/mv-tabr-gora` (A6f, clean static-graph baseline)
+- hypothesis: remaining gap to TabR is in consumption, not retrieval
+  - C1 tests: does collapsing K=24 neighbours to one ctx_v too early hurt?
+    MultiSlotAttention M=2: anchor query + learned per-slot offsets → gated sum
+  - E0 tests: does single decoder head variance hurt?
+    MultiHeadTaskHead M=4: 4 parallel 2-layer MLPs, averaged output
+  - C1E0: both together (interaction check)
+- static graph throughout — no retrieval changes
+- smoke test: ✅ A6f/C1/E0/C1E0 all pass (param deltas verified)
+- status: **scaffolding complete — ready for full run**
+- run: `python .worktrees/mv-tabr-gora-c1e0/experiments/mv_tabr_gora/scripts/run_mv_tabr_gora.py --ablation A6f C1 E0 C1E0`
+
 ### MV-TabR-GoRA DRST (dynamic candidate-pool retriever + EdgeMLP encoding)
 - path: `.worktrees/mv-tabr-gora-drst`
 - branch: `feature/mv-tabr-gora-drst`
