@@ -55,15 +55,31 @@
       "test_rmse": 0.4394894224647297,
       "val_mae": 0.30579933524131775,
       "test_mae": 0.2908887565135956,
-      "notes": "inverse-sigma2 routing over view experts"
+      "notes": "inverse-sigma2 routing \u2014 no val labels used"
+    },
+    {
+      "model": "P0_gora",
+      "val_rmse": 0.5673727536910242,
+      "test_rmse": 0.5179212476487345,
+      "val_mae": 0.34719300270080566,
+      "test_mae": 0.32599496841430664,
+      "notes": "GoRA analytical routing: softmax(-sigma2*tau), tau=1/(mean_J+eps) \u2014 zero params, no val labels"
     },
     {
       "model": "P0_router",
-      "val_rmse": 0.40456915638393726,
-      "test_rmse": 0.3784018039327189,
-      "val_mae": 0.24585594236850739,
-      "test_mae": 0.23953068256378174,
-      "notes": "softmax router on sigma2_v + J_flat + mean_J (best_epoch=338)"
+      "val_rmse": 0.4043972793703129,
+      "test_rmse": 0.3783938492502402,
+      "val_mae": 0.24555560946464539,
+      "test_mae": 0.2390068769454956,
+      "notes": "softmax router on sigma2_v + J_flat + mean_J (best_epoch=330)"
+    },
+    {
+      "model": "P0_crossfit",
+      "val_rmse": 0.40659911487087086,
+      "test_rmse": 0.37806742521443215,
+      "val_mae": 0.24755926430225372,
+      "test_mae": 0.2397455871105194,
+      "notes": "5-fold OOF router \u2014 val RMSE is clean (unbiased); test uses router trained on all val (n_splits=5)"
     }
   ],
   "weights_summary": {
@@ -87,21 +103,53 @@
       0.2513960897922516,
       0.25205403566360474
     ],
+    "gora_FULL": [
+      0.20113427937030792,
+      0.20236311852931976
+    ],
+    "gora_GEO": [
+      0.22460754215717316,
+      0.2135246992111206
+    ],
+    "gora_SOCIO": [
+      0.321632981300354,
+      0.3198579251766205
+    ],
+    "gora_LOWRANK": [
+      0.2526251971721649,
+      0.26425427198410034
+    ],
     "router_FULL": [
-      0.6764423847198486,
-      0.6782390475273132
+      0.6960985660552979,
+      0.6976728439331055
     ],
     "router_GEO": [
-      0.2679871916770935,
-      0.2652782201766968
+      0.2535262703895569,
+      0.2508501410484314
     ],
     "router_SOCIO": [
-      0.029726259410381317,
-      0.03019680269062519
+      0.027887506410479546,
+      0.028491869568824768
     ],
     "router_LOWRANK": [
-      0.025844212621450424,
-      0.026285989210009575
+      0.022487688809633255,
+      0.02298521250486374
+    ],
+    "crossfit_FULL": [
+      0.683670699596405,
+      0.683670699596405
+    ],
+    "crossfit_GEO": [
+      0.2543320059776306,
+      0.2543320059776306
+    ],
+    "crossfit_SOCIO": [
+      0.03355928510427475,
+      0.03355928510427475
+    ],
+    "crossfit_LOWRANK": [
+      0.028437944129109383,
+      0.028437944129109383
     ]
   },
   "references": {
