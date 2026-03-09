@@ -551,9 +551,17 @@ def build_cohort_residual_bundle(
     seed: int = 42,
     n_clusters: int = 96,
     append_seg_mean_to_geo: bool = True,
+    normalize_by_residual_std: bool = False,
 ) -> MVDataBundle:
     """
     Cohort-residual target normalisation based on train-only geo segments.
+
+    append_seg_mean_to_geo=False (G0a): only change is the residual target;
+      kNN geometry is identical to canonical A6f.
+
+    normalize_by_residual_std=True (G0c): divide y_residual by its own
+      train std (~0.83) instead of global std (~1.15), so Huber delta=1.0
+      is calibrated to the actual residual distribution.
     """
     ds = build_california_dataset(seed=seed)
     X, y = ds["X"], ds["y"]
@@ -570,7 +578,19 @@ def build_cohort_residual_bundle(
     segment_ids = _build_geo_segment_ids(raw_geo, train_idx, n_clusters=n_clusters, seed=seed)
     target_offset = _compute_segment_target_offsets(y, train_idx, segment_ids, fallback_mean=mean_t)
     y_residual = (y - target_offset).astype(np.float32)
-    y_norm = (y_residual / std_t).astype(np.float32)
+
+    if normalize_by_residual_std:
+        # Compute scale from train residuals so Huber delta=1.0 is correctly calibrated
+        residual_scale = float(np.std(y_residual[train_idx])) + 1e-8
+    else:
+        residual_scale = std_t
+    y_norm = (y_residual / residual_scale).astype(np.float32)
+
+    # Store the scale used so train.py can denormalize correctly
+    # target_stats["std"] is used in denorm: pred_raw = pred_norm * std_t + offset
+    # We override std in a copy so existing denorm code works unchanged
+    target_stats = dict(target_stats)
+    target_stats["std"] = residual_scale
 
     train_idx, val_idx, test_idx = maybe_truncate_splits(
         train_idx, val_idx, test_idx,

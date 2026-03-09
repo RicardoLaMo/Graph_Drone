@@ -37,8 +37,8 @@ def main() -> None:
     parser.add_argument(
         "--variants",
         nargs="+",
-        default=["raw", "g0"],
-        choices=["raw", "g0"],
+        default=["raw", "g0a"],
+        choices=["raw", "g0", "g0a", "g0c"],
     )
     parser.add_argument(
         "--output",
@@ -72,9 +72,36 @@ def main() -> None:
             smoke_val=200,
             smoke_test=200,
             seed=args.seed,
+            append_seg_mean_to_geo=True,
+            normalize_by_residual_std=False,
+        ),
+        "g0a": lambda: build_cohort_residual_bundle(
+            K=args.K,
+            smoke=args.smoke,
+            smoke_train=500,
+            smoke_val=200,
+            smoke_test=200,
+            seed=args.seed,
+            append_seg_mean_to_geo=False,   # G0a: only residual target; kNN unchanged
+            normalize_by_residual_std=False,
+        ),
+        "g0c": lambda: build_cohort_residual_bundle(
+            K=args.K,
+            smoke=args.smoke,
+            smoke_train=500,
+            smoke_val=200,
+            smoke_test=200,
+            seed=args.seed,
+            append_seg_mean_to_geo=False,   # G0c: residual target + proper scale calibration
+            normalize_by_residual_std=True,
         ),
     }
-    labels = {"raw": "A6f_raw", "g0": "G0_cohort_residual"}
+    labels = {
+        "raw": "A6f_raw",
+        "g0":  "G0_cohort_residual",
+        "g0a": "G0a_residual_only",
+        "g0c": "G0c_residual_rescaled",
+    }
 
     results = []
     t0 = time.time()
