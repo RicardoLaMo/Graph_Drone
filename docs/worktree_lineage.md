@@ -30,8 +30,10 @@ This repo has two different kinds of experiment history:
 ### MV-TabR-GoRA core line
 - path: `.worktrees/mv-tabr-gora`
 - branch: `feature/mv-tabr-gora`
-- result: A6f champion at **0.4063 RMSE**
+- result: A6f saved artifact **0.4063 RMSE** — not reproducible from fresh reruns (see note)
 - role: California branch-local line with `A0..A6f` ablation ladder
+- ⚠️ reproducibility note: fresh reruns of A6f from commit `c1ef39e` land at ~0.4295–0.4315
+  (MPS non-determinism); 0.4063 artifact is orphaned — do not use as absolute target
 
 ### MV-TabR-GoRA B-series (retrieval quality: pool expansion + score biases)
 - path: `.worktrees/mv-tabr-gora-rerank`
@@ -113,6 +115,44 @@ This repo has two different kinds of experiment history:
 - result: A6f=0.4081 | E0=0.4091 | E1=0.4115 | D0=0.4161 | E1D0=0.4121 (test RMSE)
 - finding: consumption side exhausted — A6f stays best; see findings for root cause analysis
 - status: **complete**
+
+### MV-TabR-GoRA G2 geo pool-mix + G0 cohort residual (Codex branch)
+- path: `.worktrees/mv-tabr-gora-g0g1-cohort-residual`
+- branch: `codex/mv-tabr-gora-g0g1-cohort-residual`
+- experiments:
+  - **G2_geo_poolmix96** (geo retrieval): replace k_seg=12 of K=24 FULL+GEO neighbors
+    with nearest same-KMeans-96-segment training points; same total budget; no arch change
+  - **G3_random_poolmix96** (control): same budget, random replacements → hurts
+  - **G0_cohort_residual** (failed): residual target + segment_mean in GEO combined → ep=3 collapse
+- **G2 results (3-seed paired, canonical Huber pipeline)**:
+  - A6f_raw mean: 0.4295 ± 0.0015 test RMSE (reproducible fresh baseline)
+  - G2 mean: **0.4241 ± 0.0021** test RMSE
+  - paired gain: **+0.0055 ± 0.0010** (consistent across all 3 seeds; G3 control hurts → community structure specifically helps)
+- **G2 is the new reproducible champion** at 0.4241 mean test RMSE
+- G0 finding: two confounders (residual target + GEO feature change combined); needs clean split
+- **G0a** (scaffolded, ready to run): `append_seg_mean_to_geo=False` → residual target only; kNN geometry identical to A6f
+- **G0c** (scaffolded, ready to run): G0a + `normalize_by_residual_std=True` → Huber delta=1.0 calibrated to residual std (~0.83)
+- run: `cd .worktrees/mv-tabr-gora-g0g1-cohort-residual && python experiments/mv_tabr_gora/scripts/run_cohort_residual.py --variants raw g0a g0c`
+- status: **G2 champion registered; G0a/G0c scaffolded (smoke ✅), full run pending**
+
+### TabPFN View Router (per-view TabPFN experts + GoRA-style routing)
+- path: `.worktrees/mv-tabpfn-view-router`
+- branch: `codex/mv-tabpfn-view-router`
+- hypothesis: 4 per-view TabPFN experts (FULL/GEO/SOCIO/LOWRANK) + learned soft router on
+  {sigma2_v, J_flat, mean_J} outperforms single global TabPFN
+- experiments:
+  - **P0_FULL** (single global TabPFN): mean=0.3932 ± 0.0038
+  - **P0_uniform** (equal-weight mix): mean=0.4379 — worse than P0_FULL
+  - **P0_sigma2** (inv-sigma2, no val labels): mean=0.4380 — worse than P0_FULL
+  - **P0_gora** (GoRA analytical formula, no val labels): mean=0.5196 — **fails** (too aggressive winner-take-all)
+  - **P0_router** (learned router, val meta-training): mean=0.3790 ± 0.0016
+  - **P0_crossfit** (5-fold OOF, clean protocol): mean=0.3790 ± 0.0016 — **validates P0_router**
+- **Key findings:**
+  - P0_gora failure: raw sigma2/J formula → winner-take-all, picks wrong views; routing signal requires learning
+  - P0_crossfit = P0_router at all 3 seeds → router not memorizing val labels; test gain is real
+  - 0.3790 < TabR (0.3829) < P0_FULL (0.3932): per-view specialisation + routing beats single global model
+- **status: complete (3-seed, clean OOF validation)**
+- report: `experiments/tabpfn_view_router/reports/p0_multiseed_ab.md`
 
 ### MV-TabR-GoRA DRST (dynamic candidate-pool retriever + EdgeMLP encoding)
 - path: `.worktrees/mv-tabr-gora-drst`
