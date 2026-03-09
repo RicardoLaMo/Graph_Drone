@@ -1,0 +1,238 @@
+{
+  "bundle_info": {
+    "n_train": 500,
+    "n_val": 200,
+    "n_test": 200,
+    "K": 24,
+    "V": 4,
+    "view_names": [
+      "FULL",
+      "GEO",
+      "SOCIO",
+      "LOWRANK"
+    ],
+    "view_dims": {
+      "FULL": 8,
+      "GEO": 2,
+      "SOCIO": 5,
+      "LOWRANK": 4
+    },
+    "d_model": 64,
+    "smoke": true
+  },
+  "reference_baselines": {
+    "TabR (champion)": 0.3829,
+    "TabM": 0.429,
+    "L2_stack_hgbr": 0.4292,
+    "HGBR": 0.443,
+    "GoRA v2 G2": 0.4546,
+    "GoRA v5 A0": 0.4738
+  },
+  "ablation_descriptions": {
+    "A0": "Global kNN (FULL view), uniform attention, label in KV",
+    "A1": "Per-view kNN, uniform routing, label in KV",
+    "A2": "Per-view kNN, sigma2_v routing + J-temperature",
+    "A3": "A2 + T(z_i^v \u2212 z_j^v) direction encoding in value",
+    "A4": "A3 + Q(q_i^v, q_j^v) quality-pair encoding in value",
+    "A5": "A4 + learned routing MLP",
+    "A6": "A5 + CrossViewMixer + \u03b2-gate (isolation/interaction blend)",
+    "A4f": "A3 + learned routing (no Q in value) [fixed]",
+    "A5f": "A3 + CrossViewMixer + \u03b2-gate (no Q in value) [fixed]",
+    "A6f": "A3 + learned routing + CrossViewMixer + \u03b2-gate (no Q) [fixed]"
+  },
+  "results": [
+    {
+      "best_epoch": 7,
+      "duration_seconds": 6.76,
+      "train": {
+        "rmse": 0.8484218120574951,
+        "mae": 0.6240604519844055,
+        "r2": 0.5284124757169008
+      },
+      "val": {
+        "rmse": 0.81890469789505,
+        "mae": 0.5895239114761353,
+        "r2": 0.5132309106946894
+      },
+      "test": {
+        "rmse": 0.933447003364563,
+        "mae": 0.6860138773918152,
+        "r2": 0.46185373116211537
+      },
+      "epoch_history": [
+        {
+          "epoch": 0,
+          "loss": 0.44540784507989883,
+          "val_rmse": 1.0945322513580322
+        },
+        {
+          "epoch": 1,
+          "loss": 0.3794940412044525,
+          "val_rmse": 0.9766021370887756
+        },
+        {
+          "epoch": 2,
+          "loss": 0.31627269834280014,
+          "val_rmse": 0.8914491534233093
+        },
+        {
+          "epoch": 3,
+          "loss": 0.2779641579836607,
+          "val_rmse": 0.8581525087356567
+        },
+        {
+          "epoch": 4,
+          "loss": 0.2638361118733883,
+          "val_rmse": 0.8494570255279541
+        },
+        {
+          "epoch": 5,
+          "loss": 0.24923224188387394,
+          "val_rmse": 0.830894410610199
+        },
+        {
+          "epoch": 6,
+          "loss": 0.24052702821791172,
+          "val_rmse": 0.8228135704994202
+        },
+        {
+          "epoch": 7,
+          "loss": 0.23487219400703907,
+          "val_rmse": 0.81890469789505
+        }
+      ],
+      "model": "A4f",
+      "description": "A3 + learned routing (no Q in value) [fixed]",
+      "n_params": 125397
+    },
+    {
+      "best_epoch": 7,
+      "duration_seconds": 4.61,
+      "train": {
+        "rmse": 0.8412603139877319,
+        "mae": 0.6198309659957886,
+        "r2": 0.5363401763602194
+      },
+      "val": {
+        "rmse": 0.8294150829315186,
+        "mae": 0.5956482887268066,
+        "r2": 0.5006557445683018
+      },
+      "test": {
+        "rmse": 0.9233527183532715,
+        "mae": 0.6785045862197876,
+        "r2": 0.4734298087354859
+      },
+      "epoch_history": [
+        {
+          "epoch": 0,
+          "loss": 0.44529780372977257,
+          "val_rmse": 1.1100168228149414
+        },
+        {
+          "epoch": 1,
+          "loss": 0.3809618353843689,
+          "val_rmse": 1.0296388864517212
+        },
+        {
+          "epoch": 2,
+          "loss": 0.3195965550839901,
+          "val_rmse": 0.9271202087402344
+        },
+        {
+          "epoch": 3,
+          "loss": 0.28037747181952,
+          "val_rmse": 0.8860225081443787
+        },
+        {
+          "epoch": 4,
+          "loss": 0.26702744886279106,
+          "val_rmse": 0.8678898811340332
+        },
+        {
+          "epoch": 5,
+          "loss": 0.2502357419580221,
+          "val_rmse": 0.840961217880249
+        },
+        {
+          "epoch": 6,
+          "loss": 0.23869234696030617,
+          "val_rmse": 0.8329970240592957
+        },
+        {
+          "epoch": 7,
+          "loss": 0.23545089922845364,
+          "val_rmse": 0.8294150829315186
+        }
+      ],
+      "model": "A5f",
+      "description": "A3 + CrossViewMixer + \u03b2-gate (no Q in value) [fixed]",
+      "n_params": 161858
+    },
+    {
+      "best_epoch": 7,
+      "duration_seconds": 3.43,
+      "train": {
+        "rmse": 0.8249716758728027,
+        "mae": 0.6141906976699829,
+        "r2": 0.5541213110902237
+      },
+      "val": {
+        "rmse": 0.8197098970413208,
+        "mae": 0.5858745574951172,
+        "r2": 0.5122732389761148
+      },
+      "test": {
+        "rmse": 0.9215036034584045,
+        "mae": 0.6732142567634583,
+        "r2": 0.4755367604982874
+      },
+      "epoch_history": [
+        {
+          "epoch": 0,
+          "loss": 0.4419793076813221,
+          "val_rmse": 1.0921273231506348
+        },
+        {
+          "epoch": 1,
+          "loss": 0.36886177584528923,
+          "val_rmse": 0.9822712540626526
+        },
+        {
+          "epoch": 2,
+          "loss": 0.3043708484619856,
+          "val_rmse": 0.9073839783668518
+        },
+        {
+          "epoch": 3,
+          "loss": 0.2722043786197901,
+          "val_rmse": 0.870919942855835
+        },
+        {
+          "epoch": 4,
+          "loss": 0.26097922399640083,
+          "val_rmse": 0.8528308272361755
+        },
+        {
+          "epoch": 5,
+          "loss": 0.24373970367014408,
+          "val_rmse": 0.8324543833732605
+        },
+        {
+          "epoch": 6,
+          "loss": 0.23323431052267551,
+          "val_rmse": 0.8236795663833618
+        },
+        {
+          "epoch": 7,
+          "loss": 0.22968824207782745,
+          "val_rmse": 0.8197098970413208
+        }
+      ],
+      "model": "A6f",
+      "description": "A3 + learned routing + CrossViewMixer + \u03b2-gate (no Q) [fixed]",
+      "n_params": 163030
+    }
+  ],
+  "total_seconds": 16.7
+}

@@ -1,0 +1,334 @@
+"""
+eval.py — Evaluation + head specialisation analysis for GoRA-Tabular.
+
+Required outputs:
+  - metrics.csv: per-model predictive metrics
+  - routing_stats.csv: head-view affinity matrix, entropy, tau
+  - figures: pi_heatmap.png, head_view_affinity.png, per_bin_metric.png, tau_distribution.png
+"""
+import numpy as np
+import pandas as pd
+import torch
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import seaborn as sns
+from pathlib import Path
+from sklearn.metrics import (accuracy_score, f1_score, mean_squared_error,
+                              mean_absolute_error, r2_score, log_loss)
+from scipy.stats import entropy as scipy_entropy
+from typing import Dict, List
+import datetime
+
+
+def score(name, y_true, y_pred, task, y_proba=None):
+    if task == "regression":
+        rmse = float(mean_squared_error(y_true, y_pred) ** 0.5)
+        mae = float(mean_absolute_error(y_true, y_pred))
+        r2 = float(r2_score(y_true, y_pred))
+        print(f"  [{name}] RMSE={rmse:.4f} MAE={mae:.4f} R2={r2:.4f}")
+        return {"model": name, "rmse": rmse, "mae": mae, "r2": r2}
+    else:
+        acc = float(accuracy_score(y_true, y_pred))
+        f1 = float(f1_score(y_true, y_pred, average="macro", zero_division=0))
+        ll = float(log_loss(y_true, y_proba)) if y_proba is not None else float("nan")
+        print(f"  [{name}] Acc={acc:.4f} F1={f1:.4f} LogLoss={ll:.4f}")
+        return {"model": name, "accuracy": acc, "macro_f1": f1, "log_loss": ll}
+
+
+def head_specialisation(pi_all: np.ndarray, view_tags: List[str]) -> pd.DataFrame:
+    """
+    pi_all: [N, H, M]
+    Returns head-view affinity matrix [H, M] + routing entropy per head.
+    Analogous to GoRA Table 5.
+    """
+    H, M = pi_all.shape[1], pi_all.shape[2]
+    rows = []
+    for h in range(H):
+        pi_h = pi_all[:, h, :]          # [N, M]
+        mean_pi = pi_h.mean(0)          # [M]
+        top1 = pi_h.argmax(-1)
+        top1_freq = np.bincount(top1, minlength=M) / len(top1)
+        ent = scipy_entropy(mean_pi + 1e-9)
+        dominant_view = view_tags[mean_pi.argmax()]
+        row = {"head_idx": h, "entropy": float(ent), "dominant_view": dominant_view}
+        for vi, vname in enumerate(view_tags):
+            row[f"mean_pi_{vname}"] = float(mean_pi[vi])
+            row[f"top1_freq_{vname}"] = float(top1_freq[vi])
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def bin_metric(preds, y_true, kappa_bins, task, model_name):
+    rows = []
+    for b in ["low", "medium", "high"]:
+        mask = kappa_bins == b
+        if mask.sum() == 0: continue
+        if task == "regression":
+            val = float(mean_squared_error(y_true[mask], preds[mask]) ** 0.5)
+            rows.append({"model": model_name, "bin": b, "rmse": val, "n": int(mask.sum())})
+        else:
+            val = float(accuracy_score(y_true[mask], preds[mask]))
+            rows.append({"model": model_name, "bin": b, "accuracy": val, "n": int(mask.sum())})
+    return rows
+
+
+# ─── Figures ──────────────────────────────────────────────────────────────────
+
+def fig_head_affinity(spec_df: pd.DataFrame, view_tags: List[str], fig_dir: Path, name: str):
+    """Head-view affinity heatmap (GoRA Table 5 equivalent)."""
+    cols = [f"mean_pi_{v}" for v in view_tags]
+    matrix = spec_df[cols].values    # [H, M]
+    fig, ax = plt.subplots(figsize=(max(4, len(view_tags) * 1.5), max(3, len(spec_df) * 0.8)))
+    sns.heatmap(matrix, ax=ax, xticklabels=view_tags,
+                yticklabels=[f"Head {h}" for h in spec_df.head_idx.values],
+                annot=True, fmt=".2f", cmap="Blues", vmin=0, vmax=1)
+    ax.set_title(f"Head-View Affinity (mean π_{{i,h,m}}) — {name}")
+    ax.set_xlabel("View"); ax.set_ylabel("Head")
+    plt.tight_layout(); plt.savefig(fig_dir / f"head_view_affinity_{name}.png", dpi=150); plt.close()
+
+
+def fig_pi_spread(pi_all: np.ndarray, view_tags: List[str], fig_dir: Path, name: str):
+    """Distribution of routing weights per view across all rows, head 0."""
+    pi_h0 = pi_all[:, 0, :]    # [N, M]
+    fig, axes = plt.subplots(1, len(view_tags),
+                              figsize=(3.5 * len(view_tags), 3.5), sharey=True)
+    if len(view_tags) == 1: axes = [axes]
+    for ax, vi, vn in zip(axes, range(len(view_tags)), view_tags):
+        ax.hist(pi_h0[:, vi], bins=40, color="#4C72B0", alpha=0.8, edgecolor="none")
+        ax.set_title(f"π[head0, {vn}]"); ax.set_xlabel("weight"); ax.set_xlim(0, 1)
+    plt.suptitle(f"Routing weight distributions — {name}"); plt.tight_layout()
+    plt.savefig(fig_dir / f"pi_distribution_{name}.png", dpi=150); plt.close()
+
+
+def fig_tau(tau: np.ndarray, fig_dir: Path, name: str):
+    """Per-head temperature τ_h."""
+    fig, ax = plt.subplots(figsize=(max(4, len(tau) * 0.8), 3))
+    ax.bar(range(len(tau)), tau, color="#DD8452")
+    ax.set_xlabel("Head"); ax.set_ylabel("τ (temperature)"); ax.set_title(f"Per-head τ — {name}")
+    plt.tight_layout(); plt.savefig(fig_dir / f"tau_{name}.png", dpi=150); plt.close()
+
+
+def fig_per_bin(bin_rows: list, task: str, fig_dir: Path, name: str):
+    df = pd.DataFrame(bin_rows)
+    if df.empty: return
+    metric = "rmse" if task == "regression" else "accuracy"
+    models = df.model.unique()
+    bins = ["low", "medium", "high"]
+    x = np.arange(3); w = 0.8 / max(len(models), 1)
+    fig, ax = plt.subplots(figsize=(8, 4))
+    palette = sns.color_palette("muted", len(models))
+    for idx, m in enumerate(models):
+        sub = df[df.model == m]
+        vals = [sub[sub.bin == b][metric].values[0] if (sub.bin == b).any() else 0 for b in bins]
+        ax.bar(x + idx * w - 0.4 + w / 2, vals, w, label=m, color=palette[idx])
+    ax.set_xticks(x); ax.set_xticklabels(["Low κ", "Med κ", "High κ"])
+    ax.set_ylabel(metric); ax.set_title(f"Per-bin metric — {name}")
+    ax.legend(fontsize=7); plt.tight_layout()
+    plt.savefig(fig_dir / f"per_bin_{name}.png", dpi=150); plt.close()
+
+
+# ─── Report ───────────────────────────────────────────────────────────────────
+
+def write_report(name, task, metrics, spec_df, tau, view_tags, n_heads, rep_path):
+    ts = datetime.datetime.now().strftime("%Y-%m-%d")
+    m_df = pd.DataFrame(metrics)
+
+    g2 = m_df[m_df.model == "G2_GoRA"]
+    g3 = m_df[m_df.model == "G3_Uniform"]
+    b1 = m_df[m_df.model == "B1_HGBR"]
+
+    key = "rmse" if task == "regression" else "accuracy"
+    better = lambda a, b: (a < b) if task == "regression" else (a > b)
+
+    g2v = g2[key].values[0] if len(g2) else None
+    g3v = g3[key].values[0] if len(g3) else None
+    b1v = b1[key].values[0] if len(b1) else None
+
+    routing_helps = g2v and g3v and better(g2v, g3v)
+    gora_beats_baseline = g2v and b1v and better(g2v, b1v)
+
+    g2s = f"{g2v:.4f}" if g2v is not None else "N/A"
+    g3s = f"{g3v:.4f}" if g3v is not None else "N/A"
+    b1s = f"{b1v:.4f}" if b1v is not None else "N/A"
+
+    lines = [
+        f"# GoRA-Tabular: {name}",
+        f"*{ts}* | Branch: `feature/gora-tabular-routing`\n",
+        "## Architecture",
+        "- **Routing semantics:** π_{i,h,m} from MoERouter(g_i) shapes attention logits:",
+        "  `logit_{ij}^h = <q^h,k^h>/√d + log(τ_h · Ã_{ij}^{i,h} + ε)`",
+        "- **Routing is inside the softmax**, not a downstream combiner.",
+        "- **Isolation vs interaction** is structural: a peaked π confines the softmax to",
+        "  one view's neighbourhood; flat π spans all views.",
+        f"- **Routing scope (this pass):** per-row, per-head (H={n_heads} heads).\n",
+        "## Models",
+        "| ID | Description |",
+        "|----|-------------|",
+        "| B0 | MLP |",
+        "| B1 | HGBR |",
+        "| G0 | Standard Transformer (no graph) |",
+        f"| G1 | Single-view Transformer (fixed best view) |",
+        "| **G2** | **GoRA-Tabular (full routing)** |",
+        "| G3 | Uniform-π ablation (no geometry) |",
+        "| G4 | Shuffled-g ablation (geometry destroyed) |\n",
+        "## Metrics\n",
+        m_df.to_markdown(index=False),
+        "\n## Head-View Affinity (GoRA Table 5 equivalent)\n",
+        spec_df.to_markdown(index=False),
+        f"\n## Per-head temperature τ (learned): {[f'{t:.3f}' for t in tau]}\n",
+        "## Audit Conclusion",
+        f"- G2 routing beats G3 uniform? **{'YES' if routing_helps else 'NO'}** "
+        f"(G2={g2s}, G3={g3s} {key})",
+        f"- G2 beats strong tabular baseline (B1)? **{'YES' if gora_beats_baseline else 'NO'}** "
+        f"(G2={g2s}, B1={b1s})",
+        "",
+        "## What makes this different from prior experiments",
+        "- Prior: frozen reps → ObserverRouter → reweighting (post-hoc, Model A pattern)",
+        "- This: g_i → π_{i,h,m} → logit bias inside softmax → representation formation",
+        "- The graph neighbourhood each head sees is determined BEFORE embedding is complete.",
+    ]
+    rep_path.write_text("\n".join(lines))
+    print(f"[report] Saved: {rep_path}")
+
+
+def write_report_v2(name, task, metrics, spec_dict, tau, agree_score, view_tags, n_heads, rep_path):
+    """v2 report: multiple models in spec_dict, agree_score summary, TabPFN row."""
+    ts = datetime.datetime.now().strftime("%Y-%m-%d")
+    m_df = pd.DataFrame(metrics)
+    key = "rmse" if task == "regression" else "accuracy"
+    better = lambda a, b: (a < b) if task == "regression" else (a > b)
+
+    def _val(model_id):
+        row = m_df[m_df.model == model_id]
+        return float(row[key].values[0]) if len(row) and not pd.isna(row[key].values[0]) else None
+
+    g2v = _val("G2_GoRA_v1"); g5v = _val("G5_Joint"); g6v = _val("G6_Joint_Reg")
+    g3pv = _val("G3p_Uniform_Joint"); b1v = _val("B1_HGBR"); b2v = _val("B2_TabPFN")
+
+    def _fmt(v): return f"{v:.4f}" if v is not None else "N/A"
+
+    joint_helps = g5v is not None and g2v is not None and better(g5v, g2v)
+    reg_helps = g6v is not None and g5v is not None and better(g6v, g5v)
+    gora_beats_b1 = g5v is not None and b1v is not None and better(g5v, b1v)
+    gora_beats_tabpfn = g5v is not None and b2v is not None and better(g5v, b2v)
+
+    mean_ag = float(np.mean(agree_score)) if agree_score is not None else float("nan")
+
+    lines = [
+        f"# GoRA-Tabular v2: {name}",
+        f"*{ts}* | Branch: `feature/gora-joint-knn`\n",
+        "## Architecture upgrade: joint-view kNN",
+        "Each view m independently nominates K_each=5 neighbours.",
+        "Union pool P = ∪_m kNN_m(i). Edge weight w^(m)_{ij}=0 if j∉kNN_m(i).",
+        "Routing entropy aligned with view agreement (G6 only).\n",
+        "## Metrics\n",
+        m_df.to_markdown(index=False),
+        "\n## Ablation results",
+        f"- G5 (joint) vs G2 (single-primary): **{'✅ JOINT BETTER' if joint_helps else '❌ no gain'}** "
+        f"G5={_fmt(g5v)} G2={_fmt(g2v)} {key}",
+        f"- G6 (+ routing loss) vs G5: **{'✅ REG HELPS' if reg_helps else '❌ no gain'}** "
+        f"G6={_fmt(g6v)} G5={_fmt(g5v)}",
+        f"- G5 vs G3' (uniform+joint): G5={_fmt(g5v)} G3'={_fmt(g3pv)} — "
+        f"**{'routing > uniform' if g5v is not None and g3pv is not None and better(g5v, g3pv) else 'uniform competitive'}**",
+        f"- G5 vs B1 (HGBR): **{'✅ GoRA wins' if gora_beats_b1 else '❌ HGBR still leads'}** "
+        f"G5={_fmt(g5v)} B1={_fmt(b1v)}",
+        f"- G5 vs B2 (TabPFN): **{'✅ GoRA wins' if gora_beats_tabpfn else '❌ TabPFN leads'}** "
+        f"G5={_fmt(g5v)} B2={_fmt(b2v)}",
+        f"\n## View agreement score",
+        f"Mean agree_score = {mean_ag:.3f} (0=all views disagree, 1=all views nominate same neighbours)",
+        "\n## Head-View Affinity by model\n",
+    ]
+    for mname, sp in spec_dict.items():
+        if len(sp):
+            lines += [f"### {mname}", sp.to_markdown(index=False), ""]
+
+    if tau is not None and len(tau):
+        lines.append(f"\n## Per-head τ (G5): {[f'{t:.3f}' for t in tau]}")
+
+    rep_path.write_text("\n".join(lines))
+    print(f"[report v2] Saved: {rep_path}")
+
+
+def write_report_v3(name, task, metrics, spec_dict, agree_score, view_tags, n_heads, rep_path):
+    """
+    v3 report: MQ-GoRA ablation ladder (G7→G8→G9→G10).
+
+    Ablation gates checked:
+      G8 > G7: label context helps (dual-duty router + value aug)
+      G9 > G8: teacher query helps (manifold-guided reading > avg-pool)
+      G10 > G9: alpha gate helps (local-vs-transformer blend)
+      G10 > B1: GoRA v3 beats strong tabular baseline
+      G10 > B2: GoRA v3 beats TabPFN
+    """
+    ts = datetime.datetime.now().strftime("%Y-%m-%d")
+    m_df = pd.DataFrame(metrics)
+    key = "rmse" if task == "regression" else "accuracy"
+    better = lambda a, b: (a < b) if task == "regression" else (a > b)
+
+    def _val(model_id):
+        row = m_df[m_df.model == model_id]
+        return float(row[key].values[0]) if len(row) and not pd.isna(row[key].values[0]) else None
+
+    def _fmt(v): return f"{v:.4f}" if v is not None else "N/A"
+
+    g2v  = _val("G2_GoRA_v1")
+    g7v  = _val("G7_RichCtx")
+    g8v  = _val("G8_LabelCtx")
+    g9v  = _val("G9_Teacher")
+    g10v = _val("G10_Full")
+    b1v  = _val("B1_HGBR")
+    b2v  = _val("B2_TabPFN")
+
+    mean_ag = float(np.mean(agree_score)) if agree_score is not None else float("nan")
+
+    ablation_lines = [
+        "\n## Ablation ladder (G7 → G10)\n",
+        "| Gate | Δ component | Result |",
+        "|------|-------------|--------|",
+        f"| G7 vs G2 | +ViewSpecificEmbed +ctx^(m) in router | "
+        f"**{'✅' if g7v is not None and g2v is not None and better(g7v, g2v) else '❌'}** "
+        f"G7={_fmt(g7v)} G2={_fmt(g2v)} |",
+        f"| G8 vs G7 | +label_ctx (router + value aug) | "
+        f"**{'✅' if g8v is not None and g7v is not None and better(g8v, g7v) else '❌'}** "
+        f"G8={_fmt(g8v)} G7={_fmt(g7v)} |",
+        f"| G9 vs G8 | +teacher z_anc as cross-attn query | "
+        f"**{'✅' if g9v is not None and g8v is not None and better(g9v, g8v) else '❌'}** "
+        f"G9={_fmt(g9v)} G8={_fmt(g8v)} |",
+        f"| G10 vs G9 | +alpha-gate prediction fusion | "
+        f"**{'✅' if g10v is not None and g9v is not None and better(g10v, g9v) else '❌'}** "
+        f"G10={_fmt(g10v)} G9={_fmt(g9v)} |",
+        f"| G10 vs B1 | GoRA v3 vs HGBR | "
+        f"**{'✅ MQ-GoRA wins' if g10v is not None and b1v is not None and better(g10v, b1v) else '❌ HGBR still leads'}** "
+        f"G10={_fmt(g10v)} B1={_fmt(b1v)} |",
+        f"| G10 vs B2 | GoRA v3 vs TabPFN | "
+        f"**{'✅ MQ-GoRA wins' if g10v is not None and b2v is not None and better(g10v, b2v) else '❌ TabPFN leads'}** "
+        f"G10={_fmt(g10v)} B2={_fmt(b2v)} |",
+    ]
+
+    lines = [
+        f"# GoRA-Tabular v3 (MQ-GoRA): {name}",
+        f"*{ts}* | Branch: `claude/funny-davinci`\n",
+        "## Architecture: Manifold-Query GoRA",
+        "Teacher f_T: x_i → z_i encodes manifold geometry (agree_score, label centroid, neighbour centroid).",
+        "Student stages:",
+        "  A. ViewSpecificEmbedder: M separate projections → view-discriminative values",
+        "  B. LabelContextEncoder: per-view label stats → router input + value augmentation",
+        "  C. ManifoldReader: z_i-queried cross-attention → ctx_vec (or avg-pool for G7/G8)",
+        "  D. RichMoERouter: [g_anc; z_anc; label_ctx; ctx_vec] → pi, tau",
+        "  E. SparseGeomLayers (unchanged)",
+        "  F. AlphaGate: pred_final = (1-α)·pred_base + α·pred_local (G10 only)\n",
+        "## Metrics\n",
+        m_df.to_markdown(index=False),
+    ] + ablation_lines + [
+        f"\n## View agreement score",
+        f"Mean agree_score = {mean_ag:.3f}",
+        "\n## Head-View Affinity by model\n",
+    ]
+
+    for mname, sp in spec_dict.items():
+        if len(sp):
+            lines += [f"### {mname}", sp.to_markdown(index=False), ""]
+
+    rep_path.write_text("\n".join(lines))
+    print(f"[report v3] Saved: {rep_path}")

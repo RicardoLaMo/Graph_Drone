@@ -1,0 +1,4 @@
+model,metric,current,reference,delta,status
+B1_HGBR,rmse/accuracy,not-run-in-integrity,see v3 metrics CSVs,n/a,PENDING
+G2_GoRA_v1,rmse/accuracy,not-run-in-integrity,see v3 metrics CSVs,n/a,PENDING
+G10_Full,rmse/accuracy,not-run-in-integrity,see v3 metrics CSVs,n/a,PENDING

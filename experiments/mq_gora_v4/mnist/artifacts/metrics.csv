@@ -1,0 +1,15 @@
+tag,source,best_ep,stop_ep,collapsed,change,interp,accuracy,macro_f1,log_loss
+B1_HGBR,current_run,—,—,False,reference baseline,Strong tabular baseline for calibration,0.9573333333333334,0.9570605393380797,
+G2_ref,current_run,v1,v1,False,GoRA carry-forward reference,Reference GoRA path before v4 split-track changes,0.9293333333333333,0.9283166508385436,0.2722559760606498
+G10_ref,current_run,v3,v3,False,Exact v3 G10 reproduction,Protected baseline before any MNIST routing changes,0.932,0.9310256703939814,0.2574195105996732
+MN_v4a,current_run,7,27,True,Protected v4 path matching G10 ingredients,Locked alpha-gate baseline under v4 routing path,0.9333333333333333,0.9323584562984047,0.24967480928184288
+MN_v4b,current_run,7,27,True,MN_v4a + mild diversity regulariser,Incremental specialization pressure with alpha gate preserved,0.932,0.9312058906314157,0.24763684774193773
+MN_v4c,current_run,5,25,True,MN_v4b + stronger diversity,More explicit anti-collapse pressure; only justified if accuracy holds,0.926,0.9250901034510829,0.26227541586523095
+MN_v4d,current_run,6,26,True,MN_v4c + label-ctx LayerNorm,Optional anti-collapse variant with extra scale control,0.932,0.9310200940645658,0.23655050524930904
+B1_HGBR,saved_v3,—,—,False,saved reference,Historical v3 result,0.958,0.9576788610249012,0.1882160308867061
+B2_TabPFN,saved_v3,—,—,False,saved reference,Historical v3 result,,,
+G2_GoRA_v1,saved_v3,—,—,False,saved reference,Historical v3 result,0.93,0.9293864109040596,0.2589964332221141
+G7_RichCtx,saved_v3,—,—,False,saved reference,Historical v3 result,0.9266666666666666,0.9257917630921744,0.2754733893834442
+G8_LabelCtx,saved_v3,—,—,False,saved reference,Historical v3 result,0.9306666666666666,0.9300028421310422,0.2726806053806933
+G9_Teacher,saved_v3,—,—,False,saved reference,Historical v3 result,0.9346666666666666,0.934031095504412,0.2799141950546748
+G10_Full,saved_v3,—,—,False,saved reference,Historical v3 result,0.938,0.9373671668468508,0.237162088195551

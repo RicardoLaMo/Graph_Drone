@@ -1,0 +1,15 @@
+branch: feature/mq-gora-v4-split-track
+integrity:
+  run_reference_rows: true
+  check_interface_compatibility: true
+  check_shape_sanity: true
+  check_precompute_timing: true
+shared:
+  seed: 42
+  d_model: 64
+  n_heads: 4
+  n_layers: 2
+  ff_dim: 128
+  d_z: 64
+  dropout: 0.1
+  batch_size: 512

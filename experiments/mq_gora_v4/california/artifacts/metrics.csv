@@ -1,0 +1,16 @@
+tag,source,best_ep,stop_ep,collapsed,change,interp,rmse,mae,r2
+B1_HGBR,current_run,—,—,False,reference baseline,Strong tabular baseline for calibration,0.4432922009906094,0.3006575107574463,0.8513904809951782
+G2_ref,current_run,v1,v1,False,v3/v1 carry-forward,Reference GoRA without v4 split-track changes,0.4514591739008879,0.30931827425956726,0.8458641767501831
+G10_ref,current_run,v3,v3,False,Exact v3 rich-context reproduction,"Used for integrity/reference comparison, not as a v4 fix",0.5022915838276582,0.35231849551200867,0.8091999888420105
+CA_v4a,current_run,34,74,False,Remove LabelContextEncoder entirely,Regression-safe structural routing only,0.4718702574990543,0.32563719153404236,0.8316117525100708
+CA_v4b,current_run,39,79,False,CA_v4a + normalised label context,"Experimental target-derived context, normalised and train-masked",0.5696306725312278,0.38289663195610046,0.7546120285987854
+CA_v4c,current_run,27,67,False,CA_v4b + LayerNorm(label_ctx_vec),Adds router-side scale control to label context,0.5328290136916096,0.3663775622844696,0.7852949500083923
+CA_v4d,current_run,43,83,False,CA_v4c + teacher-lite (L_agree + L_label),Teacher-lite without centroid loss,0.5418531634760869,0.36126285791397095,0.7779607176780701
+CA_v4e,current_run,59,99,False,CA_v4d + healthier scheduler / patience,Longer patience with cosine schedule,0.5316359296222785,0.35273051261901855,0.7862553596496582
+B1_HGBR,saved_v3,—,—,False,saved reference,Historical v3 result,0.4432922009906094,0.3006575107574463,0.8513904809951782
+B2_TabPFN,saved_v3,—,—,False,saved reference,Historical v3 result,,,
+G2_GoRA_v1,saved_v3,—,—,False,saved reference,Historical v3 result,0.4546429759770185,0.3148115575313568,0.8436825275421143
+G7_RichCtx,saved_v3,—,—,False,saved reference,Historical v3 result,0.4928804696379642,0.3440114855766296,0.8162828087806702
+G8_LabelCtx,saved_v3,—,—,False,saved reference,Historical v3 result,0.5169086372934273,0.3683824241161346,0.7979335784912109
+G9_Teacher,saved_v3,—,—,False,saved reference,Historical v3 result,0.5098598583130648,0.3595902919769287,0.8034069538116455
+G10_Full,saved_v3,—,—,False,saved reference,Historical v3 result,0.5209055627965608,0.3660699427127838,0.7947965860366821

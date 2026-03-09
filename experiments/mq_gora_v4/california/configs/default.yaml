@@ -1,0 +1,28 @@
+dataset: california
+task: regression
+views:
+  - FULL
+  - GEO
+  - SOCIO
+  - LOWRANK
+training:
+  epochs: 150
+  teacher_epochs: 200
+  patience: 40
+  lr: 0.001
+  batch_size: 512
+  use_cosine_for_ca_v4e: true
+variants:
+  - G2_ref
+  - G10_ref
+  - CA_v4a
+  - CA_v4b
+  - CA_v4c
+  - CA_v4d
+  - CA_v4e
+california_fixes:
+  normalize_label_context: true
+  layernorm_label_ctx_vec: true
+  teacher_skip_centroid_loss: true
+  teacher_lam_agree: 1.0
+  teacher_lam_label: 0.5

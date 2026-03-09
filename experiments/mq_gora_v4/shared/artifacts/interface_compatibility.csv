@@ -1,0 +1,5 @@
+model,accepts_view_mask,accepts_z_anc,accepts_lbl_nei,accepts_agree_score,accepts_extra_kwargs,status,note
+GoraTransformer,Y,Y,Y,Y,Y,PASS,tuple_len=3
+StandardTransformer,Y,Y,Y,Y,Y,PASS,tuple_len=3
+SingleViewTransformer,Y,Y,Y,Y,Y,PASS,tuple_len=3
+MQGoraV4,Y,Y,Y,Y,Y,PASS,tuple_len=6
