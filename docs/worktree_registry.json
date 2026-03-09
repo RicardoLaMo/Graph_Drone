@@ -1,0 +1,471 @@
+{
+  "repo_root": "/Volumes/MacMini/Projects/Graph_Drone",
+  "generated_at_utc": "2026-03-09T18:48:38+00:00",
+  "current_checkout": {
+    "path": "/Volumes/MacMini/Projects/Graph_Drone",
+    "repo_relative_path": ".",
+    "branch": "feature/gora-v5-trust-routing",
+    "head": "0963788"
+  },
+  "worktrees": [
+    {
+      "path": "/Volumes/MacMini/Projects/Graph_Drone",
+      "repo_relative_path": ".",
+      "branch": "feature/gora-v5-trust-routing",
+      "head": "09637888cb775f4c66f3794d203f7e290c8bebed",
+      "is_current_checkout": true,
+      "experiment_families": [
+        "gora_tabular",
+        "head_routing_v5",
+        "mq_gora_v4"
+      ],
+      "primary_focus": "head_routing_v5",
+      "lineage_role": "current-checkout",
+      "purpose": "primary working checkout",
+      "status": "current"
+    },
+    {
+      "path": "/private/tmp/graphdrone-main-worktree",
+      "repo_relative_path": "/private/tmp/graphdrone-main-worktree",
+      "branch": "main",
+      "head": "6cdf36607c2e36c571b824c3119d68ccf3c962cb",
+      "is_current_checkout": false,
+      "experiment_families": [],
+      "primary_focus": "other",
+      "lineage_role": "other",
+      "purpose": "auxiliary worktree",
+      "status": "sibling-worktree"
+    },
+    {
+      "path": "/Volumes/MacMini/Projects/Graph_Drone/.claude/worktrees/funny-davinci",
+      "repo_relative_path": ".claude/worktrees/funny-davinci",
+      "branch": "claude/funny-davinci",
+      "head": "1903f5ab55b0bb3a7c8e5d3dbec8db1d3054c49f",
+      "is_current_checkout": false,
+      "experiment_families": [
+        "gora_tabular"
+      ],
+      "primary_focus": "gora_tabular_v3_snapshot",
+      "lineage_role": "early-v3-snapshot",
+      "purpose": "Claude Code v3 snapshot worktree",
+      "status": "sibling-worktree"
+    },
+    {
+      "path": "/Volumes/MacMini/Projects/Graph_Drone/.claude/worktrees/tender-goldstine",
+      "repo_relative_path": ".claude/worktrees/tender-goldstine",
+      "branch": "claude/tender-goldstine",
+      "head": "6cdf36607c2e36c571b824c3119d68ccf3c962cb",
+      "is_current_checkout": false,
+      "experiment_families": [],
+      "primary_focus": "other",
+      "lineage_role": "other",
+      "purpose": "auxiliary worktree",
+      "status": "sibling-worktree"
+    },
+    {
+      "path": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/california-retrieval-validation-pyramid",
+      "repo_relative_path": ".worktrees/california-retrieval-validation-pyramid",
+      "branch": "feature/california-retrieval-validation-pyramid",
+      "head": "9382bdac138d30600b5848fac3ef62f90ee231a6",
+      "is_current_checkout": false,
+      "experiment_families": [
+        "gora_tabular",
+        "head_routing_v5",
+        "mq_gora_v4"
+      ],
+      "primary_focus": "head_routing_v5",
+      "lineage_role": "tracked-v5-family",
+      "purpose": "tracked v5 trust-routing experiment family",
+      "status": "sibling-worktree"
+    },
+    {
+      "path": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/california-tab-foundation-compare",
+      "repo_relative_path": ".worktrees/california-tab-foundation-compare",
+      "branch": "feature/california-tab-foundation-compare",
+      "head": "a325129d3a629e1f793817df3e94001181a7edef",
+      "is_current_checkout": false,
+      "experiment_families": [],
+      "primary_focus": "california_tab_foundation_compare",
+      "lineage_role": "other",
+      "purpose": "auxiliary worktree",
+      "status": "sibling-worktree"
+    },
+    {
+      "path": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/california-v35-routed-regression",
+      "repo_relative_path": ".worktrees/california-v35-routed-regression",
+      "branch": "feature/california-v35-routed-regression",
+      "head": "359f51b8afd5fe654b42675cc71ff6086f2da1e0",
+      "is_current_checkout": false,
+      "experiment_families": [],
+      "primary_focus": "california_v35_routed_regression",
+      "lineage_role": "other",
+      "purpose": "auxiliary worktree",
+      "status": "sibling-worktree"
+    },
+    {
+      "path": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/head-gated-decoder",
+      "repo_relative_path": ".worktrees/head-gated-decoder",
+      "branch": "feature/head-gated-decoder",
+      "head": "bc6d9ed42a5d5e265ea367c401e3b2d3b2c683df",
+      "is_current_checkout": false,
+      "experiment_families": [],
+      "primary_focus": "other",
+      "lineage_role": "other",
+      "purpose": "auxiliary worktree",
+      "status": "sibling-worktree"
+    },
+    {
+      "path": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/mv-dynknn-routed-retriever",
+      "repo_relative_path": ".worktrees/mv-dynknn-routed-retriever",
+      "branch": "codex/mv-dynknn-routed-retriever",
+      "head": "7ab9c01ded0b9f72227fee52e558ecbefc611f35",
+      "is_current_checkout": false,
+      "experiment_families": [
+        "gora_tabular",
+        "head_routing_v5",
+        "mq_gora_v4",
+        "mv_tabr_gora"
+      ],
+      "primary_focus": "head_routing_v5",
+      "lineage_role": "mv-tabr-core",
+      "purpose": "mv-tabr california core experiment",
+      "status": "sibling-worktree"
+    },
+    {
+      "path": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/mv-evidence-calibrated-consumer",
+      "repo_relative_path": ".worktrees/mv-evidence-calibrated-consumer",
+      "branch": "codex/mv-evidence-calibrated-consumer",
+      "head": "9d38a8dd537ee28824063bce5845473f1670b6e3",
+      "is_current_checkout": false,
+      "experiment_families": [
+        "gora_tabular",
+        "head_routing_v5",
+        "mq_gora_v4",
+        "mv_tabr_gora"
+      ],
+      "primary_focus": "head_routing_v5",
+      "lineage_role": "mv-tabr-core",
+      "purpose": "mv-tabr california core experiment",
+      "status": "sibling-worktree"
+    },
+    {
+      "path": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/mv-geo-segmentation-priors",
+      "repo_relative_path": ".worktrees/mv-geo-segmentation-priors",
+      "branch": "codex/mv-geo-segmentation-priors",
+      "head": "10b5f57685d70444915d1f4a39587442c219f5ab",
+      "is_current_checkout": false,
+      "experiment_families": [
+        "gora_tabular",
+        "head_routing_v5",
+        "mq_gora_v4",
+        "mv_tabr_gora"
+      ],
+      "primary_focus": "head_routing_v5",
+      "lineage_role": "mv-tabr-core",
+      "purpose": "mv-tabr california core experiment",
+      "status": "sibling-worktree"
+    },
+    {
+      "path": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/mv-gora-validation",
+      "repo_relative_path": ".worktrees/mv-gora-validation",
+      "branch": "feature/mv-gora-retrieval-validation",
+      "head": "cbd457b817e2e45c054315030344e894ae8d41f1",
+      "is_current_checkout": false,
+      "experiment_families": [
+        "gora_tabular",
+        "head_routing_v5",
+        "mq_gora_v4"
+      ],
+      "primary_focus": "head_routing_v5",
+      "lineage_role": "tracked-v5-family",
+      "purpose": "tracked v5 trust-routing experiment family",
+      "status": "sibling-worktree"
+    },
+    {
+      "path": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/mv-tabr-gora",
+      "repo_relative_path": ".worktrees/mv-tabr-gora",
+      "branch": "feature/mv-tabr-gora",
+      "head": "c1ef39eec81afa2950b4cf9777cd80efadae70f2",
+      "is_current_checkout": false,
+      "experiment_families": [
+        "gora_tabular",
+        "head_routing_v5",
+        "mq_gora_v4",
+        "mv_tabr_gora"
+      ],
+      "primary_focus": "head_routing_v5",
+      "lineage_role": "mv-tabr-core",
+      "purpose": "mv-tabr california core experiment",
+      "status": "sibling-worktree"
+    },
+    {
+      "path": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/mv-tabr-gora-a10a-scale256",
+      "repo_relative_path": ".worktrees/mv-tabr-gora-a10a-scale256",
+      "branch": "feature/mv-tabr-gora-a10a-scale256",
+      "head": "8b90e1173e71b0479171c08a9c6d0541e16be26a",
+      "is_current_checkout": false,
+      "experiment_families": [
+        "gora_tabular",
+        "head_routing_v5",
+        "mq_gora_v4",
+        "mv_tabr_gora"
+      ],
+      "primary_focus": "head_routing_v5",
+      "lineage_role": "mv-tabr-core",
+      "purpose": "mv-tabr california core experiment",
+      "status": "sibling-worktree"
+    },
+    {
+      "path": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/mv-tabr-gora-a10b-dynamic-knn",
+      "repo_relative_path": ".worktrees/mv-tabr-gora-a10b-dynamic-knn",
+      "branch": "feature/mv-tabr-gora-a10b-dynamic-knn",
+      "head": "83b738bd2642306c094e094772df4d2044ac574d",
+      "is_current_checkout": false,
+      "experiment_families": [
+        "gora_tabular",
+        "head_routing_v5",
+        "mq_gora_v4",
+        "mv_tabr_gora"
+      ],
+      "primary_focus": "head_routing_v5",
+      "lineage_role": "mv-tabr-core",
+      "purpose": "mv-tabr california core experiment",
+      "status": "sibling-worktree"
+    },
+    {
+      "path": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/mv-tabr-gora-a7-candidate-rerank",
+      "repo_relative_path": ".worktrees/mv-tabr-gora-a7-candidate-rerank",
+      "branch": "feature/mv-tabr-gora-a7-candidate-rerank",
+      "head": "c8542c9dd7f73408d2a74947ca4d730a971452ae",
+      "is_current_checkout": false,
+      "experiment_families": [
+        "gora_tabular",
+        "head_routing_v5",
+        "mq_gora_v4",
+        "mv_tabr_gora"
+      ],
+      "primary_focus": "head_routing_v5",
+      "lineage_role": "mv-tabr-followon",
+      "purpose": "mv-tabr retrieval follow-on experiment",
+      "status": "sibling-worktree"
+    },
+    {
+      "path": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/mv-tabr-gora-a7a-hybrid-mix",
+      "repo_relative_path": ".worktrees/mv-tabr-gora-a7a-hybrid-mix",
+      "branch": "feature/mv-tabr-gora-a7a-hybrid-mix",
+      "head": "d1ee19f22572c03d87a64a87aa23b41a2a3547f1",
+      "is_current_checkout": false,
+      "experiment_families": [
+        "gora_tabular",
+        "head_routing_v5",
+        "mq_gora_v4",
+        "mv_tabr_gora"
+      ],
+      "primary_focus": "head_routing_v5",
+      "lineage_role": "mv-tabr-followon",
+      "purpose": "mv-tabr retrieval follow-on experiment",
+      "status": "sibling-worktree"
+    },
+    {
+      "path": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/mv-tabr-gora-a7a-iterative-reindex",
+      "repo_relative_path": ".worktrees/mv-tabr-gora-a7a-iterative-reindex",
+      "branch": "feature/mv-tabr-gora-a7a-iterative-reindex",
+      "head": "7ef9d8898c7bb304531e5faa4a72bdc5221f64a1",
+      "is_current_checkout": false,
+      "experiment_families": [
+        "gora_tabular",
+        "head_routing_v5",
+        "mq_gora_v4",
+        "mv_tabr_gora"
+      ],
+      "primary_focus": "head_routing_v5",
+      "lineage_role": "mv-tabr-followon",
+      "purpose": "mv-tabr retrieval follow-on experiment",
+      "status": "sibling-worktree"
+    },
+    {
+      "path": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/mv-tabr-gora-a8a-label-anchor",
+      "repo_relative_path": ".worktrees/mv-tabr-gora-a8a-label-anchor",
+      "branch": "feature/mv-tabr-gora-a8a-label-anchor",
+      "head": "ed7ba2c174b4fa86f17fb7943a59cee31f7fec0e",
+      "is_current_checkout": false,
+      "experiment_families": [
+        "gora_tabular",
+        "head_routing_v5",
+        "mq_gora_v4",
+        "mv_tabr_gora"
+      ],
+      "primary_focus": "head_routing_v5",
+      "lineage_role": "mv-tabr-core",
+      "purpose": "mv-tabr california core experiment",
+      "status": "sibling-worktree"
+    },
+    {
+      "path": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/mv-tabr-gora-a9a-gated-anchor",
+      "repo_relative_path": ".worktrees/mv-tabr-gora-a9a-gated-anchor",
+      "branch": "feature/mv-tabr-gora-a9a-gated-anchor",
+      "head": "a7673c8d2d85b5ce0470bf786394ffdcddaf89cd",
+      "is_current_checkout": false,
+      "experiment_families": [
+        "gora_tabular",
+        "head_routing_v5",
+        "mq_gora_v4",
+        "mv_tabr_gora"
+      ],
+      "primary_focus": "head_routing_v5",
+      "lineage_role": "mv-tabr-core",
+      "purpose": "mv-tabr california core experiment",
+      "status": "sibling-worktree"
+    },
+    {
+      "path": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/mv-tabr-gora-a9b-guided-pretrain",
+      "repo_relative_path": ".worktrees/mv-tabr-gora-a9b-guided-pretrain",
+      "branch": "feature/mv-tabr-gora-a9b-guided-pretrain",
+      "head": "aa44e2d834c4cdaa10044194f3edf69be0ad9b9a",
+      "is_current_checkout": false,
+      "experiment_families": [
+        "gora_tabular",
+        "head_routing_v5",
+        "mq_gora_v4",
+        "mv_tabr_gora"
+      ],
+      "primary_focus": "head_routing_v5",
+      "lineage_role": "mv-tabr-core",
+      "purpose": "mv-tabr california core experiment",
+      "status": "sibling-worktree"
+    },
+    {
+      "path": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/mv-tabr-gora-c1e0",
+      "repo_relative_path": ".worktrees/mv-tabr-gora-c1e0",
+      "branch": "feature/mv-tabr-gora-c1e0",
+      "head": "d5517155fd83b1d05566890a680ed4b599825923",
+      "is_current_checkout": false,
+      "experiment_families": [
+        "gora_tabular",
+        "head_routing_v5",
+        "mq_gora_v4",
+        "mv_tabr_gora"
+      ],
+      "primary_focus": "head_routing_v5",
+      "lineage_role": "mv-tabr-core",
+      "purpose": "mv-tabr california core experiment",
+      "status": "sibling-worktree"
+    },
+    {
+      "path": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/mv-tabr-gora-drst",
+      "repo_relative_path": ".worktrees/mv-tabr-gora-drst",
+      "branch": "feature/mv-tabr-gora-drst",
+      "head": "0e6d02f1492322ada663ee9036766fa4eb43f603",
+      "is_current_checkout": false,
+      "experiment_families": [
+        "gora_tabular",
+        "head_routing_v5",
+        "mq_gora_v4",
+        "mv_tabr_gora"
+      ],
+      "primary_focus": "head_routing_v5",
+      "lineage_role": "mv-tabr-core",
+      "purpose": "mv-tabr california core experiment",
+      "status": "sibling-worktree"
+    },
+    {
+      "path": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/mv-tabr-gora-e1d0",
+      "repo_relative_path": ".worktrees/mv-tabr-gora-e1d0",
+      "branch": "feature/mv-tabr-gora-e1d0",
+      "head": "2b588d4fd5fc92d600f2f93540f7321126227336",
+      "is_current_checkout": false,
+      "experiment_families": [
+        "gora_tabular",
+        "head_routing_v5",
+        "mq_gora_v4",
+        "mv_tabr_gora"
+      ],
+      "primary_focus": "head_routing_v5",
+      "lineage_role": "mv-tabr-core",
+      "purpose": "mv-tabr california core experiment",
+      "status": "sibling-worktree"
+    },
+    {
+      "path": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/mv-tabr-gora-geo-retrieval",
+      "repo_relative_path": ".worktrees/mv-tabr-gora-geo-retrieval",
+      "branch": "codex/mv-tabr-gora-geo-retrieval",
+      "head": "c1ef39eec81afa2950b4cf9777cd80efadae70f2",
+      "is_current_checkout": false,
+      "experiment_families": [
+        "gora_tabular",
+        "head_routing_v5",
+        "mq_gora_v4",
+        "mv_tabr_gora"
+      ],
+      "primary_focus": "head_routing_v5",
+      "lineage_role": "mv-tabr-core",
+      "purpose": "mv-tabr california core experiment",
+      "status": "sibling-worktree"
+    },
+    {
+      "path": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/mv-tabr-gora-rerank",
+      "repo_relative_path": ".worktrees/mv-tabr-gora-rerank",
+      "branch": "feature/mv-tabr-gora-rerank",
+      "head": "05e2375d0495bff948d1e4824487dd7ebd7144ce",
+      "is_current_checkout": false,
+      "experiment_families": [
+        "gora_tabular",
+        "head_routing_v5",
+        "mq_gora_v4",
+        "mv_tabr_gora"
+      ],
+      "primary_focus": "head_routing_v5",
+      "lineage_role": "mv-tabr-core",
+      "purpose": "mv-tabr california core experiment",
+      "status": "sibling-worktree"
+    },
+    {
+      "path": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/shared-head-routing-backbone",
+      "repo_relative_path": ".worktrees/shared-head-routing-backbone",
+      "branch": "feature/shared-head-routing-backbone",
+      "head": "ece49da527e7451b21328f5b21e0616c80aa0464",
+      "is_current_checkout": false,
+      "experiment_families": [],
+      "primary_focus": "shared_head_routing_backbone",
+      "lineage_role": "other",
+      "purpose": "auxiliary worktree",
+      "status": "sibling-worktree"
+    },
+    {
+      "path": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabpfn-california-baseline",
+      "repo_relative_path": ".worktrees/tabpfn-california-baseline",
+      "branch": "codex/tabpfn-california-baseline",
+      "head": "0f5ad9764d606623e774a14e4756b1635beae061",
+      "is_current_checkout": false,
+      "experiment_families": [],
+      "primary_focus": "other",
+      "lineage_role": "other",
+      "purpose": "auxiliary worktree",
+      "status": "sibling-worktree"
+    },
+    {
+      "path": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-california-baseline",
+      "repo_relative_path": ".worktrees/tabr-california-baseline",
+      "branch": "feature/tabr-california-baseline",
+      "head": "fb92ce011a2d489bc7e3bb0ba7491407bb3af049",
+      "is_current_checkout": false,
+      "experiment_families": [],
+      "primary_focus": "tabr_california_baseline",
+      "lineage_role": "other",
+      "purpose": "auxiliary worktree",
+      "status": "sibling-worktree"
+    },
+    {
+      "path": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabr-mv-retrieval-bc",
+      "repo_relative_path": ".worktrees/tabr-mv-retrieval-bc",
+      "branch": "feature/tabr-mv-retrieval-bc",
+      "head": "cf10fa726282d5c9c9b51467419299d36ad89a8c",
+      "is_current_checkout": false,
+      "experiment_families": [],
+      "primary_focus": "tabr_mv_retrieval_bc",
+      "lineage_role": "other",
+      "purpose": "auxiliary worktree",
+      "status": "sibling-worktree"
+    }
+  ]
+}
