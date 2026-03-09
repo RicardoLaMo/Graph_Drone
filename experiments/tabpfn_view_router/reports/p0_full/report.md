@@ -12,8 +12,10 @@
 | P0_SOCIO | 0.6771 | 0.7121 | single-view TabPFN expert |
 | P0_LOWRANK | 0.5622 | 0.5924 | single-view TabPFN expert |
 | P0_uniform | 0.4359 | 0.4686 | uniform mean over four TabPFN view experts |
-| P0_sigma2 | 0.4361 | 0.4694 | inverse-sigma2 routing over view experts |
-| P0_router | 0.3773 | 0.3989 | softmax router on sigma2_v + J_flat + mean_J (best_epoch=399) |
+| P0_sigma2 | 0.4361 | 0.4694 | inverse-sigma2 routing — no val labels used |
+| P0_gora | 0.5190 | 0.5676 | GoRA analytical routing: softmax(-sigma2*tau), tau=1/(mean_J+eps) — zero params, no val labels |
+| P0_router | 0.3775 | 0.3986 | softmax router on sigma2_v + J_flat + mean_J (best_epoch=399) |
+| P0_crossfit | 0.3776 | 0.4001 | 5-fold OOF router — val RMSE is clean (unbiased); test uses router trained on all val (n_splits=5) |
 
 ## Reference Anchors
 
@@ -29,7 +31,15 @@
 - sigma2_GEO: val `0.246` / test `0.246`
 - sigma2_SOCIO: val `0.251` / test `0.251`
 - sigma2_LOWRANK: val `0.251` / test `0.252`
-- router_FULL: val `0.717` / test `0.720`
-- router_GEO: val `0.235` / test `0.231`
-- router_SOCIO: val `0.025` / test `0.025`
+- gora_FULL: val `0.201` / test `0.202`
+- gora_GEO: val `0.225` / test `0.214`
+- gora_SOCIO: val `0.322` / test `0.320`
+- gora_LOWRANK: val `0.253` / test `0.264`
+- router_FULL: val `0.720` / test `0.723`
+- router_GEO: val `0.231` / test `0.227`
+- router_SOCIO: val `0.026` / test `0.026`
 - router_LOWRANK: val `0.023` / test `0.023`
+- crossfit_FULL: val `0.715` / test `0.715`
+- crossfit_GEO: val `0.233` / test `0.233`
+- crossfit_SOCIO: val `0.027` / test `0.027`
+- crossfit_LOWRANK: val `0.024` / test `0.024`
