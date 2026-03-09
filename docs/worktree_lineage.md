@@ -52,6 +52,50 @@ This repo has two different kinds of experiment history:
 - branch: `feature/mv-tabr-gora-a7-candidate-rerank`
 - role: exploratory; superseded by A7a iterative reindex
 
+### MV-TabR-GoRA A8a (label-anchor residual prediction)
+- path: `.worktrees/mv-tabr-gora-a8a-label-anchor`
+- branch: `feature/mv-tabr-gora-a8a-label-anchor`
+- result: A6f val=0.4510/test=0.4099 vs A8a val=0.4492/test=0.4156
+- finding: val improves (−0.0018) but test worsens (+0.0057); confirms retrieval is the bottleneck
+
+### MV-TabR-GoRA A9a (gated anchor trust)
+- path: `.worktrees/mv-tabr-gora-a9a-gated-anchor`
+- branch: `feature/mv-tabr-gora-a9a-gated-anchor`
+- hypothesis: learned gate down-weights bad anchors; pred_v = sigmoid(gate(ctx_v)) * anchor_v + residual_v
+- status: **implemented, ready to run** (smoke test ✅)
+
+### MV-TabR-GoRA A9b (label-guided encoder pretraining)
+- path: `.worktrees/mv-tabr-gora-a9b-guided-pretrain`
+- branch: `feature/mv-tabr-gora-a9b-guided-pretrain`
+- hypothesis: Stage 0 encoder pretraining → better kNN quality → better neural gains
+- result: val=0.4882, test=0.4657 — clear regression; Stage 0 collapses direction-encoding metric structure
+- finding: pretraining destroys T(z_i^v − z_j^v) space; label-predictive embeddings ≠ retrieval-useful embeddings
+
+### MV-TabR-GoRA A10a (d_model 64→256 scale)
+- path: `.worktrees/mv-tabr-gora-a10a-scale256`
+- branch: `feature/mv-tabr-gora-a10a-scale256`
+- hypothesis: architecture is capacity-bottlenecked; scaling d_model attacks the remaining gap directly
+- status: **ready to run** (smoke test ✅, no code changes — use --d_model 256 flag)
+- run: `python experiments/mv_tabr_gora/scripts/run_mv_tabr_gora.py --ablation A6f --d_model 256 --output reports/a10a_d256`
+
+### MV-TabR-GoRA A10b (dynamic kNN — co-evolving graph)
+- path: `.worktrees/mv-tabr-gora-a10b-dynamic-knn`
+- branch: `feature/mv-tabr-gora-a10b-dynamic-knn`
+- hypothesis: rebuild per-view kNN from current z^v embeddings every 10 epochs — graph and encoder co-evolve (TabR-like)
+- status: **ready to run** (smoke test ✅ — rebuild fires correctly, ~1.4s per rebuild)
+- run: `python experiments/mv_tabr_gora/scripts/run_mv_tabr_gora.py --ablation A6f A10b --rebuild_interval 10 --output reports/a10b_dynknn`
+
+### MV-TabR-GoRA DRST (dynamic candidate-pool retriever + EdgeMLP encoding)
+- path: `.worktrees/mv-tabr-gora-drst`
+- branch: `feature/mv-tabr-gora-drst`
+- base: `feature/mv-tabr-gora` (A6f codebase — avoids A9/A10 cruft)
+- hypothesis: Q·K_ema re-ranking inside fixed pool (C=96) + EdgeMLP edge encoding
+  fixes the static-direction-encoding / dynamic-graph incompatibility
+- ablations: B1 (cand-pool rerank), B2 (+ EdgeMLP), B3 (+ CrossViewMixer)
+- smoke test: ✅ B1 and B2 pass (KL loss visible, no shape errors)
+- status: **scaffolding complete — ready for full run**
+- run: `cd .worktrees/mv-tabr-gora-drst && python experiments/mv_tabr_gora/scripts/run_mv_tabr_gora.py --ablation A6f B1`
+
 ## Agent Assignments
 
 | Agent | Home | Writes to | Role |
