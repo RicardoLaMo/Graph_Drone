@@ -57,6 +57,17 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def resolve_upstream_report_path(run_output_dir: Path) -> Path | None:
+    expected = run_output_dir / "report.json"
+    if expected.exists():
+        return expected
+    candidates = sorted(
+        run_output_dir.parent.glob(f"{run_output_dir.name}*/report.json"),
+        key=lambda path: str(path),
+    )
+    return candidates[0] if candidates else None
+
+
 def main() -> None:
     args = parse_args()
     split = build_openml_regression_split(
@@ -110,20 +121,33 @@ def main() -> None:
     stderr_path = output_dir / "tabr.stderr.log"
     started_at = time.time()
     command = [str(args.venv_python), "bin/tabr.py", str(local_config), "--force"]
-    with stdout_path.open("w") as stdout_handle, stderr_path.open("w") as stderr_handle:
-        result = subprocess.run(
-            command,
-            cwd=args.upstream_root,
-            env=env,
-            stdout=stdout_handle,
-            stderr=stderr_handle,
-            text=True,
-        )
-    if result.returncode != 0:
-        raise SystemExit(result.returncode)
-
     run_output_dir = local_config.with_suffix("")
-    upstream_report = json.loads((run_output_dir / "report.json").read_text())
+    upstream_report_path: Path | None = None
+    result = None
+    for attempt in range(2):
+        with stdout_path.open("a") as stdout_handle, stderr_path.open("a") as stderr_handle:
+            if attempt:
+                stderr_handle.write("[wrapper] retrying TabR because upstream report.json was missing after a zero exit code\n")
+            result = subprocess.run(
+                command,
+                cwd=args.upstream_root,
+                env=env,
+                stdout=stdout_handle,
+                stderr=stderr_handle,
+                text=True,
+            )
+        if result.returncode != 0:
+            raise SystemExit(result.returncode)
+        upstream_report_path = resolve_upstream_report_path(run_output_dir)
+        if upstream_report_path is not None:
+            break
+        time.sleep(1.0)
+
+    if upstream_report_path is None:
+        raise FileNotFoundError(
+            f"TabR finished with exit code 0 but report.json was not found under {run_output_dir}"
+        )
+    upstream_report = json.loads(upstream_report_path.read_text())
     payload = {
         "run_name": run_name,
         "model": "TabR",
@@ -134,7 +158,7 @@ def main() -> None:
         "duration_seconds": round(time.time() - started_at, 3),
         "metrics": upstream_report["metrics"],
         "best_epoch": upstream_report.get("best_epoch"),
-        "upstream_report_path": str(run_output_dir / "report.json"),
+        "upstream_report_path": str(upstream_report_path),
     }
     (output_dir / "tabr_results.json").write_text(json.dumps(payload, indent=2) + "\n")
 
