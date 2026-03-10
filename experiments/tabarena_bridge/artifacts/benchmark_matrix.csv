@@ -1,0 +1,11 @@
+priority_tier,name,openml_dataset_id,openml_task_id,problem_type,rows,features,graph_drone_role,why
+1,diamonds,46923,363631,regression,53940,10,non-geo-price-transfer,Tests whether retrieval and routing gains generalize beyond geographic structure.
+1,houses,46934,363678,regression,20640,9,housing-anchor,Closest general housing regression anchor from the TabArena suite.
+1,miami_housing,46942,363686,regression,13776,16,geo-transfer,Closest housing-like geospatial regression benchmark in the TabArena suite.
+2,airfoil_self_noise,46904,363612,regression,1503,6,small-numeric-sanity,Another compact regression task useful for quick sweeps.
+2,concrete_compressive_strength,46917,363625,regression,1030,9,small-numeric-sanity,Compact numeric regression benchmark for early pipeline validation.
+2,healthcare_insurance_expenses,46931,363675,regression,1338,7,small-fast-regression,Small regression task for fast local ablations before GPU expansion.
+2,wine_quality,46964,363708,regression,6497,13,midscale-regression,Mid-size regression with mixed signal quality and broad benchmark use.
+3,Food_Delivery_Time,46928,363672,regression,45451,10,large-regression,Larger-scale regression benchmark for H200 expansion.
+3,physiochemical_protein,46949,363693,regression,45730,10,large-regression,Large regression task to stress retrieval and foundation baselines.
+3,superconductivity,46961,363705,regression,21263,82,high-dimensional-regression,High-dimensional regression benchmark for testing foundation-model transfer.

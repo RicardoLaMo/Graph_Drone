@@ -1,0 +1,134 @@
+{
+  "benchmark": {
+    "name": "graph_drone_tabarena_regression_bridge",
+    "source_suite": {
+      "name": "tabarena-v0.1",
+      "openml_suite_id": 457
+    },
+    "split_policy": {
+      "split_seeds": [42, 43, 44, 45, 46],
+      "training_seed_policy": "keep split seed separate from model seed"
+    },
+    "primary_metric": "rmse",
+    "secondary_metrics": ["mae", "r2", "win_count", "mean", "std"],
+    "baseline_models": [
+      "TabR",
+      "TabPFN_full",
+      "TabM",
+      "P0_full",
+      "P0_router"
+    ],
+    "datasets": [
+      {
+        "name": "miami_housing",
+        "openml_dataset_id": 46942,
+        "openml_task_id": 363686,
+        "problem_type": "regression",
+        "rows": 13776,
+        "features": 16,
+        "priority_tier": 1,
+        "graph_drone_role": "geo-transfer",
+        "why": "Closest housing-like geospatial regression benchmark in the TabArena suite."
+      },
+      {
+        "name": "houses",
+        "openml_dataset_id": 46934,
+        "openml_task_id": 363678,
+        "problem_type": "regression",
+        "rows": 20640,
+        "features": 9,
+        "priority_tier": 1,
+        "graph_drone_role": "housing-anchor",
+        "why": "Closest general housing regression anchor from the TabArena suite."
+      },
+      {
+        "name": "diamonds",
+        "openml_dataset_id": 46923,
+        "openml_task_id": 363631,
+        "problem_type": "regression",
+        "rows": 53940,
+        "features": 10,
+        "priority_tier": 1,
+        "graph_drone_role": "non-geo-price-transfer",
+        "why": "Tests whether retrieval and routing gains generalize beyond geographic structure."
+      },
+      {
+        "name": "healthcare_insurance_expenses",
+        "openml_dataset_id": 46931,
+        "openml_task_id": 363675,
+        "problem_type": "regression",
+        "rows": 1338,
+        "features": 7,
+        "priority_tier": 2,
+        "graph_drone_role": "small-fast-regression",
+        "why": "Small regression task for fast local ablations before GPU expansion."
+      },
+      {
+        "name": "concrete_compressive_strength",
+        "openml_dataset_id": 46917,
+        "openml_task_id": 363625,
+        "problem_type": "regression",
+        "rows": 1030,
+        "features": 9,
+        "priority_tier": 2,
+        "graph_drone_role": "small-numeric-sanity",
+        "why": "Compact numeric regression benchmark for early pipeline validation."
+      },
+      {
+        "name": "airfoil_self_noise",
+        "openml_dataset_id": 46904,
+        "openml_task_id": 363612,
+        "problem_type": "regression",
+        "rows": 1503,
+        "features": 6,
+        "priority_tier": 2,
+        "graph_drone_role": "small-numeric-sanity",
+        "why": "Another compact regression task useful for quick sweeps."
+      },
+      {
+        "name": "wine_quality",
+        "openml_dataset_id": 46964,
+        "openml_task_id": 363708,
+        "problem_type": "regression",
+        "rows": 6497,
+        "features": 13,
+        "priority_tier": 2,
+        "graph_drone_role": "midscale-regression",
+        "why": "Mid-size regression with mixed signal quality and broad benchmark use."
+      },
+      {
+        "name": "Food_Delivery_Time",
+        "openml_dataset_id": 46928,
+        "openml_task_id": 363672,
+        "problem_type": "regression",
+        "rows": 45451,
+        "features": 10,
+        "priority_tier": 3,
+        "graph_drone_role": "large-regression",
+        "why": "Larger-scale regression benchmark for H200 expansion."
+      },
+      {
+        "name": "physiochemical_protein",
+        "openml_dataset_id": 46949,
+        "openml_task_id": 363693,
+        "problem_type": "regression",
+        "rows": 45730,
+        "features": 10,
+        "priority_tier": 3,
+        "graph_drone_role": "large-regression",
+        "why": "Large regression task to stress retrieval and foundation baselines."
+      },
+      {
+        "name": "superconductivity",
+        "openml_dataset_id": 46961,
+        "openml_task_id": 363705,
+        "problem_type": "regression",
+        "rows": 21263,
+        "features": 82,
+        "priority_tier": 3,
+        "graph_drone_role": "high-dimensional-regression",
+        "why": "High-dimensional regression benchmark for testing foundation-model transfer."
+      }
+    ]
+  }
+}
