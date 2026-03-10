@@ -11,6 +11,7 @@ from sklearn.neighbors import NearestNeighbors
 
 
 SEED = 42
+OPENML_CALIFORNIA_DID = 44024
 LOG1P_COLS = (2, 4)
 GEO_COLS = (6, 7)
 SOCIO_COLS = (0, 1, 2, 3, 4)
@@ -51,8 +52,17 @@ class QualityFeatures:
     mean_j_test: np.ndarray
 
 
-def build_aligned_california_split(seed: int = SEED, smoke: bool = False) -> SplitData:
-    X, y = fetch_california_housing(return_X_y=True)
+def build_aligned_california_split(
+    seed: int = SEED,
+    smoke: bool = False,
+    *,
+    dataset_source: str = "sklearn",
+    openml_dataset_id: int = OPENML_CALIFORNIA_DID,
+) -> SplitData:
+    X, y = _fetch_california_xy(
+        dataset_source=dataset_source,
+        openml_dataset_id=openml_dataset_id,
+    )
     X = X.astype(np.float32)
     y = y.astype(np.float32)
     X[:, LOG1P_COLS] = np.log1p(X[:, LOG1P_COLS])
@@ -206,4 +216,54 @@ def build_quality_features(split: SplitData, views: ViewData, k: int = 24) -> Qu
         mean_j_train=mean_train.squeeze(1),
         mean_j_val=mean_val.squeeze(1),
         mean_j_test=mean_test.squeeze(1),
+    )
+
+
+def _fetch_california_xy(*, dataset_source: str, openml_dataset_id: int) -> tuple[np.ndarray, np.ndarray]:
+    if dataset_source == "openml":
+        return _fetch_california_xy_openml(openml_dataset_id)
+    if dataset_source == "sklearn":
+        try:
+            return fetch_california_housing(return_X_y=True)
+        except FileNotFoundError:
+            # sklearn can successfully materialize the cached dataset and then fail
+            # while cleaning up the temporary archive on first download. A second
+            # read typically succeeds once the cache file exists.
+            return fetch_california_housing(return_X_y=True)
+    raise ValueError(f"Unsupported dataset_source={dataset_source!r}")
+
+
+def _fetch_california_xy_openml(openml_dataset_id: int) -> tuple[np.ndarray, np.ndarray]:
+    import openml
+
+    dataset = openml.datasets.get_dataset(openml_dataset_id)
+    X_df, y, _, _ = dataset.get_data(
+        dataset_format="dataframe",
+        target=dataset.default_target_attribute,
+    )
+
+    expected_cols = [
+        "MedInc",
+        "HouseAge",
+        "AveRooms",
+        "AveBedrms",
+        "Population",
+        "AveOccup",
+        "Latitude",
+        "Longitude",
+    ]
+
+    if list(X_df.columns) == expected_cols:
+        X = X_df.to_numpy(dtype=np.float32)
+        y_arr = np.expm1(y.to_numpy(dtype=np.float32))
+        return X, y_arr
+
+    if {"medianIncome", "housingMedianAge", "totalRooms", "totalBedrooms", "population", "households", "latitude", "longitude"} <= set(X_df.columns):
+        raise ValueError(
+            "OpenML dataset does not match the aligned California schema used by P0. "
+            "Use did=44024 or another schema-compatible variant."
+        )
+
+    raise ValueError(
+        f"OpenML dataset did={openml_dataset_id} has unsupported feature columns: {list(X_df.columns)}"
     )

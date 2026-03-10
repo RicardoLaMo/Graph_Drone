@@ -149,6 +149,7 @@ def fit_soft_router(
 @dataclass(frozen=True)
 class CrossfitRouterResult:
     pred_val_oof: np.ndarray   # clean OOF val predictions — unbiased val RMSE
+    weights_val_oof: np.ndarray
     pred_test: np.ndarray      # final model predictions on test (router trained on all val)
     weights_test: np.ndarray   # final model weights on test
     n_splits: int
@@ -179,6 +180,7 @@ def fit_crossfit_router(
     """
     kf = KFold(n_splits=n_splits, shuffle=True, random_state=seed)
     oof_preds = np.zeros(len(y_val), dtype=np.float32)
+    oof_weights = np.zeros_like(pred_val, dtype=np.float32)
 
     for fold, (fold_tr_idx, fold_oof_idx) in enumerate(kf.split(x_val)):
         # fit_soft_router internally splits fold_tr 70/30 for training / early-stopping
@@ -196,6 +198,7 @@ def fit_crossfit_router(
             patience=patience,
         )
         oof_preds[fold_oof_idx] = fold_result.pred_test   # OOF slot used as "test" here
+        oof_weights[fold_oof_idx] = fold_result.weights_test
 
     # Final router on all val → actual test predictions
     final = fit_soft_router(
@@ -214,6 +217,7 @@ def fit_crossfit_router(
 
     return CrossfitRouterResult(
         pred_val_oof=oof_preds,
+        weights_val_oof=oof_weights,
         pred_test=final.pred_test,
         weights_test=final.weights_test,
         n_splits=n_splits,

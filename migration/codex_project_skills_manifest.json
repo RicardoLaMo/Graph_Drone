@@ -1,0 +1,70 @@
+{
+  "purpose": "Minimal Codex skill subset to carry to the H200 host for the P0 TabPFN view-router branch.",
+  "operational_reflections": [
+    "Use h200-gpu-ops first. The practical P0 pattern is 4 GPUs per run in per_view mode, then two concurrent seeds to occupy all 8 H200s.",
+    "Use experiment-design-tracker to freeze dataset_source=openml, openml_dataset_id=44024, split_seed=42, and the GPU group layout for multiseed reruns.",
+    "Use git-codebase-ops before and after long H200 runs so result directories stay separate from code edits.",
+    "Keep gemini-validator-reconciler optional until Gemini CLI and auth are actually present on the host."
+  ],
+  "workflows": [
+    {
+      "name": "bringup",
+      "skills": [
+        "h200-gpu-ops",
+        "git-codebase-ops",
+        "git-tree-manager"
+      ],
+      "goal": "Validate CUDA, repo state, and host readiness before first P0 run."
+    },
+    {
+      "name": "p0_multiseed_openml",
+      "skills": [
+        "h200-gpu-ops",
+        "experiment-design-tracker",
+        "results-manager"
+      ],
+      "goal": "Run OpenML California multiseed P0 sweeps with fixed split_seed=42 and stable GPU groups."
+    },
+    {
+      "name": "postrun_review",
+      "skills": [
+        "git-codebase-ops",
+        "results-manager",
+        "gemini-validator-reconciler"
+      ],
+      "goal": "Snapshot diffs, summarize outputs, and optionally cross-check code or report drift."
+    }
+  ],
+  "skills": [
+    {
+      "name": "h200-gpu-ops",
+      "priority": "required",
+      "why": "GPU runtime bring-up, guardrails, and H200 validation."
+    },
+    {
+      "name": "git-codebase-ops",
+      "priority": "required",
+      "why": "Safe git branch, diff, and commit-readiness checks on the GPU host."
+    },
+    {
+      "name": "git-tree-manager",
+      "priority": "required",
+      "why": "Quick repo structure and impact mapping when working from a new host."
+    },
+    {
+      "name": "experiment-design-tracker",
+      "priority": "recommended",
+      "why": "Freeze seed contracts, runtime settings, and result lineage for H200 reruns."
+    },
+    {
+      "name": "results-manager",
+      "priority": "recommended",
+      "why": "Keep multi-seed P0 reports organized and reproducible."
+    },
+    {
+      "name": "gemini-validator-reconciler",
+      "priority": "optional",
+      "why": "Second-pass code and report validation after branch-local edits."
+    }
+  ]
+}
