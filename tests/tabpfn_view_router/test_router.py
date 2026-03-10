@@ -8,6 +8,7 @@ from experiments.tabpfn_view_router.src.data import (
     build_view_data,
 )
 from experiments.tabpfn_view_router.src.router import (
+    _inner_holdout_size,
     build_trust_gate_features,
     fit_crossfit_router,
     fit_soft_router,
@@ -140,3 +141,9 @@ def test_oracle_blend_prefers_closer_prediction() -> None:
 
     np.testing.assert_allclose(pred, np.array([0.1, 1.1, 2.1], dtype=np.float32))
     np.testing.assert_allclose(alpha, np.array([0.0, 1.0, 1.0], dtype=np.float32))
+
+
+def test_inner_holdout_size_guards_small_validation_sets() -> None:
+    assert _inner_holdout_size(12, min_holdout=50) == 6
+    assert _inner_holdout_size(80, min_holdout=50) == 40
+    assert _inner_holdout_size(179, min_holdout=50) == 54

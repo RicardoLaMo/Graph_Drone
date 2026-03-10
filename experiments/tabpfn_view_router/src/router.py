@@ -129,6 +129,19 @@ class SoftTrustGate(torch.nn.Module):
         return torch.sigmoid(self.net(x))
 
 
+def _inner_holdout_size(
+    n_rows: int,
+    *,
+    holdout_fraction: float = 0.30,
+    min_holdout: int = 50,
+) -> int:
+    if n_rows < 2:
+        raise ValueError(f"Need at least 2 rows to build an inner holdout, got {n_rows}")
+    fractional = int(np.ceil(n_rows * holdout_fraction))
+    guarded = max(fractional, min(min_holdout, n_rows // 2))
+    return min(max(1, guarded), n_rows - 1)
+
+
 def fit_soft_router(
     x_val: np.ndarray,
     pred_val: np.ndarray,
@@ -141,9 +154,14 @@ def fit_soft_router(
     weight_decay: float = 1e-4,
     max_epochs: int = 400,
     patience: int = 40,
+    min_holdout: int = 50,
 ) -> RouterResult:
     idx = np.arange(len(x_val))
-    tr_idx, hold_idx = train_test_split(idx, test_size=0.30, random_state=seed)
+    tr_idx, hold_idx = train_test_split(
+        idx,
+        test_size=_inner_holdout_size(len(idx), min_holdout=min_holdout),
+        random_state=seed,
+    )
 
     model = SoftViewRouter(in_dim=x_val.shape[1], n_views=pred_val.shape[1], hidden_dim=hidden_dim)
     optim = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
@@ -216,9 +234,14 @@ def fit_trust_gate(
     max_epochs: int = 400,
     patience: int = 40,
     bias_init: float = -2.0,
+    min_holdout: int = 50,
 ) -> TrustGateResult:
     idx = np.arange(len(x_val))
-    tr_idx, hold_idx = train_test_split(idx, test_size=0.30, random_state=seed)
+    tr_idx, hold_idx = train_test_split(
+        idx,
+        test_size=_inner_holdout_size(len(idx), min_holdout=min_holdout),
+        random_state=seed,
+    )
 
     model = SoftTrustGate(in_dim=x_val.shape[1], hidden_dim=hidden_dim, bias_init=bias_init)
     optim = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)

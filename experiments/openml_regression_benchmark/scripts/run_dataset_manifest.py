@@ -79,8 +79,14 @@ def build_command(
 
 
 def current_branch_name() -> str:
-    return subprocess.check_output(
+    branch = subprocess.check_output(
         ["git", "-C", str(REPO_ROOT), "branch", "--show-current"],
+        text=True,
+    ).strip()
+    if branch:
+        return branch
+    return subprocess.check_output(
+        ["git", "-C", str(REPO_ROOT), "rev-parse", "--short", "HEAD"],
         text=True,
     ).strip()
 
