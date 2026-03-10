@@ -1,25 +1,18 @@
 from __future__ import annotations
 
 import csv
-import json
+import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[3]
-MANIFEST_PATH = ROOT / "experiments" / "tabarena_bridge" / "configs" / "benchmark_manifest.json"
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from experiments.tabarena_bridge.src.manifest import load_manifest, sorted_datasets
+
 ARTIFACT_DIR = ROOT / "experiments" / "tabarena_bridge" / "artifacts"
 CSV_PATH = ARTIFACT_DIR / "benchmark_matrix.csv"
 MD_PATH = ARTIFACT_DIR / "benchmark_matrix.md"
-
-
-def load_manifest() -> dict:
-    with MANIFEST_PATH.open() as f:
-        return json.load(f)
-
-
-def normalize_rows(manifest: dict) -> list[dict]:
-    rows = manifest["benchmark"]["datasets"]
-    return sorted(rows, key=lambda row: (row["priority_tier"], row["name"]))
 
 
 def write_csv(rows: list[dict]) -> None:
@@ -32,6 +25,8 @@ def write_csv(rows: list[dict]) -> None:
         "problem_type",
         "rows",
         "features",
+        "view_family",
+        "integration_phase",
         "graph_drone_role",
         "why",
     ]
@@ -51,12 +46,13 @@ def write_markdown(rows: list[dict], manifest: dict) -> None:
     lines.append(f"- Primary metric: `{manifest['benchmark']['primary_metric']}`")
     lines.append(f"- Split seeds: `{', '.join(map(str, manifest['benchmark']['split_policy']['split_seeds']))}`")
     lines.append("")
-    lines.append("| Tier | Dataset | OpenML DID | OpenML TID | Rows | Features | Role | Why |")
-    lines.append("| --- | --- | ---: | ---: | ---: | ---: | --- | --- |")
+    lines.append("| Tier | Dataset | OpenML DID | OpenML TID | Rows | Features | View family | Phase | Role | Why |")
+    lines.append("| --- | --- | ---: | ---: | ---: | ---: | --- | --- | --- | --- |")
     for row in rows:
         lines.append(
             f"| {row['priority_tier']} | {row['name']} | {row['openml_dataset_id']} | "
             f"{row['openml_task_id']} | {row['rows']} | {row['features']} | "
+            f"{row['view_family']} | {row['integration_phase']} | "
             f"{row['graph_drone_role']} | {row['why']} |"
         )
     MD_PATH.write_text("\n".join(lines) + "\n")
@@ -64,7 +60,7 @@ def write_markdown(rows: list[dict], manifest: dict) -> None:
 
 def main() -> None:
     manifest = load_manifest()
-    rows = normalize_rows(manifest)
+    rows = sorted_datasets(manifest)
     write_csv(rows)
     write_markdown(rows, manifest)
     print(f"Wrote {CSV_PATH}")

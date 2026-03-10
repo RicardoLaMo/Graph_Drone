@@ -1,0 +1,4 @@
+priority_tier,name,openml_dataset_id,openml_task_id,rows,features,view_family,integration_phase,graph_drone_role
+1,diamonds,46923,363631,53940,10,generic_numeric,phase_2,non-geo-price-transfer
+1,houses,46934,363678,20640,9,geo_housing,phase_1,housing-anchor
+1,miami_housing,46942,363686,13776,16,geo_housing,phase_1,geo-transfer

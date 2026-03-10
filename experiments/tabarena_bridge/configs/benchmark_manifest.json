@@ -28,6 +28,8 @@
         "features": 16,
         "priority_tier": 1,
         "graph_drone_role": "geo-transfer",
+        "view_family": "geo_housing",
+        "integration_phase": "phase_1",
         "why": "Closest housing-like geospatial regression benchmark in the TabArena suite."
       },
       {
@@ -39,6 +41,8 @@
         "features": 9,
         "priority_tier": 1,
         "graph_drone_role": "housing-anchor",
+        "view_family": "geo_housing",
+        "integration_phase": "phase_1",
         "why": "Closest general housing regression anchor from the TabArena suite."
       },
       {
@@ -50,6 +54,8 @@
         "features": 10,
         "priority_tier": 1,
         "graph_drone_role": "non-geo-price-transfer",
+        "view_family": "generic_numeric",
+        "integration_phase": "phase_2",
         "why": "Tests whether retrieval and routing gains generalize beyond geographic structure."
       },
       {
@@ -61,6 +67,8 @@
         "features": 7,
         "priority_tier": 2,
         "graph_drone_role": "small-fast-regression",
+        "view_family": "generic_numeric",
+        "integration_phase": "phase_2",
         "why": "Small regression task for fast local ablations before GPU expansion."
       },
       {
@@ -72,6 +80,8 @@
         "features": 9,
         "priority_tier": 2,
         "graph_drone_role": "small-numeric-sanity",
+        "view_family": "generic_numeric",
+        "integration_phase": "phase_2",
         "why": "Compact numeric regression benchmark for early pipeline validation."
       },
       {
@@ -83,6 +93,8 @@
         "features": 6,
         "priority_tier": 2,
         "graph_drone_role": "small-numeric-sanity",
+        "view_family": "generic_numeric",
+        "integration_phase": "phase_2",
         "why": "Another compact regression task useful for quick sweeps."
       },
       {
@@ -94,6 +106,8 @@
         "features": 13,
         "priority_tier": 2,
         "graph_drone_role": "midscale-regression",
+        "view_family": "generic_numeric",
+        "integration_phase": "phase_2",
         "why": "Mid-size regression with mixed signal quality and broad benchmark use."
       },
       {
@@ -105,6 +119,8 @@
         "features": 10,
         "priority_tier": 3,
         "graph_drone_role": "large-regression",
+        "view_family": "generic_numeric",
+        "integration_phase": "phase_3",
         "why": "Larger-scale regression benchmark for H200 expansion."
       },
       {
@@ -116,6 +132,8 @@
         "features": 10,
         "priority_tier": 3,
         "graph_drone_role": "large-regression",
+        "view_family": "generic_numeric",
+        "integration_phase": "phase_3",
         "why": "Large regression task to stress retrieval and foundation baselines."
       },
       {
@@ -127,6 +145,8 @@
         "features": 82,
         "priority_tier": 3,
         "graph_drone_role": "high-dimensional-regression",
+        "view_family": "generic_numeric",
+        "integration_phase": "phase_3",
         "why": "High-dimensional regression benchmark for testing foundation-model transfer."
       }
     ]
