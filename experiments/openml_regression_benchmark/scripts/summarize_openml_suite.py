@@ -24,13 +24,11 @@ def parse_args() -> argparse.Namespace:
 
 def load_rows(reports_root: Path, *, include_smoke: bool) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
-    for run_dir in sorted(path for path in reports_root.iterdir() if path.is_dir()):
-        if not include_smoke and run_dir.name.endswith("__smoke"):
+    run_dirs = sorted(path.parent for path in reports_root.rglob("graphdrone_results.json"))
+    for run_dir in run_dirs:
+        if not include_smoke and any(part.endswith("__smoke") for part in run_dir.parts):
             continue
         present = {path.name for path in run_dir.glob("*.json")}
-        if "graphdrone_results.json" not in present:
-            continue
-
         payload = json.loads((run_dir / "graphdrone_results.json").read_text())
         dataset = payload["dataset"]
         for row in payload["rows"]:
