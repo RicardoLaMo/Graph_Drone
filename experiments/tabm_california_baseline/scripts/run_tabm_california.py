@@ -16,22 +16,43 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from experiments.tab_foundation_compare.src.aligned_california import write_aligned_california_dataset
+from experiments.tab_foundation_compare.src.runtime_support import (
+    ALIGNED_CANONICAL_SEED,
+    default_foundation_python,
+    default_tabm_upstream_root,
+    seed_aware_dataset_name,
+    seed_aware_run_name,
+)
 from experiments.tabm_california_baseline.src.run_config import prepare_model_config
 from experiments.tabm_california_baseline.src.upstream_refs import extract_upstream_california_refs
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--upstream-root", type=Path, default=Path("/private/tmp/tabm_clone_inspect_20260308/paper"))
+    parser.add_argument("--upstream-root", type=Path, default=default_tabm_upstream_root(REPO_ROOT))
     parser.add_argument(
         "--venv-python",
         type=Path,
-        default=REPO_ROOT / ".venv-foundation312" / "bin" / "python",
+        default=default_foundation_python(REPO_ROOT),
     )
     parser.add_argument("--config", default="0-evaluation/0")
+    parser.add_argument(
+        "--seed",
+        "--split-seed",
+        dest="seed",
+        type=int,
+        default=ALIGNED_CANONICAL_SEED,
+        help="Aligned California split seed. Keeps historical filenames when set to 42.",
+    )
     parser.add_argument("--smoke", action="store_true")
+    parser.add_argument(
+        "--device-policy",
+        choices=["auto", "cpu"],
+        default="auto",
+        help="Use 'auto' to let upstream TabM use CUDA when visible on H200; use 'cpu' for legacy CPU-first runs.",
+    )
     parser.add_argument("--output-root", type=Path, default=REPO_ROOT / "experiments" / "tabm_california_baseline")
-    parser.add_argument("--dataset-name", default="california_aligned_ours")
+    parser.add_argument("--dataset-name", default="")
     return parser.parse_args()
 
 
@@ -58,24 +79,34 @@ def main():
     for directory in [art_dir, log_dir, rep_dir, cfg_dir]:
         directory.mkdir(parents=True, exist_ok=True)
 
-    local_data_dir = art_dir / "data" / args.dataset_name
-    write_aligned_california_dataset(local_data_dir, seed=42)
+    dataset_name = args.dataset_name or seed_aware_dataset_name(
+        "california_aligned_ours",
+        args.seed,
+        canonical_seed=ALIGNED_CANONICAL_SEED,
+    )
+    local_data_dir = art_dir / "data" / dataset_name
+    write_aligned_california_dataset(local_data_dir, seed=args.seed)
 
     source_config = args.upstream_root / "exp" / "tabm" / "california" / f"{args.config}.toml"
     if not source_config.exists():
         raise FileNotFoundError(source_config)
 
-    run_name = args.config.replace("/", "__") + ("__smoke" if args.smoke else "")
+    run_name = seed_aware_run_name(
+        args.config.replace("/", "__"),
+        args.seed,
+        canonical_seed=ALIGNED_CANONICAL_SEED,
+        smoke=args.smoke,
+    )
     local_config = cfg_dir / f"{run_name}.toml"
     prepare_model_config(
         source_config=source_config,
         output_config=local_config,
-        data_path=f"data/{args.dataset_name}",
+        data_path=f"data/{dataset_name}",
         smoke=args.smoke,
         amp=False,
     )
 
-    upstream_data_dir = args.upstream_root / "data" / args.dataset_name
+    upstream_data_dir = args.upstream_root / "data" / dataset_name
     upstream_data_dir.parent.mkdir(parents=True, exist_ok=True)
     if upstream_data_dir.exists():
         shutil.rmtree(upstream_data_dir)
@@ -84,6 +115,8 @@ def main():
     _patch_tabm_for_modern_torch(args.upstream_root)
 
     env = os.environ.copy()
+    if args.device_policy == "cpu":
+        env["CUDA_VISIBLE_DEVICES"] = ""
     env.setdefault("OMP_NUM_THREADS", "1")
     env.setdefault("MKL_NUM_THREADS", "1")
     env.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
@@ -110,6 +143,9 @@ def main():
     upstream_report_path = run_output_dir / "report.json"
     report = {
         "config": args.config,
+        "seed": args.seed,
+        "dataset_name": dataset_name,
+        "device_policy": args.device_policy,
         "smoke": args.smoke,
         "returncode": result.returncode,
         "local_config": str(local_config),

@@ -18,16 +18,129 @@ if str(REPO_ROOT) not in sys.path:
 from experiments.tabr_california_baseline.src.data_bridge import write_california_dataset
 from experiments.tabr_california_baseline.src.run_config import prepare_eval_config
 from experiments.tabr_california_baseline.src.upstream_refs import extract_upstream_california_refs
+from experiments.tab_foundation_compare.src.runtime_support import (
+    UPSTREAM_CANONICAL_SEED,
+    default_foundation_python,
+    default_single_gpu_cuda_visible_devices,
+    default_tabr_upstream_root,
+    seed_aware_dataset_name,
+    seed_aware_run_name,
+)
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--upstream-root", type=Path, default=Path("/private/tmp/tabr_clone_inspect"))
-    parser.add_argument("--venv-python", type=Path, default=REPO_ROOT / ".venv-tabr312" / "bin" / "python")
+    parser.add_argument("--upstream-root", type=Path, default=default_tabr_upstream_root(REPO_ROOT))
+    parser.add_argument("--venv-python", type=Path, default=default_foundation_python(REPO_ROOT))
+    parser.add_argument(
+        "--device-policy",
+        choices=["auto", "cpu"],
+        default="auto",
+        help="Use CUDA when available in auto mode; cpu blanks CUDA visibility.",
+    )
     parser.add_argument("--config", default="0-evaluation/0")
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=UPSTREAM_CANONICAL_SEED,
+        help="Local exported dataset seed. Keeps historical filenames when set to 0.",
+    )
     parser.add_argument("--smoke", action="store_true")
     parser.add_argument("--output-root", type=Path, default=REPO_ROOT / "experiments" / "tabr_california_baseline")
+    parser.add_argument("--dataset-name", default="")
     return parser.parse_args()
+
+
+def _patch_tabr_for_modern_env(upstream_root: Path) -> None:
+    util_path = upstream_root / "lib" / "util.py"
+    util_text = util_path.read_text()
+    util_variants = [
+        (
+            "def load_checkpoint(output: str | Path, **kwargs) -> Any:\n"
+            "    return torch.load(get_checkpoint_path(output), **kwargs)\n",
+            "def load_checkpoint(output: str | Path, **kwargs) -> Any:\n"
+            "    kwargs.setdefault('weights_only', False)\n"
+            "    return torch.load(get_checkpoint_path(output), **kwargs)\n",
+        ),
+        (
+            "def load_checkpoint(output: Union[str, Path], **kwargs) -> JSONDict:\n"
+            "    return torch.load(get_checkpoint_path(output), **kwargs)\n",
+            "def load_checkpoint(output: Union[str, Path], **kwargs) -> JSONDict:\n"
+            "    kwargs.setdefault('weights_only', False)\n"
+            "    return torch.load(get_checkpoint_path(output), **kwargs)\n",
+        ),
+    ]
+    for util_old, util_new in util_variants:
+        if util_old in util_text and util_new not in util_text:
+            util_text = util_text.replace(util_old, util_new)
+    util_path.write_text(util_text)
+
+    tabr_path = upstream_root / "bin" / "tabr.py"
+    text = tabr_path.read_text()
+    old_search = (
+        "        with torch.no_grad():\n"
+        "            if self.search_index is None:\n"
+        "                self.search_index = (\n"
+        "                    faiss.GpuIndexFlatL2(faiss.StandardGpuResources(), d_main)\n"
+        "                    if device.type == 'cuda'\n"
+        "                    else faiss.IndexFlatL2(d_main)\n"
+        "                )\n"
+        "            # Updating the index is much faster than creating a new one.\n"
+        "            self.search_index.reset()\n"
+        "            self.search_index.add(candidate_k)  # type: ignore[code]\n"
+        "            distances: Tensor\n"
+        "            context_idx: Tensor\n"
+        "            distances, context_idx = self.search_index.search(  # type: ignore[code]\n"
+        "                k, context_size + (1 if is_train else 0)\n"
+        "            )\n"
+        "            if is_train:\n"
+        "                # NOTE: to avoid leakage, the index i must be removed from the i-th row,\n"
+        "                # (because of how candidate_k is constructed).\n"
+        "                distances[\n"
+        "                    context_idx == torch.arange(batch_size, device=device)[:, None]\n"
+        "                ] = torch.inf\n"
+        "                # Not the most elegant solution to remove the argmax, but anyway.\n"
+        "                context_idx = context_idx.gather(-1, distances.argsort()[:, :-1])\n"
+    )
+    new_search = (
+        "        with torch.no_grad():\n"
+        "            use_gpu_faiss = device.type == 'cuda' and hasattr(faiss, 'StandardGpuResources')\n"
+        "            if self.search_index is None:\n"
+        "                self.search_index = (\n"
+        "                    faiss.GpuIndexFlatL2(faiss.StandardGpuResources(), d_main)\n"
+        "                    if use_gpu_faiss\n"
+        "                    else faiss.IndexFlatL2(d_main)\n"
+        "                )\n"
+        "            # Updating the index is much faster than creating a new one.\n"
+        "            self.search_index.reset()\n"
+        "            distances: Tensor\n"
+        "            context_idx: Tensor\n"
+        "            if use_gpu_faiss:\n"
+        "                self.search_index.add(candidate_k)  # type: ignore[code]\n"
+        "                distances, context_idx = self.search_index.search(  # type: ignore[code]\n"
+        "                    k, context_size + (1 if is_train else 0)\n"
+        "                )\n"
+        "            else:\n"
+        "                candidate_k_np = np.ascontiguousarray(candidate_k.detach().cpu().numpy())\n"
+        "                k_np = np.ascontiguousarray(k.detach().cpu().numpy())\n"
+        "                self.search_index.add(candidate_k_np)  # type: ignore[code]\n"
+        "                distances_np, context_idx_np = self.search_index.search(  # type: ignore[code]\n"
+        "                    k_np, context_size + (1 if is_train else 0)\n"
+        "                )\n"
+        "                distances = torch.from_numpy(distances_np).to(device=device)\n"
+        "                context_idx = torch.from_numpy(context_idx_np).to(device=device)\n"
+        "            if is_train:\n"
+        "                # NOTE: to avoid leakage, the index i must be removed from the i-th row,\n"
+        "                # (because of how candidate_k is constructed).\n"
+        "                distances[\n"
+        "                    context_idx == torch.arange(batch_size, device=device)[:, None]\n"
+        "                ] = torch.inf\n"
+        "                # Not the most elegant solution to remove the argmax, but anyway.\n"
+        "                context_idx = context_idx.gather(-1, distances.argsort()[:, :-1])\n"
+    )
+    if old_search in text and "use_gpu_faiss" not in text:
+        text = text.replace(old_search, new_search)
+    tabr_path.write_text(text)
 
 
 def main():
@@ -40,13 +153,23 @@ def main():
     for directory in [art_dir, log_dir, rep_dir, cfg_dir]:
         directory.mkdir(parents=True, exist_ok=True)
 
-    local_data_dir = art_dir / "data" / "california_local"
-    write_california_dataset(local_data_dir, seed=0)
+    dataset_name = args.dataset_name or seed_aware_dataset_name(
+        "california_local",
+        args.seed,
+        canonical_seed=UPSTREAM_CANONICAL_SEED,
+    )
+    local_data_dir = art_dir / "data" / dataset_name
+    write_california_dataset(local_data_dir, seed=args.seed)
 
     source_config = args.upstream_root / "exp" / "tabr" / "california" / f"{args.config}.toml"
     if not source_config.exists():
         raise FileNotFoundError(source_config)
-    run_name = args.config.replace("/", "__") + ("__smoke" if args.smoke else "")
+    run_name = seed_aware_run_name(
+        args.config.replace("/", "__"),
+        args.seed,
+        canonical_seed=UPSTREAM_CANONICAL_SEED,
+        smoke=args.smoke,
+    )
     local_config = cfg_dir / f"{run_name}.toml"
     prepare_eval_config(
         source_config=source_config,
@@ -55,17 +178,24 @@ def main():
         smoke=args.smoke,
     )
 
-    upstream_data_dir = args.upstream_root / "data" / "california_local"
+    upstream_data_dir = args.upstream_root / "data" / dataset_name
     upstream_data_dir.parent.mkdir(parents=True, exist_ok=True)
     if upstream_data_dir.exists():
         shutil.rmtree(upstream_data_dir)
     shutil.copytree(local_data_dir, upstream_data_dir)
 
+    _patch_tabr_for_modern_env(args.upstream_root)
+
     env = os.environ.copy()
     env["PROJECT_DIR"] = str(args.upstream_root)
-    env.pop("CUDA_VISIBLE_DEVICES", None)
-    # These guards were required to run upstream TabR stably on Apple Silicon
-    # with CPU FAISS and modern PyTorch.
+    if args.device_policy == "cpu":
+        env["CUDA_VISIBLE_DEVICES"] = ""
+    else:
+        env["CUDA_VISIBLE_DEVICES"] = env.get(
+            "CUDA_VISIBLE_DEVICES",
+            default_single_gpu_cuda_visible_devices(),
+        )
+    # These guards keep upstream TabR stable with mixed CPU/GPU FAISS paths and modern PyTorch.
     env.setdefault("PYTHONFAULTHANDLER", "1")
     env.setdefault("OMP_NUM_THREADS", "1")
     env.setdefault("MKL_NUM_THREADS", "1")
@@ -93,7 +223,10 @@ def main():
     upstream_report_path = run_output_dir / "report.json"
     report = {
         "config": args.config,
+        "seed": args.seed,
+        "dataset_name": dataset_name,
         "smoke": args.smoke,
+        "device_policy": args.device_policy,
         "returncode": result.returncode,
         "local_config": str(local_config),
         "local_data_dir": str(local_data_dir),

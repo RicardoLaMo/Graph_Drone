@@ -105,6 +105,12 @@ def write_tabpfn_report(
     tabm_rmse: float,
     a6f_rmse: float,
 ) -> None:
+    device_note = f"device `{metrics.get('device', 'unknown')}`"
+    extra_note = (
+        "- CPU-only TabPFN runs above 1000 rows require the current package override."
+        if metrics.get("device") == "cpu"
+        else "- This run uses the CUDA-enabled TabPFN path on the shared H200 environment."
+    )
     lines = [
         "# TabPFN Aligned California Report",
         "",
@@ -124,7 +130,8 @@ def write_tabpfn_report(
         "## Notes",
         "",
         "- This run uses the aligned California split and feature edits from the foundation comparison branch.",
-        "- CPU-only TabPFN runs above 1000 rows require the current package override; this run records the exact train cap used.",
+        f"- Runtime: {device_note}; train cap `{metrics['train_samples_used']}`.",
+        extra_note,
     ]
     output_path.write_text("\n".join(lines) + "\n")
 

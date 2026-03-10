@@ -10,10 +10,11 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from experiments.tabr_california_baseline.src.upstream_refs import extract_upstream_california_refs
+from experiments.tab_foundation_compare.src.runtime_support import default_tabr_upstream_root
 
 
 def main():
-    upstream_root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("/private/tmp/tabr_clone_inspect")
+    upstream_root = Path(sys.argv[1]) if len(sys.argv) > 1 else default_tabr_upstream_root(REPO_ROOT)
     output_path = (
         Path(sys.argv[2])
         if len(sys.argv) > 2

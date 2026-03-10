@@ -11,6 +11,10 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from experiments.tab_foundation_compare.src.aligned_california import build_aligned_california_split
+from experiments.tab_foundation_compare.src.runtime_support import (
+    ALIGNED_CANONICAL_SEED,
+    seed_aware_run_name,
+)
 from experiments.tab_foundation_compare.src.tabpfn_baseline import (
     evaluate_tabpfn_regression,
     write_tabpfn_json,
@@ -37,11 +41,20 @@ def parse_args() -> argparse.Namespace:
         help="Use full aligned train split when <= 0; otherwise subsample train rows to this cap.",
     )
     parser.add_argument("--n-estimators", type=int, default=8)
+    parser.add_argument("--device", default="cpu")
     parser.add_argument("--smoke", action="store_true")
     return parser.parse_args()
 
 
-def _write_comparison_csv(path: Path, test_rmse: float, val_rmse: float, train_samples: int) -> None:
+def _write_comparison_csv(
+    path: Path,
+    *,
+    test_rmse: float,
+    val_rmse: float,
+    train_samples: int,
+    device: str,
+) -> None:
+    runtime_note = f"TabPFN {device} aligned to repo California split; train cap={train_samples}"
     rows = [
         {
             "stage": "C1",
@@ -50,7 +63,7 @@ def _write_comparison_csv(path: Path, test_rmse: float, val_rmse: float, train_s
             "val_rmse": f"{val_rmse:.10f}",
             "best_step_or_epoch": "",
             "source": "current aligned run snapshot",
-            "notes": f"TabPFN 6.4.1 CPU aligned to repo California split; train cap={train_samples}",
+            "notes": runtime_note,
         },
         {
             "stage": "C1",
@@ -96,7 +109,10 @@ def main() -> None:
     split = build_aligned_california_split(seed=args.seed)
     max_eval_rows = 128 if args.smoke else None
     full_train = args.max_train_samples <= 0
-    max_train_samples = min(args.max_train_samples, 512) if args.smoke else (None if full_train else args.max_train_samples)
+    if args.smoke:
+        max_train_samples = 512 if full_train else min(args.max_train_samples, 512)
+    else:
+        max_train_samples = None if full_train else args.max_train_samples
     n_estimators = 2 if args.smoke else args.n_estimators
 
     metrics = evaluate_tabpfn_regression(
@@ -105,13 +121,20 @@ def main() -> None:
         max_train_samples=max_train_samples,
         n_estimators=n_estimators,
         max_eval_rows=max_eval_rows,
+        device=args.device,
     )
     if args.smoke:
-        run_name = "tabpfn_aligned__smoke"
+        base_name = "tabpfn_aligned"
     elif full_train:
-        run_name = "tabpfn_aligned__full"
+        base_name = "tabpfn_aligned__full"
     else:
-        run_name = f"tabpfn_aligned__train{metrics['train_samples_used']}"
+        base_name = f"tabpfn_aligned__train{metrics['train_samples_used']}"
+    run_name = seed_aware_run_name(
+        base_name,
+        args.seed,
+        canonical_seed=ALIGNED_CANONICAL_SEED,
+        smoke=args.smoke,
+    )
     write_tabpfn_json(rep_dir / f"{run_name}.json", metrics)
     write_tabpfn_report(
         rep_dir / f"{run_name}.md",
@@ -125,6 +148,7 @@ def main() -> None:
         test_rmse=metrics["test"]["rmse"],
         val_rmse=metrics["val"]["rmse"],
         train_samples=metrics["train_samples_used"],
+        device=metrics["device"],
     )
     print(
         {
