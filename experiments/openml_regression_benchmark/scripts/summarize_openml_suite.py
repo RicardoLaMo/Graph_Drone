@@ -2,13 +2,25 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from experiments.openml_regression_benchmark.src.openml_tasks import dataset_run_tag
+
+RESULT_FILES = (
+    "graphdrone_results.json",
+    "tabpfn_results.json",
+    "autogluon_results.json",
+    "tabr_results.json",
+    "tabm_results.json",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -22,31 +34,65 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def discover_run_dirs(reports_root: Path) -> list[Path]:
+    manifest_path = reports_root / "suite_manifest.json"
+    if manifest_path.exists():
+        payload = json.loads(manifest_path.read_text())
+        run_dirs: list[Path] = []
+        seen: set[Path] = set()
+        for row in payload:
+            run_name = row.get(
+                "run_name",
+                dataset_run_tag(
+                    str(row["dataset"]),
+                    repeat=int(row.get("repeat", 0)),
+                    fold=int(row["fold"]),
+                    smoke=bool(row.get("smoke", False)),
+                ),
+            )
+            run_dir = reports_root / str(run_name)
+            if run_dir in seen:
+                continue
+            seen.add(run_dir)
+            run_dirs.append(run_dir)
+        return sorted(run_dirs)
+    return sorted(
+        {
+            path.parent
+            for result_name in RESULT_FILES
+            for path in reports_root.rglob(result_name)
+        }
+    )
+
+
 def load_rows(reports_root: Path, *, include_smoke: bool) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
-    run_dirs = sorted(path.parent for path in reports_root.rglob("graphdrone_results.json"))
+    run_dirs = discover_run_dirs(reports_root)
     for run_dir in run_dirs:
         if not include_smoke and any(part.endswith("__smoke") for part in run_dir.parts):
             continue
+        if not run_dir.exists():
+            continue
         present = {path.name for path in run_dir.glob("*.json")}
-        payload = json.loads((run_dir / "graphdrone_results.json").read_text())
-        dataset = payload["dataset"]
-        for row in payload["rows"]:
+        if "graphdrone_results.json" in present:
+            payload = json.loads((run_dir / "graphdrone_results.json").read_text())
             dataset = payload["dataset"]
-            rows.append(
-                {
-                    "dataset": dataset["dataset_key"],
-                    "repeat": dataset["repeat"],
-                    "fold": dataset["fold"],
-                    "model": row["model"],
-                    "test_rmse": row["test_rmse"],
-                    "val_rmse": row["val_rmse"],
-                    "test_mae": row["test_mae"],
-                    "test_r2": row["test_r2"],
-                }
-            )
+            for row in payload["rows"]:
+                dataset = payload["dataset"]
+                rows.append(
+                    {
+                        "dataset": dataset["dataset_key"],
+                        "repeat": dataset["repeat"],
+                        "fold": dataset["fold"],
+                        "model": row["model"],
+                        "test_rmse": row["test_rmse"],
+                        "val_rmse": row["val_rmse"],
+                        "test_mae": row["test_mae"],
+                        "test_r2": row["test_r2"],
+                    }
+                )
 
-        for name in ("tabpfn_results.json", "tabr_results.json", "tabm_results.json"):
+        for name in ("tabpfn_results.json", "autogluon_results.json", "tabr_results.json", "tabm_results.json"):
             if name not in present:
                 continue
             payload = json.loads((run_dir / name).read_text())
@@ -118,6 +164,8 @@ def main() -> None:
                 "vs TabM": float((router - dataset_rows["TabM"]).mean()),
                 "vs TabPFN": float((router - dataset_rows["TabPFN"]).mean()),
             }
+            if "AutoGluon" in dataset_rows.columns:
+                deltas["vs AutoGluon"] = float((router - dataset_rows["AutoGluon"]).mean())
             lines.extend(["### GraphDrone Router Deltas", ""])
             for label, value in deltas.items():
                 lines.append(f"- {label}: `{value:+.4f}` mean RMSE delta")

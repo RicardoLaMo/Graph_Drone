@@ -2,7 +2,7 @@
   "dataset": "used_fiat_500",
   "worktree_slug": "used-fiat-500",
   "output_root": "experiments/openml_regression_benchmark/reports_by_dataset/used_fiat_500",
-  "models": ["GraphDrone", "TabPFN", "TabR", "TabM"],
+  "models": ["GraphDrone", "TabPFN", "AutoGluon", "TabR", "TabM"],
   "folds": [0, 1, 2],
   "repeat": 0,
   "seed": 42,

@@ -2,7 +2,7 @@
   "dataset": "wine_quality",
   "worktree_slug": "wine-quality",
   "output_root": "experiments/openml_regression_benchmark/reports_by_dataset/wine_quality",
-  "models": ["GraphDrone", "TabPFN", "TabR", "TabM"],
+  "models": ["GraphDrone", "TabPFN", "AutoGluon", "TabR", "TabM"],
   "folds": [0, 1, 2],
   "repeat": 0,
   "seed": 42,

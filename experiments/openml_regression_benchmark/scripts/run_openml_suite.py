@@ -11,16 +11,41 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = Path(__file__).resolve().parents[3]
-SHARED_PYTHON = REPO_ROOT / ".venv-h200" / "bin" / "python"
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from experiments.openml_regression_benchmark.src.openml_tasks import available_dataset_keys
+from experiments.openml_regression_benchmark.src.openml_tasks import available_dataset_keys, dataset_run_tag
+
+
+def resolve_shared_python(
+    *,
+    repo_root: Path = REPO_ROOT,
+    environ: dict[str, str] | None = None,
+    current_python: str | None = None,
+) -> Path:
+    env = os.environ if environ is None else environ
+    override = env.get("GRAPHDRONE_SHARED_PYTHON", "").strip()
+    if override:
+        override_path = Path(override).expanduser().resolve()
+        if override_path.exists():
+            return override_path
+    for root in (repo_root, *repo_root.parents):
+        candidate = root / ".venv-h200" / "bin" / "python"
+        if candidate.exists():
+            return candidate
+    fallback = Path(current_python or sys.executable).resolve()
+    if fallback.exists():
+        return fallback
+    raise FileNotFoundError("Could not locate a usable Python interpreter for benchmark subprocesses")
+
+
+SHARED_PYTHON = resolve_shared_python()
 
 
 MODEL_SCRIPTS = {
     "GraphDrone": SCRIPT_DIR / "run_graphdrone_openml.py",
     "TabPFN": SCRIPT_DIR / "run_tabpfn_openml.py",
+    "AutoGluon": SCRIPT_DIR / "run_autogluon_openml.py",
     "TabR": SCRIPT_DIR / "run_tabr_openml.py",
     "TabM": SCRIPT_DIR / "run_tabm_openml.py",
 }
@@ -31,11 +56,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--datasets", nargs="+", default=available_dataset_keys())
     parser.add_argument("--repeat", type=int, default=0)
     parser.add_argument("--folds", nargs="+", type=int, default=[0, 1, 2])
-    parser.add_argument("--models", nargs="+", default=["GraphDrone", "TabPFN", "TabR", "TabM"])
+    parser.add_argument("--models", nargs="+", default=["GraphDrone", "TabPFN", "AutoGluon", "TabR", "TabM"])
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--split-seed", type=int, default=42)
     parser.add_argument("--graphdrone-max-train-samples", type=int, default=0)
     parser.add_argument("--tabpfn-max-train-samples", type=int, default=0)
+    parser.add_argument(
+        "--autogluon-time-limit",
+        type=float,
+        default=float(os.environ.get("GRAPHDRONE_OPENML_AUTOGLUON_TIME_LIMIT", "300")),
+    )
+    parser.add_argument(
+        "--autogluon-num-cpus",
+        default=os.environ.get("GRAPHDRONE_OPENML_AUTOGLUON_NUM_CPUS", "4"),
+    )
+    parser.add_argument(
+        "--autogluon-num-gpus",
+        default=os.environ.get("GRAPHDRONE_OPENML_AUTOGLUON_NUM_GPUS", "auto"),
+    )
     parser.add_argument("--gpus", default="auto")
     parser.add_argument("--gpu-order", choices=["high-first", "low-first"], default=os.environ.get("GRAPH_DRONE_GPU_ORDER", "high-first"))
     parser.add_argument(
@@ -202,7 +240,14 @@ def main() -> None:
     for dataset in args.datasets:
         for fold in args.folds:
             for model in args.models:
-                tasks.append({"dataset": dataset, "fold": fold, "model": model})
+                tasks.append(
+                    {
+                        "dataset": dataset,
+                        "fold": fold,
+                        "model": model,
+                        "run_name": dataset_run_tag(dataset, repeat=args.repeat, fold=fold, smoke=args.smoke),
+                    }
+                )
 
     running: dict[tuple[int, ...], dict[str, object]] = {}
     manifest: list[dict[str, object]] = []
@@ -216,12 +261,15 @@ def main() -> None:
                     {
                         "gpus": list(gpu_allocation),
                         "dataset": info["dataset"],
+                        "repeat": args.repeat,
                         "fold": info["fold"],
                         "model": info["model"],
+                        "run_name": info["run_name"],
                         "returncode": proc.returncode,
                         "command": info["command"],
                         "cuda_visible_devices": info["cuda_visible_devices"],
                         "gpu_span": len(gpu_allocation),
+                        "smoke": args.smoke,
                     }
                 )
                 finished.append(gpu_allocation)
@@ -271,6 +319,19 @@ def main() -> None:
             ]
             if model in {"GraphDrone", "TabPFN"}:
                 cmd.extend(["--device", "auto"])
+            if model == "AutoGluon":
+                cmd.extend(
+                    [
+                        "--device-policy",
+                        "auto",
+                        "--time-limit",
+                        str(args.autogluon_time_limit),
+                        "--num-cpus",
+                        str(args.autogluon_num_cpus),
+                        "--num-gpus",
+                        str(args.autogluon_num_gpus),
+                    ]
+                )
             if model == "GraphDrone" and len(gpu_allocation) > 1:
                 cmd.append("--all-gpus")
                 parallel_workers = args.graphdrone_parallel_workers or len(gpu_allocation)
@@ -290,6 +351,7 @@ def main() -> None:
                 "dataset": task["dataset"],
                 "fold": task["fold"],
                 "model": model,
+                "run_name": task["run_name"],
                 "command": cmd,
                 "cuda_visible_devices": cuda_visible_devices,
             }

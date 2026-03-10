@@ -16,6 +16,7 @@ MODEL_COLUMNS = [
     "GraphDrone_foundation_router",
     "GraphDrone_foundation_crossfit",
     "GraphDrone_trust_gate",
+    "AutoGluon",
     "TabPFN",
     "TabR",
     "TabM",
@@ -30,6 +31,13 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=None,
         help="Optional path to openml_benchmark_summary.csv. Defaults to <reports-root>/openml_benchmark_summary.csv",
+    )
+    parser.add_argument(
+        "--extra-summary-csv",
+        type=Path,
+        nargs="*",
+        default=(),
+        help="Optional additional summary CSV files to merge in before building the leaderboard",
     )
     parser.add_argument(
         "--output-md",
@@ -62,8 +70,8 @@ def to_markdown(df: pd.DataFrame) -> str:
         "",
         "Mean test RMSE by dataset across the foundation-view OpenML benchmark.",
         "",
-        "| Dataset | GraphDrone_FULL | GraphDrone_FOUNDATION | GraphDrone_router | GraphDrone_crossfit | GraphDrone_foundation_router | GraphDrone_foundation_crossfit | GraphDrone_trust_gate | TabPFN | TabR | TabM | Best |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
+        "| Dataset | GraphDrone_FULL | GraphDrone_FOUNDATION | GraphDrone_router | GraphDrone_crossfit | GraphDrone_foundation_router | GraphDrone_foundation_crossfit | GraphDrone_trust_gate | AutoGluon | TabPFN | TabR | TabM | Best |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
     for row in df.itertuples(index=False):
         values = [row.Dataset]
@@ -85,6 +93,10 @@ def main() -> None:
     output_csv = args.output_csv or (args.reports_root / "graphdrone_foundation_portfolio_leaderboard.csv")
 
     summary = pd.read_csv(summary_csv)
+    for extra_path in args.extra_summary_csv:
+        extra_df = pd.read_csv(extra_path)
+        summary = pd.concat([summary, extra_df], ignore_index=True)
+    summary = summary.sort_values(["dataset", "model"]).drop_duplicates(["dataset", "model"], keep="last")
     leaderboard = build_leaderboard(summary)
     leaderboard.to_csv(output_csv, index=False)
     output_md.write_text(to_markdown(leaderboard))

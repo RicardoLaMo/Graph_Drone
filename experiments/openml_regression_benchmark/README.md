@@ -1,7 +1,7 @@
 # OpenML Regression Benchmark
 
-This benchmark runs the current GraphDrone family against `TabPFN`, `TabR`, and
-`TabM` on the shared H200 environment.
+This benchmark runs the current GraphDrone family against `TabPFN`,
+`AutoGluon`, `TabR`, and `TabM` on the shared H200 environment.
 
 ## Canonical Runtime
 
@@ -60,5 +60,9 @@ cd /path/to/Graph_Drone/.worktrees/graphdrone-openml-regression
   `experiments/openml_regression_benchmark/openml_portfolio_leaderboard.md`
 - California-focused table:
   `experiments/openml_regression_benchmark/california_lineage_leaderboard.md`
+- Foundation-view plus AutoGluon leaderboard:
+  `experiments/openml_regression_benchmark/reports_foundation_view_autogluon_20260310/graphdrone_foundation_autogluon_portfolio_leaderboard.md`
+- AutoGluon assessment note:
+  `experiments/openml_regression_benchmark/reports_foundation_view_autogluon_20260310/autogluon_assessment.md`
 - Earlier 3-fold benchmark summary:
   `experiments/openml_regression_benchmark/reports_h200_20260310_full/openml_benchmark_summary.md`

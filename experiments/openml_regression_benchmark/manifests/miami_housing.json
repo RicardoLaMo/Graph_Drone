@@ -2,7 +2,7 @@
   "dataset": "miami_housing",
   "worktree_slug": "miami-housing",
   "output_root": "experiments/openml_regression_benchmark/reports_by_dataset/miami_housing",
-  "models": ["GraphDrone", "TabPFN", "TabR", "TabM"],
+  "models": ["GraphDrone", "TabPFN", "AutoGluon", "TabR", "TabM"],
   "folds": [0, 1, 2],
   "repeat": 0,
   "seed": 42,

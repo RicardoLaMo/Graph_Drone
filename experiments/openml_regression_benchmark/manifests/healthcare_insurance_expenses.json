@@ -2,7 +2,7 @@
   "dataset": "healthcare_insurance_expenses",
   "worktree_slug": "healthcare-insurance-expenses",
   "output_root": "experiments/openml_regression_benchmark/reports_by_dataset/healthcare_insurance_expenses",
-  "models": ["GraphDrone", "TabPFN", "TabR", "TabM"],
+  "models": ["GraphDrone", "TabPFN", "AutoGluon", "TabR", "TabM"],
   "folds": [0, 1, 2],
   "repeat": 0,
   "seed": 42,

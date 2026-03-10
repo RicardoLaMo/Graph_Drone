@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from collections import deque
 
 from experiments.openml_regression_benchmark.scripts.run_openml_suite import (
@@ -8,6 +10,7 @@ from experiments.openml_regression_benchmark.scripts.run_openml_suite import (
     parse_gpu_status,
     pop_first_schedulable_task,
     resolve_gpu_pool,
+    resolve_shared_python,
     take_gpu_allocation,
 )
 
@@ -61,6 +64,7 @@ def test_discover_free_gpus_filters_on_thresholds():
 def test_graphdrone_gpu_span_is_clipped_to_four():
     assert gpu_span_for_model("GraphDrone", graphdrone_gpu_span=8) == 4
     assert gpu_span_for_model("TabPFN", graphdrone_gpu_span=8) == 1
+    assert gpu_span_for_model("AutoGluon", graphdrone_gpu_span=8) == 1
 
 
 def test_take_gpu_allocation_returns_contiguous_slice():
@@ -92,3 +96,16 @@ def test_pop_first_schedulable_task_preserves_queue_when_nothing_fits():
 
     assert task is None
     assert list(tasks) == [{"dataset": "diamonds", "fold": 0, "model": "GraphDrone"}]
+
+
+def test_resolve_shared_python_prefers_env_override(tmp_path):
+    fake_python = tmp_path / "custom-python"
+    fake_python.write_text("#!/bin/sh\n")
+
+    resolved = resolve_shared_python(
+        repo_root=tmp_path / "repo",
+        environ={"GRAPHDRONE_SHARED_PYTHON": str(fake_python)},
+        current_python="/missing/python",
+    )
+
+    assert resolved == fake_python.resolve()

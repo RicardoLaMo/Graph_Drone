@@ -2,7 +2,7 @@
   "dataset": "houses",
   "worktree_slug": "houses",
   "output_root": "experiments/openml_regression_benchmark/reports_by_dataset/houses",
-  "models": ["GraphDrone", "TabPFN", "TabR", "TabM"],
+  "models": ["GraphDrone", "TabPFN", "AutoGluon", "TabR", "TabM"],
   "folds": [0, 1, 2],
   "repeat": 0,
   "seed": 42,

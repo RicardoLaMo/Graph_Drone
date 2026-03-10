@@ -2,7 +2,7 @@
   "dataset": "airfoil_self_noise",
   "worktree_slug": "airfoil-self-noise",
   "output_root": "experiments/openml_regression_benchmark/reports_by_dataset/airfoil_self_noise",
-  "models": ["GraphDrone", "TabPFN", "TabR", "TabM"],
+  "models": ["GraphDrone", "TabPFN", "AutoGluon", "TabR", "TabM"],
   "folds": [0, 1, 2],
   "repeat": 0,
   "seed": 42,
