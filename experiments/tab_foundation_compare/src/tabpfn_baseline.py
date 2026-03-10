@@ -42,7 +42,14 @@ class TabPFNRunConfig:
     n_preprocessing_jobs: int = 1
 
 
-def evaluate_tabpfn_regression(
+@dataclass(frozen=True)
+class TabPFNPredictionResult:
+    pred_val: np.ndarray
+    pred_test: np.ndarray
+    metrics: dict
+
+
+def predict_tabpfn_regression(
     split: SplitData,
     seed: int = 42,
     max_train_samples: int | None = 8000,
@@ -86,7 +93,7 @@ def evaluate_tabpfn_regression(
     pred_val = model.predict(X_val).astype(np.float32)
     pred_test = model.predict(X_test).astype(np.float32)
 
-    return {
+    metrics = {
         "seed": seed,
         "train_samples_used": int(len(X_train)),
         "n_estimators": int(n_estimators),
@@ -95,6 +102,31 @@ def evaluate_tabpfn_regression(
         "val": _score_regression(y_val, pred_val),
         "test": _score_regression(y_test, pred_test),
     }
+    return TabPFNPredictionResult(
+        pred_val=pred_val,
+        pred_test=pred_test,
+        metrics=metrics,
+    )
+
+
+def evaluate_tabpfn_regression(
+    split: SplitData,
+    seed: int = 42,
+    max_train_samples: int | None = 8000,
+    n_estimators: int = 8,
+    max_eval_rows: int | None = None,
+    device: str = "cpu",
+    n_preprocessing_jobs: int = 1,
+) -> dict:
+    return predict_tabpfn_regression(
+        split=split,
+        seed=seed,
+        max_train_samples=max_train_samples,
+        n_estimators=n_estimators,
+        max_eval_rows=max_eval_rows,
+        device=device,
+        n_preprocessing_jobs=n_preprocessing_jobs,
+    ).metrics
 
 
 def write_tabpfn_report(

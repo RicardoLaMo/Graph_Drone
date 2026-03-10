@@ -23,9 +23,11 @@ from experiments.openml_regression_benchmark.src.openml_tasks import (
     limit_train_rows,
     split_summary,
 )
+from experiments.tab_foundation_compare.src.tabpfn_baseline import predict_tabpfn_regression
 from experiments.tabpfn_view_router.scripts.run_experiment import fit_view_experts
 from experiments.tabpfn_view_router.src.data import build_quality_features
 from experiments.tabpfn_view_router.src.router import (
+    build_foundation_router_features,
     build_trust_gate_features,
     fit_crossfit_router,
     fit_soft_router,
@@ -48,6 +50,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--split-seed", type=int, default=42)
     parser.add_argument("--n-estimators", type=int, default=1)
     parser.add_argument("--max-train-samples", type=int, default=0)
+    parser.add_argument("--foundation-n-estimators", type=int, default=8)
+    parser.add_argument("--foundation-max-train-samples", type=int, default=0)
     parser.add_argument("--device", type=str, default="auto")
     parser.add_argument("--device-mode", choices=["per_view", "per_model"], default="per_view")
     parser.add_argument("--all-gpus", action="store_true")
@@ -123,6 +127,20 @@ def gate_feature_names(view_names: list[str]) -> list[str]:
         "route_delta",
         "abs_route_delta",
         "view_pred_std",
+    ]
+
+
+def foundation_feature_names(view_names: list[str]) -> list[str]:
+    return [
+        *(f"sigma2_{name}" for name in view_names),
+        *(f"J_{view_names[i]}_{view_names[j]}" for i in range(len(view_names)) for j in range(i + 1, len(view_names))),
+        "mean_J",
+        "foundation_minus_full",
+        "abs_foundation_minus_full",
+        "foundation_minus_mean_internal",
+        "abs_foundation_minus_mean_internal",
+        "internal_pred_std",
+        "all_pred_std",
     ]
 
 
@@ -221,6 +239,35 @@ def main() -> None:
                 "notes": "single-view TabPFN expert",
             }
         )
+
+    foundation_max_train_samples = None if args.foundation_max_train_samples <= 0 else args.foundation_max_train_samples
+    if args.smoke and foundation_max_train_samples is None:
+        foundation_max_train_samples = 1024
+    foundation_result = predict_tabpfn_regression(
+        split=split,
+        seed=args.seed,
+        max_train_samples=foundation_max_train_samples,
+        n_estimators=2 if args.smoke else args.foundation_n_estimators,
+        max_eval_rows=512 if args.smoke else None,
+        device=args.device,
+        n_preprocessing_jobs=args.n_preprocessing_jobs,
+    )
+    foundation_val = foundation_result.pred_val
+    foundation_test = foundation_result.pred_test
+    foundation_metrics_val = foundation_result.metrics["val"]
+    foundation_metrics_test = foundation_result.metrics["test"]
+    model_rows.append(
+        {
+            "model": "GraphDrone_FOUNDATION",
+            "val_rmse": foundation_metrics_val["rmse"],
+            "test_rmse": foundation_metrics_test["rmse"],
+            "val_mae": foundation_metrics_val["mae"],
+            "test_mae": foundation_metrics_test["mae"],
+            "val_r2": foundation_metrics_val["r2"],
+            "test_r2": foundation_metrics_test["r2"],
+            "notes": f"TabPFN foundation expert candidate (n_estimators={foundation_result.metrics['n_estimators']})",
+        }
+    )
 
     pred_uniform_val, w_uniform_val = uniform_mix(pred_val)
     pred_uniform_test, w_uniform_test = uniform_mix(pred_test)
@@ -355,6 +402,86 @@ def main() -> None:
     full_idx = views.view_names.index("FULL")
     full_val = pred_val[:, full_idx]
     full_test = pred_test[:, full_idx]
+    foundation_router_feat_val = build_foundation_router_features(
+        quality_features=quality.val,
+        pred_views=pred_val,
+        pred_foundation=foundation_val,
+        anchor_idx=full_idx,
+    )
+    foundation_router_feat_test = build_foundation_router_features(
+        quality_features=quality.test,
+        pred_views=pred_test,
+        pred_foundation=foundation_test,
+        anchor_idx=full_idx,
+    )
+    pred_val_foundation = np.concatenate([pred_val, foundation_val[:, None]], axis=1).astype(np.float32)
+    pred_test_foundation = np.concatenate([pred_test, foundation_test[:, None]], axis=1).astype(np.float32)
+    foundation_view_names = [*views.view_names, "FOUNDATION"]
+
+    foundation_router = fit_soft_router(
+        x_val=foundation_router_feat_val,
+        pred_val=pred_val_foundation,
+        y_val=split.y_val,
+        x_test=foundation_router_feat_test,
+        pred_test=pred_test_foundation,
+        seed=args.seed,
+    )
+    val_metrics = score_regression(split.y_val, foundation_router.pred_val)
+    test_metrics = score_regression(split.y_test, foundation_router.pred_test)
+    model_rows.append(
+        {
+            "model": "GraphDrone_foundation_router",
+            "val_rmse": val_metrics["rmse"],
+            "test_rmse": test_metrics["rmse"],
+            "val_mae": val_metrics["mae"],
+            "test_mae": test_metrics["mae"],
+            "val_r2": val_metrics["r2"],
+            "test_r2": test_metrics["r2"],
+            "notes": f"softmax router over internal views + FOUNDATION expert (best_epoch={foundation_router.best_epoch})",
+        }
+    )
+    weights_summary["foundation_router"] = [
+        float(foundation_router.weights_val.mean()),
+        float(foundation_router.weights_test.mean()),
+    ]
+    for idx, name in enumerate(foundation_view_names):
+        weights_summary[f"foundation_router_{name}"] = [
+            float(foundation_router.weights_val[:, idx].mean()),
+            float(foundation_router.weights_test[:, idx].mean()),
+        ]
+
+    foundation_crossfit = fit_crossfit_router(
+        x_val=foundation_router_feat_val,
+        pred_val=pred_val_foundation,
+        y_val=split.y_val,
+        x_test=foundation_router_feat_test,
+        pred_test=pred_test_foundation,
+        seed=args.seed,
+    )
+    val_metrics = score_regression(split.y_val, foundation_crossfit.pred_val_oof)
+    test_metrics = score_regression(split.y_test, foundation_crossfit.pred_test)
+    model_rows.append(
+        {
+            "model": "GraphDrone_foundation_crossfit",
+            "val_rmse": val_metrics["rmse"],
+            "test_rmse": test_metrics["rmse"],
+            "val_mae": val_metrics["mae"],
+            "test_mae": test_metrics["mae"],
+            "val_r2": val_metrics["r2"],
+            "test_r2": test_metrics["r2"],
+            "notes": f"{foundation_crossfit.n_splits}-fold OOF router over internal views + FOUNDATION expert",
+        }
+    )
+    weights_summary["foundation_crossfit"] = [
+        float(foundation_crossfit.weights_val_oof.mean()),
+        float(foundation_crossfit.weights_test.mean()),
+    ]
+    for idx, name in enumerate(foundation_view_names):
+        weights_summary[f"foundation_crossfit_{name}"] = [
+            float(foundation_crossfit.weights_val_oof[:, idx].mean()),
+            float(foundation_crossfit.weights_test[:, idx].mean()),
+        ]
+
     trust_gate_feat_val = build_trust_gate_features(
         quality.val,
         pred_full=full_val,
@@ -414,6 +541,18 @@ def main() -> None:
         gate_features_val=trust_gate_feat_val,
         view_names=views.view_names,
     )
+    foundation_router_diagnostics = {
+        "feature_names": foundation_feature_names(views.view_names),
+        "foundation_metrics": foundation_result.metrics,
+        "foundation_router_rmse": {
+            "val": score_regression(split.y_val, foundation_router.pred_val)["rmse"],
+            "test": score_regression(split.y_test, foundation_router.pred_test)["rmse"],
+        },
+        "foundation_crossfit_rmse": {
+            "val": score_regression(split.y_val, foundation_crossfit.pred_val_oof)["rmse"],
+            "test": score_regression(split.y_test, foundation_crossfit.pred_test)["rmse"],
+        },
+    }
 
     run_name = dataset_run_tag(args.dataset, repeat=args.repeat, fold=args.fold, smoke=args.smoke)
     output_dir = (args.output_root / run_name).resolve()
@@ -427,6 +566,19 @@ def main() -> None:
         y_test=split.y_test,
         pred_val=pred_val,
         pred_test=pred_test,
+        foundation_pred_val=foundation_val,
+        foundation_pred_test=foundation_test,
+        foundation_view_names=np.array(foundation_view_names),
+        foundation_router_features_val=foundation_router_feat_val,
+        foundation_router_features_test=foundation_router_feat_test,
+        foundation_router_pred_val=foundation_router.pred_val,
+        foundation_router_pred_test=foundation_router.pred_test,
+        foundation_router_weights_val=foundation_router.weights_val,
+        foundation_router_weights_test=foundation_router.weights_test,
+        foundation_crossfit_pred_val=foundation_crossfit.pred_val_oof,
+        foundation_crossfit_pred_test=foundation_crossfit.pred_test,
+        foundation_crossfit_weights_val=foundation_crossfit.weights_val_oof,
+        foundation_crossfit_weights_test=foundation_crossfit.weights_test,
         sigma2_val=quality.sigma2_val,
         sigma2_test=quality.sigma2_test,
         mean_j_val=quality.mean_j_val,
@@ -466,12 +618,17 @@ def main() -> None:
             "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES", ""),
             "view_devices": view_devices_used,
             "max_train_samples": args.max_train_samples,
+            "foundation_n_estimators": foundation_result.metrics["n_estimators"],
+            "foundation_max_train_samples": args.foundation_max_train_samples,
         },
         "rows": model_rows,
         "weights_summary": weights_summary,
     }
     (output_dir / "graphdrone_results.json").write_text(json.dumps(payload, indent=2) + "\n")
     (artifacts_dir / "gate_diagnostics.json").write_text(json.dumps(gate_diagnostics, indent=2) + "\n")
+    (artifacts_dir / "foundation_router_diagnostics.json").write_text(
+        json.dumps(foundation_router_diagnostics, indent=2) + "\n"
+    )
     write_report(
         output_dir / "report.md",
         run_name=run_name,

@@ -9,6 +9,7 @@ from experiments.tabpfn_view_router.src.data import (
 )
 from experiments.tabpfn_view_router.src.router import (
     _inner_holdout_size,
+    build_foundation_router_features,
     build_trust_gate_features,
     fit_crossfit_router,
     fit_soft_router,
@@ -98,6 +99,22 @@ def test_trust_gate_features_add_disagreement_columns() -> None:
     features = build_trust_gate_features(quality, pred_full, pred_route, pred_views)
 
     assert features.shape == (12, 14)
+    np.testing.assert_allclose(features[:, :11], quality)
+
+
+def test_foundation_router_features_add_foundation_columns() -> None:
+    rng = np.random.default_rng(4)
+    quality = rng.normal(size=(12, 11)).astype(np.float32)
+    pred_views = rng.normal(size=(12, 4)).astype(np.float32)
+    pred_foundation = rng.normal(size=(12,)).astype(np.float32)
+
+    features = build_foundation_router_features(
+        quality_features=quality,
+        pred_views=pred_views,
+        pred_foundation=pred_foundation,
+    )
+
+    assert features.shape == (12, 17)
     np.testing.assert_allclose(features[:, :11], quality)
 
 

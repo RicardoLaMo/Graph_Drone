@@ -94,6 +94,31 @@ def build_trust_gate_features(
     ).astype(np.float32)
 
 
+def build_foundation_router_features(
+    quality_features: np.ndarray,
+    pred_views: np.ndarray,
+    pred_foundation: np.ndarray,
+    *,
+    anchor_idx: int = 0,
+) -> np.ndarray:
+    anchor = pred_views[:, anchor_idx].astype(np.float32)
+    pred_foundation = pred_foundation.astype(np.float32)
+    mean_internal = pred_views.mean(axis=1).astype(np.float32)
+    all_preds = np.concatenate([pred_views.astype(np.float32), pred_foundation[:, None]], axis=1)
+    return np.concatenate(
+        [
+            quality_features.astype(np.float32),
+            (pred_foundation - anchor)[:, None],
+            np.abs(pred_foundation - anchor)[:, None],
+            (pred_foundation - mean_internal)[:, None],
+            np.abs(pred_foundation - mean_internal)[:, None],
+            pred_views.std(axis=1, keepdims=True).astype(np.float32),
+            all_preds.std(axis=1, keepdims=True).astype(np.float32),
+        ],
+        axis=1,
+    ).astype(np.float32)
+
+
 def oracle_full_route_blend(
     y_true: np.ndarray,
     pred_full: np.ndarray,
