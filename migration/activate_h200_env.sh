@@ -32,24 +32,42 @@ export HF_HOME="${HF_HOME:-$ROOT_DIR/.cache/huggingface}"
 export HUGGINGFACE_HUB_CACHE="${HUGGINGFACE_HUB_CACHE:-$HF_HOME/hub}"
 export TABPFN_MODEL_CACHE_DIR="${TABPFN_MODEL_CACHE_DIR:-$ROOT_DIR/.cache/tabpfn}"
 export OPENML_CACHE_DIR="${OPENML_CACHE_DIR:-$ROOT_DIR/.cache/openml}"
+export GRAPH_DRONE_GPU_COUNT="${GRAPH_DRONE_GPU_COUNT:-8}"
+export GRAPH_DRONE_GPU_ORDER="${GRAPH_DRONE_GPU_ORDER:-high-first}"
+export GRAPHDRONE_OPENML_GRAPHDRONE_GPU_SPAN="${GRAPHDRONE_OPENML_GRAPHDRONE_GPU_SPAN:-1}"
+export GRAPHDRONE_OPENML_MAX_CONCURRENT_JOBS="${GRAPHDRONE_OPENML_MAX_CONCURRENT_JOBS:-8}"
+export GRAPHDRONE_OPENML_GPU_MEMORY_FREE_THRESHOLD_MIB="${GRAPHDRONE_OPENML_GPU_MEMORY_FREE_THRESHOLD_MIB:-4096}"
+export GRAPHDRONE_OPENML_GPU_UTIL_FREE_THRESHOLD="${GRAPHDRONE_OPENML_GPU_UTIL_FREE_THRESHOLD:-10}"
 
 mkdir -p "$HF_HOME" "$HUGGINGFACE_HUB_CACHE" "$TABPFN_MODEL_CACHE_DIR" "$OPENML_CACHE_DIR"
 
-if [[ -z "${CUDA_VISIBLE_DEVICES:-}" ]] && command -v nvidia-smi >/dev/null 2>&1; then
-  GPU_COUNT="${GRAPH_DRONE_GPU_COUNT:-4}"
-  mapfile -t GPU_IDS < <(
-    nvidia-smi --query-gpu=index --format=csv,noheader,nounits \
-      | sort -nr \
-      | head -n "$GPU_COUNT" \
-      | tr -d ' '
-  )
-  if [[ "${#GPU_IDS[@]}" -gt 0 ]]; then
-    export CUDA_VISIBLE_DEVICES
-    CUDA_VISIBLE_DEVICES="$(IFS=,; echo "${GPU_IDS[*]}")"
+if command -v nvidia-smi >/dev/null 2>&1; then
+  if [[ -z "${GRAPH_DRONE_GPU_POOL:-}" ]]; then
+    if [[ "$GRAPH_DRONE_GPU_ORDER" == "low-first" ]]; then
+      sort_args=("-n")
+    else
+      sort_args=("-nr")
+    fi
+    mapfile -t GPU_IDS < <(
+      nvidia-smi --query-gpu=index --format=csv,noheader,nounits \
+        | sort "${sort_args[@]}" \
+        | head -n "$GRAPH_DRONE_GPU_COUNT" \
+        | tr -d ' '
+    )
+    if [[ "${#GPU_IDS[@]}" -gt 0 ]]; then
+      export GRAPH_DRONE_GPU_POOL
+      GRAPH_DRONE_GPU_POOL="$(IFS=,; echo "${GPU_IDS[*]}")"
+    fi
+  fi
+  if [[ -z "${CUDA_VISIBLE_DEVICES:-}" && -n "${GRAPH_DRONE_GPU_POOL:-}" ]]; then
+    export CUDA_VISIBLE_DEVICES="$GRAPH_DRONE_GPU_POOL"
   fi
 fi
 
 echo "Activated $VENV_PATH"
 echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-<unset>}"
+echo "GRAPH_DRONE_GPU_POOL=${GRAPH_DRONE_GPU_POOL:-<unset>}"
+echo "GRAPHDRONE_OPENML_GRAPHDRONE_GPU_SPAN=$GRAPHDRONE_OPENML_GRAPHDRONE_GPU_SPAN"
+echo "GRAPHDRONE_OPENML_MAX_CONCURRENT_JOBS=$GRAPHDRONE_OPENML_MAX_CONCURRENT_JOBS"
 echo "HF_HOME=$HF_HOME"
 echo "TABPFN_MODEL_CACHE_DIR=$TABPFN_MODEL_CACHE_DIR"

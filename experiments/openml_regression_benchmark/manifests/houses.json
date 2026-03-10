@@ -1,0 +1,19 @@
+{
+  "dataset": "houses",
+  "worktree_slug": "houses",
+  "output_root": "experiments/openml_regression_benchmark/reports_by_dataset/houses",
+  "models": ["GraphDrone", "TabPFN", "TabR", "TabM"],
+  "folds": [0, 1, 2],
+  "repeat": 0,
+  "seed": 42,
+  "split_seed": 42,
+  "graphdrone_max_train_samples": 16000,
+  "tabpfn_max_train_samples": 16000,
+  "graphdrone_gpu_span": 1,
+  "graphdrone_exclusive_gpu_span": 4,
+  "graphdrone_parallel_workers": 0,
+  "max_concurrent_jobs": 8,
+  "gpus": "auto",
+  "gpu_order": "high-first",
+  "notes": "Medium housing regression dataset. Default to one-GPU queue saturation; use 4 GPUs only for GraphDrone-only reruns."
+}

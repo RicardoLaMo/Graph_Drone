@@ -40,7 +40,10 @@ source migration/activate_h200_env.sh
 
 Notes:
 
-- `GRAPH_DRONE_GPU_COUNT` controls how many of the highest-index GPUs are selected when `CUDA_VISIBLE_DEVICES` is not already set
+- `GRAPH_DRONE_GPU_COUNT` now defaults to `8`, so the activation wrapper exposes the whole H200 box unless you narrow it
+- `GRAPH_DRONE_GPU_POOL` can pin the physical GPU order explicitly, for example `7,6,5,4,3,2,1,0`
+- `GRAPHDRONE_OPENML_GRAPHDRONE_GPU_SPAN=1` is the max-throughput mixed-suite default; set it to `4` for GraphDrone-only sweeps that should run as two 4-GPU jobs on an 8-GPU node
+- `GRAPHDRONE_OPENML_MAX_CONCURRENT_JOBS` defaults to `8`, so the OpenML queue will pack one job per free GPU when enough tasks are pending
 - bootstrap now uses the validated conda path: `torch 2.6.x`, `CUDA 12.6`, `faiss-gpu-cuvs 1.14.1`
 - the target is one shared `.venv-h200` env, not separate `.venv-foundation*` variants
 - Hugging Face cache and TabPFN model cache are kept under `.cache/` in the repo by default
