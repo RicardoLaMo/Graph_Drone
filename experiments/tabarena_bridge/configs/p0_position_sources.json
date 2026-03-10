@@ -1,0 +1,72 @@
+{
+  "benchmark_name": "california_anchor_benchmark",
+  "metric": "rmse",
+  "target_model": "P0_router",
+  "methods": [
+    {
+      "name": "P0_full",
+      "kind": "p0_per_seed",
+      "model": "P0_FULL",
+      "paths": [
+        "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/mv-tabpfn-view-router/experiments/tabpfn_view_router/reports/p0_seed41/p0_results.json",
+        "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/mv-tabpfn-view-router/experiments/tabpfn_view_router/reports/p0_full/p0_results.json",
+        "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/mv-tabpfn-view-router/experiments/tabpfn_view_router/reports/p0_seed43/p0_results.json"
+      ],
+      "coverage": "matched_split_sweep"
+    },
+    {
+      "name": "P0_router",
+      "kind": "p0_per_seed",
+      "model": "P0_router",
+      "paths": [
+        "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/mv-tabpfn-view-router/experiments/tabpfn_view_router/reports/p0_seed41/p0_results.json",
+        "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/mv-tabpfn-view-router/experiments/tabpfn_view_router/reports/p0_full/p0_results.json",
+        "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/mv-tabpfn-view-router/experiments/tabpfn_view_router/reports/p0_seed43/p0_results.json"
+      ],
+      "coverage": "matched_split_sweep"
+    },
+    {
+      "name": "P0_crossfit",
+      "kind": "p0_per_seed",
+      "model": "P0_crossfit",
+      "paths": [
+        "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/mv-tabpfn-view-router/experiments/tabpfn_view_router/reports/p0_seed41/p0_results.json",
+        "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/mv-tabpfn-view-router/experiments/tabpfn_view_router/reports/p0_full/p0_results.json",
+        "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/mv-tabpfn-view-router/experiments/tabpfn_view_router/reports/p0_seed43/p0_results.json"
+      ],
+      "coverage": "matched_split_sweep"
+    },
+    {
+      "name": "TabPFN_full",
+      "kind": "tabpfn_multiseed",
+      "path": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabpfn-california-baseline/experiments/tab_foundation_compare/reports/tabpfn_multiseed_e1.json",
+      "coverage": "matched_split_sweep"
+    },
+    {
+      "name": "TabR",
+      "kind": "foundation_csv_single",
+      "path": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabpfn-california-baseline/experiments/tab_foundation_compare/artifacts/foundation_comparison.csv",
+      "selector": {
+        "stage": "C1",
+        "model": "TabR_on_our_split"
+      },
+      "coverage": "single_reference"
+    },
+    {
+      "name": "TabM",
+      "kind": "foundation_csv_single",
+      "path": "/Volumes/MacMini/Projects/Graph_Drone/.worktrees/tabpfn-california-baseline/experiments/tab_foundation_compare/artifacts/foundation_comparison.csv",
+      "selector": {
+        "stage": "C1",
+        "model": "TabM_on_our_split"
+      },
+      "coverage": "single_reference"
+    },
+    {
+      "name": "A6f_artifact",
+      "kind": "scalar",
+      "value": 0.4063458370081337,
+      "coverage": "historical_artifact"
+    }
+  ]
+}

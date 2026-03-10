@@ -1,0 +1,108 @@
+{
+  "benchmark_name": "california_anchor_benchmark",
+  "target_model": "P0_router",
+  "leaderboard": [
+    {
+      "model": "P0_crossfit",
+      "coverage": "matched_split_sweep",
+      "n_runs": 3,
+      "mean_test_rmse": 0.37896539462639045,
+      "std_test_rmse": 0.0016067126494884265,
+      "mean_val_rmse": 0.40485983801411135,
+      "rank": 1,
+      "normalized_score": 1.0
+    },
+    {
+      "model": "P0_router",
+      "coverage": "matched_split_sweep",
+      "n_runs": 3,
+      "mean_test_rmse": 0.37904865857458514,
+      "std_test_rmse": 0.001591528795700496,
+      "mean_val_rmse": 0.40328051909428125,
+      "rank": 2,
+      "normalized_score": 0.9983367419654805
+    },
+    {
+      "model": "TabR",
+      "coverage": "single_reference",
+      "n_runs": 1,
+      "mean_test_rmse": 0.382893598092279,
+      "std_test_rmse": null,
+      "mean_val_rmse": 0.4153537352533367,
+      "rank": 3,
+      "normalized_score": 0.9215312735280149
+    },
+    {
+      "model": "P0_full",
+      "coverage": "matched_split_sweep",
+      "n_runs": 3,
+      "mean_test_rmse": 0.3931559473907546,
+      "std_test_rmse": 0.0037688963600998357,
+      "mean_val_rmse": 0.41928998285265573,
+      "rank": 4,
+      "normalized_score": 0.7165333687466511
+    },
+    {
+      "model": "TabPFN_full",
+      "coverage": "matched_split_sweep",
+      "n_runs": 3,
+      "mean_test_rmse": 0.3931559473907546,
+      "std_test_rmse": 0.0037688963600998357,
+      "mean_val_rmse": 0.41928998285265573,
+      "rank": 5,
+      "normalized_score": 0.7165333687466511
+    },
+    {
+      "model": "A6f_artifact",
+      "coverage": "historical_artifact",
+      "n_runs": 1,
+      "mean_test_rmse": 0.4063458370081337,
+      "std_test_rmse": null,
+      "mean_val_rmse": null,
+      "rank": 6,
+      "normalized_score": 0.45305571297617053
+    },
+    {
+      "model": "TabM",
+      "coverage": "single_reference",
+      "n_runs": 1,
+      "mean_test_rmse": 0.4290261467566167,
+      "std_test_rmse": null,
+      "mean_val_rmse": 0.4537707364517,
+      "rank": 7,
+      "normalized_score": 0.0
+    }
+  ],
+  "paired_vs_target": {
+    "P0_full": {
+      "comparable_runs": 3,
+      "target_wins": 3,
+      "mean_delta": 0.01410728881616948
+    },
+    "P0_crossfit": {
+      "comparable_runs": 3,
+      "target_wins": 1,
+      "mean_delta": -8.326394819470802e-05
+    },
+    "TabPFN_full": {
+      "comparable_runs": 3,
+      "target_wins": 3,
+      "mean_delta": 0.01410728881616948
+    },
+    "TabR": {
+      "comparable_runs": 0,
+      "target_wins": null,
+      "mean_delta": null
+    },
+    "TabM": {
+      "comparable_runs": 0,
+      "target_wins": null,
+      "mean_delta": null
+    },
+    "A6f_artifact": {
+      "comparable_runs": 0,
+      "target_wins": null,
+      "mean_delta": null
+    }
+  }
+}
