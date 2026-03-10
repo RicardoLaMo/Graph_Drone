@@ -65,4 +65,14 @@ if [[ "$print_only" -eq 1 ]]; then
   exit 0
 fi
 
-exec "${cmd[@]}" >"$log_path" 2>&1
+child_pid=""
+cleanup() {
+  if [[ -n "$child_pid" ]] && kill -0 "$child_pid" 2>/dev/null; then
+    kill "$child_pid" 2>/dev/null || true
+  fi
+}
+trap cleanup INT TERM
+
+"${cmd[@]}" >"$log_path" 2>&1 &
+child_pid="$!"
+wait "$child_pid"

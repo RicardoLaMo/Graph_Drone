@@ -3,7 +3,7 @@
 Primary operating path:
 - use the shared benchmark base at [graphdrone-openml-regression](/home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-openml-regression)
 - keep per-dataset worktrees only for true code divergence, not for normal execution
-- use the shared H200 runtime at `/home/wliu23/projects/Graph_Drone/.venv-h200`
+- use the shared H200 runtime at the repo root `.venv-h200`
 
 Current 8-dataset portfolio:
 - `houses`
@@ -28,25 +28,25 @@ Default GPU partition:
 Run commands:
 
 ```bash
-cd /home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-openml-regression
+cd /path/to/Graph_Drone/.worktrees/graphdrone-openml-regression
 experiments/openml_regression_benchmark/scripts/run_lane_a_small_datasets.sh full
 ```
 
 ```bash
-cd /home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-openml-regression
+cd /path/to/Graph_Drone/.worktrees/graphdrone-openml-regression
 experiments/openml_regression_benchmark/scripts/run_lane_b_diamonds.sh full
 ```
 
 ```bash
-cd /home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-openml-regression
+cd /path/to/Graph_Drone/.worktrees/graphdrone-openml-regression
 experiments/openml_regression_benchmark/scripts/run_portfolio_lanes.sh full
 ```
 
 Standalone follow-up dataset:
 
 ```bash
-cd /home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-openml-regression
-/home/wliu23/projects/Graph_Drone/.venv-h200/bin/python \
+cd /path/to/Graph_Drone/.worktrees/graphdrone-openml-regression
+../../.venv-h200/bin/python \
   experiments/openml_regression_benchmark/scripts/run_dataset_manifest.py \
   --dataset wine_quality --gpus 7
 ```
@@ -54,14 +54,14 @@ cd /home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-openml-regression
 Print-only dry run:
 
 ```bash
-cd /home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-openml-regression
+cd /path/to/Graph_Drone/.worktrees/graphdrone-openml-regression
 experiments/openml_regression_benchmark/scripts/run_portfolio_lanes.sh smoke --print-only
 ```
 
 15-minute background monitor:
 
 ```bash
-cd /home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-openml-regression
+cd /path/to/Graph_Drone/.worktrees/graphdrone-openml-regression
 experiments/openml_regression_benchmark/scripts/monitor_portfolio_lanes.sh full --interval-seconds 900
 ```
 

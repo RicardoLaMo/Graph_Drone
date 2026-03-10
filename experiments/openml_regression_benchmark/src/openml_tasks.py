@@ -300,6 +300,9 @@ def build_view_columns(
     domain_view_name: str,
 ) -> dict[str, tuple[int, ...]]:
     feature_to_idx = {name: idx for idx, name in enumerate(feature_names)}
+    missing = tuple(name for name in geo_columns if name not in feature_to_idx)
+    if missing:
+        raise ValueError(f"Missing geo columns {missing!r} for feature_names={feature_names!r}")
     geo_idx = tuple(feature_to_idx[name] for name in geo_columns if name in feature_to_idx)
     if not geo_idx:
         raise ValueError(f"No geo columns from {geo_columns!r} found in feature_names={feature_names!r}")

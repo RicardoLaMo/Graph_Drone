@@ -5,16 +5,16 @@ This benchmark runs the current GraphDrone family against `TabPFN`, `TabR`, and
 
 ## Canonical Runtime
 
-Use the shared H200 environment:
+Use the shared H200 environment at the repo root:
 
 ```bash
-/home/wliu23/projects/Graph_Drone/.venv-h200
+.venv-h200
 ```
 
 Recommended interpreter pattern:
 
 ```bash
-/home/wliu23/projects/Graph_Drone/.venv-h200/bin/python ...
+./.venv-h200/bin/python ...
 ```
 
 ## Main Entry Points
@@ -41,15 +41,15 @@ nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total --for
 2. Run the portfolio lanes:
 
 ```bash
-cd /home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-openml-regression
+cd /path/to/Graph_Drone/.worktrees/graphdrone-openml-regression
 experiments/openml_regression_benchmark/scripts/run_portfolio_lanes.sh full
 ```
 
 3. Run a standalone dataset when it is intentionally outside the active lanes:
 
 ```bash
-cd /home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-openml-regression
-/home/wliu23/projects/Graph_Drone/.venv-h200/bin/python \
+cd /path/to/Graph_Drone/.worktrees/graphdrone-openml-regression
+../../.venv-h200/bin/python \
   experiments/openml_regression_benchmark/scripts/run_dataset_manifest.py \
   --dataset wine_quality --gpus 7
 ```

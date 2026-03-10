@@ -24,12 +24,11 @@ def parse_args() -> argparse.Namespace:
 
 def load_rows(reports_root: Path, *, include_smoke: bool) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
-    required = {"graphdrone_results.json", "tabpfn_results.json", "tabr_results.json", "tabm_results.json"}
     for run_dir in sorted(path for path in reports_root.iterdir() if path.is_dir()):
         if not include_smoke and run_dir.name.endswith("__smoke"):
             continue
         present = {path.name for path in run_dir.glob("*.json")}
-        if not required.issubset(present):
+        if "graphdrone_results.json" not in present:
             continue
 
         payload = json.loads((run_dir / "graphdrone_results.json").read_text())
@@ -50,6 +49,8 @@ def load_rows(reports_root: Path, *, include_smoke: bool) -> list[dict[str, obje
             )
 
         for name in ("tabpfn_results.json", "tabr_results.json", "tabm_results.json"):
+            if name not in present:
+                continue
             payload = json.loads((run_dir / name).read_text())
             dataset = payload["dataset"]
             metrics = payload["metrics"]
@@ -123,6 +124,8 @@ def main() -> None:
             for label, value in deltas.items():
                 lines.append(f"- {label}: `{value:+.4f}` mean RMSE delta")
             lines.append("")
+        else:
+            lines.extend(["### GraphDrone Router Deltas", "", "- skipped: missing one or more baseline columns", ""])
 
     (args.reports_root / "openml_benchmark_summary.md").write_text("\n".join(lines) + "\n")
 

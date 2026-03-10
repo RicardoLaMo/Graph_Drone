@@ -168,6 +168,22 @@ def take_gpu_allocation(available: list[int], *, span: int) -> tuple[int, ...] |
     return allocation
 
 
+def pop_first_schedulable_task(
+    tasks: deque[dict[str, object]],
+    *,
+    available_gpu_count: int,
+    graphdrone_gpu_span: int,
+) -> dict[str, object] | None:
+    for _ in range(len(tasks)):
+        task = tasks.popleft()
+        model = str(task["model"])
+        span = gpu_span_for_model(model, graphdrone_gpu_span=graphdrone_gpu_span)
+        if span <= available_gpu_count:
+            return task
+        tasks.append(task)
+    return None
+
+
 def main() -> None:
     args = parse_args()
     args.output_root.mkdir(parents=True, exist_ok=True)
@@ -223,13 +239,19 @@ def main() -> None:
         available = [gpu for gpu in available_pool if gpu not in occupied]
         capacity = args.max_concurrent_jobs if args.max_concurrent_jobs > 0 else len(gpu_pool)
         while tasks and available and len(running) < capacity:
-            task = tasks[0]
+            task = pop_first_schedulable_task(
+                tasks,
+                available_gpu_count=len(available),
+                graphdrone_gpu_span=args.graphdrone_gpu_span,
+            )
+            if task is None:
+                break
             model = str(task["model"])
             gpu_span = gpu_span_for_model(model, graphdrone_gpu_span=args.graphdrone_gpu_span)
             gpu_allocation = take_gpu_allocation(available, span=gpu_span)
             if gpu_allocation is None:
+                tasks.appendleft(task)
                 break
-            tasks.popleft()
             script = MODEL_SCRIPTS[model]
             cmd = [
                 str(SHARED_PYTHON),

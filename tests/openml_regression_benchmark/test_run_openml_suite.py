@@ -1,9 +1,12 @@
+from collections import deque
+
 from experiments.openml_regression_benchmark.scripts.run_openml_suite import (
     discover_free_gpus,
     gpu_span_for_model,
     ordered_gpu_indices,
     parse_gpu_indices,
     parse_gpu_status,
+    pop_first_schedulable_task,
     resolve_gpu_pool,
     take_gpu_allocation,
 )
@@ -66,3 +69,26 @@ def test_take_gpu_allocation_returns_contiguous_slice():
     assert allocation == (7, 6)
     assert available == [5, 4]
     assert take_gpu_allocation(available, span=3) is None
+
+
+def test_pop_first_schedulable_task_skips_blocking_wide_job():
+    tasks = deque(
+        [
+            {"dataset": "diamonds", "fold": 0, "model": "GraphDrone"},
+            {"dataset": "houses", "fold": 0, "model": "TabPFN"},
+        ]
+    )
+
+    task = pop_first_schedulable_task(tasks, available_gpu_count=1, graphdrone_gpu_span=4)
+
+    assert task == {"dataset": "houses", "fold": 0, "model": "TabPFN"}
+    assert list(tasks) == [{"dataset": "diamonds", "fold": 0, "model": "GraphDrone"}]
+
+
+def test_pop_first_schedulable_task_preserves_queue_when_nothing_fits():
+    tasks = deque([{"dataset": "diamonds", "fold": 0, "model": "GraphDrone"}])
+
+    task = pop_first_schedulable_task(tasks, available_gpu_count=0, graphdrone_gpu_span=4)
+
+    assert task is None
+    assert list(tasks) == [{"dataset": "diamonds", "fold": 0, "model": "GraphDrone"}]

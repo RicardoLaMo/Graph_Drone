@@ -228,7 +228,14 @@ def main() -> None:
     if args.json:
         print(json.dumps(results, indent=2))
     else:
-        print(json.dumps(results, indent=2))
+        for section, payload in results.items():
+            print(f"[{section}]")
+            if isinstance(payload, dict):
+                for key, value in payload.items():
+                    print(f"{key}: {value}")
+            else:
+                print(payload)
+            print()
 
     raise SystemExit(1 if failed else 0)
 

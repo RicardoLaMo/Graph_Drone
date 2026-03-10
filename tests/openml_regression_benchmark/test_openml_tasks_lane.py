@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from experiments.openml_regression_benchmark.src.openml_tasks import (
     OPENML_REGRESSION_SPECS,
@@ -77,6 +78,12 @@ def test_build_view_columns_uses_named_subset_and_complement() -> None:
     view_columns = build_view_columns(columns, ("lat", "lon", "km"), "DOMAIN")
     assert view_columns["GEO"] == (0, 1, 2)
     assert view_columns["DOMAIN"] == (3, 4)
+
+
+def test_build_view_columns_rejects_missing_geo_columns() -> None:
+    columns = ("lat", "lon", "km", "model")
+    with pytest.raises(ValueError, match="Missing geo columns"):
+        build_view_columns(columns, ("lat", "lon", "missing_geo"), "DOMAIN")
 
 
 def test_build_graphdrone_view_data_from_live_lane_shape_contract() -> None:

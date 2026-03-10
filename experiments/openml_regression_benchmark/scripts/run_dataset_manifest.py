@@ -78,6 +78,13 @@ def build_command(
     return cmd
 
 
+def current_branch_name() -> str:
+    return subprocess.check_output(
+        ["git", "-C", str(REPO_ROOT), "branch", "--show-current"],
+        text=True,
+    ).strip()
+
+
 def main() -> None:
     args = parse_args()
     if bool(args.dataset) == bool(args.manifest):
@@ -96,8 +103,8 @@ def main() -> None:
     )
     meta = {
         "dataset": manifest.dataset,
-        "branch_name": manifest.branch_name,
-        "worktree_name": manifest.worktree_name,
+        "branch_name": current_branch_name(),
+        "worktree_name": REPO_ROOT.name,
         "notes": manifest.notes,
         "exclusive_graphdrone": args.exclusive_graphdrone,
         "smoke": args.smoke,

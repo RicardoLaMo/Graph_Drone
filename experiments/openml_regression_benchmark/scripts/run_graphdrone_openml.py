@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+from scipy.stats import spearmanr
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -25,9 +26,12 @@ from experiments.openml_regression_benchmark.src.openml_tasks import (
 from experiments.tabpfn_view_router.scripts.run_experiment import fit_view_experts
 from experiments.tabpfn_view_router.src.data import build_quality_features
 from experiments.tabpfn_view_router.src.router import (
+    build_trust_gate_features,
     fit_crossfit_router,
     fit_soft_router,
+    fit_trust_gate,
     gora_mix,
+    oracle_full_route_blend,
     score_regression,
     sigma2_mix,
     uniform_mix,
@@ -104,6 +108,66 @@ def write_report(
     for name, values in weights_summary.items():
         lines.append(f"- {name}: val `{values[0]:.3f}` / test `{values[1]:.3f}`")
     output_path.write_text("\n".join(lines) + "\n")
+
+
+def gate_feature_names(view_names: list[str]) -> list[str]:
+    pair_names = [
+        f"J_{view_names[i]}_{view_names[j]}"
+        for i in range(len(view_names))
+        for j in range(i + 1, len(view_names))
+    ]
+    return [
+        *(f"sigma2_{name}" for name in view_names),
+        *pair_names,
+        "mean_J",
+        "route_delta",
+        "abs_route_delta",
+        "view_pred_std",
+    ]
+
+
+def summarize_gate_diagnostics(
+    *,
+    y_val: np.ndarray,
+    y_test: np.ndarray,
+    pred_full_val: np.ndarray,
+    pred_full_test: np.ndarray,
+    pred_route_val: np.ndarray,
+    pred_route_test: np.ndarray,
+    gate_features_val: np.ndarray,
+    view_names: list[str],
+) -> dict[str, object]:
+    oracle_val_pred, oracle_val_alpha = oracle_full_route_blend(y_val, pred_full_val, pred_route_val)
+    oracle_test_pred, oracle_test_alpha = oracle_full_route_blend(y_test, pred_full_test, pred_route_test)
+    loss_delta_val = ((pred_full_val - y_val) ** 2 - (pred_route_val - y_val) ** 2).astype(np.float32)
+
+    correlations: list[dict[str, object]] = []
+    for idx, name in enumerate(gate_feature_names(view_names)):
+        corr, _ = spearmanr(gate_features_val[:, idx], loss_delta_val)
+        if np.isnan(corr):
+            corr = 0.0
+        correlations.append({"feature": name, "spearman_to_loss_delta": float(corr)})
+    correlations.sort(key=lambda item: abs(item["spearman_to_loss_delta"]), reverse=True)
+
+    full_test_rmse = score_regression(y_test, pred_full_test)["rmse"]
+    route_test_rmse = score_regression(y_test, pred_route_test)["rmse"]
+    oracle_test_rmse = score_regression(y_test, oracle_test_pred)["rmse"]
+
+    return {
+        "oracle_val": {
+            "rmse": score_regression(y_val, oracle_val_pred)["rmse"],
+            "route_fraction": float(oracle_val_alpha.mean()),
+        },
+        "oracle_test": {
+            "rmse": oracle_test_rmse,
+            "route_fraction": float(oracle_test_alpha.mean()),
+        },
+        "gains_test": {
+            "vs_full_rmse": float(full_test_rmse - oracle_test_rmse),
+            "vs_route_rmse": float(route_test_rmse - oracle_test_rmse),
+        },
+        "top_feature_correlations": correlations[:8],
+    }
 
 
 def main() -> None:
@@ -288,6 +352,69 @@ def main() -> None:
             float(crossfit.weights_test[:, idx].mean()),
         ]
 
+    full_idx = views.view_names.index("FULL")
+    full_val = pred_val[:, full_idx]
+    full_test = pred_test[:, full_idx]
+    trust_gate_feat_val = build_trust_gate_features(
+        quality.val,
+        pred_full=full_val,
+        pred_route=crossfit.pred_val_oof,
+        pred_views=pred_val,
+    )
+    trust_gate_feat_test = build_trust_gate_features(
+        quality.test,
+        pred_full=full_test,
+        pred_route=crossfit.pred_test,
+        pred_views=pred_test,
+    )
+    trust_gate = fit_trust_gate(
+        x_val=trust_gate_feat_val,
+        pred_full_val=full_val,
+        pred_route_val=crossfit.pred_val_oof,
+        y_val=split.y_val,
+        x_test=trust_gate_feat_test,
+        pred_full_test=full_test,
+        pred_route_test=crossfit.pred_test,
+        seed=args.seed,
+    )
+    val_metrics = score_regression(split.y_val, trust_gate.pred_val)
+    test_metrics = score_regression(split.y_test, trust_gate.pred_test)
+    model_rows.append(
+        {
+            "model": "GraphDrone_trust_gate",
+            "val_rmse": val_metrics["rmse"],
+            "test_rmse": test_metrics["rmse"],
+            "val_mae": val_metrics["mae"],
+            "test_mae": test_metrics["mae"],
+            "val_r2": val_metrics["r2"],
+            "test_r2": test_metrics["r2"],
+            "notes": f"sigmoid gate over FULL and crossfit route (best_epoch={trust_gate.best_epoch})",
+        }
+    )
+    weights_summary["trust_gate_alpha"] = [
+        float(trust_gate.alpha_val.mean()),
+        float(trust_gate.alpha_test.mean()),
+    ]
+    weights_summary["trust_gate_full_weight"] = [
+        float((1.0 - trust_gate.alpha_val).mean()),
+        float((1.0 - trust_gate.alpha_test).mean()),
+    ]
+    weights_summary["trust_gate_route_weight"] = [
+        float(trust_gate.alpha_val.mean()),
+        float(trust_gate.alpha_test.mean()),
+    ]
+
+    gate_diagnostics = summarize_gate_diagnostics(
+        y_val=split.y_val,
+        y_test=split.y_test,
+        pred_full_val=full_val,
+        pred_full_test=full_test,
+        pred_route_val=crossfit.pred_val_oof,
+        pred_route_test=crossfit.pred_test,
+        gate_features_val=trust_gate_feat_val,
+        view_names=views.view_names,
+    )
+
     run_name = dataset_run_tag(args.dataset, repeat=args.repeat, fold=args.fold, smoke=args.smoke)
     output_dir = (args.output_root / run_name).resolve()
     artifacts_dir = output_dir / "artifacts"
@@ -312,6 +439,12 @@ def main() -> None:
         crossfit_pred_test=crossfit.pred_test,
         crossfit_weights_val=crossfit.weights_val_oof,
         crossfit_weights_test=crossfit.weights_test,
+        trust_gate_pred_val=trust_gate.pred_val,
+        trust_gate_pred_test=trust_gate.pred_test,
+        trust_gate_alpha_val=trust_gate.alpha_val,
+        trust_gate_alpha_test=trust_gate.alpha_test,
+        trust_gate_features_val=trust_gate_feat_val,
+        trust_gate_features_test=trust_gate_feat_test,
         uniform_weights_val=w_uniform_val,
         uniform_weights_test=w_uniform_test,
         sigma2_weights_val=w_sigma_val,
@@ -338,6 +471,7 @@ def main() -> None:
         "weights_summary": weights_summary,
     }
     (output_dir / "graphdrone_results.json").write_text(json.dumps(payload, indent=2) + "\n")
+    (artifacts_dir / "gate_diagnostics.json").write_text(json.dumps(gate_diagnostics, indent=2) + "\n")
     write_report(
         output_dir / "report.md",
         run_name=run_name,

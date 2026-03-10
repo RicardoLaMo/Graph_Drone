@@ -8,8 +8,11 @@ from experiments.tabpfn_view_router.src.data import (
     build_view_data,
 )
 from experiments.tabpfn_view_router.src.router import (
+    build_trust_gate_features,
     fit_crossfit_router,
     fit_soft_router,
+    fit_trust_gate,
+    oracle_full_route_blend,
     sigma2_mix,
     uniform_mix,
 )
@@ -82,3 +85,58 @@ def test_uniform_and_sigma2_mix_shapes() -> None:
     assert p_s.shape == (10,)
     assert w_u.shape == (10, 4)
     assert w_s.shape == (10, 4)
+
+
+def test_trust_gate_features_add_disagreement_columns() -> None:
+    rng = np.random.default_rng(2)
+    quality = rng.normal(size=(12, 11)).astype(np.float32)
+    pred_full = rng.normal(size=(12,)).astype(np.float32)
+    pred_route = rng.normal(size=(12,)).astype(np.float32)
+    pred_views = rng.normal(size=(12, 4)).astype(np.float32)
+
+    features = build_trust_gate_features(quality, pred_full, pred_route, pred_views)
+
+    assert features.shape == (12, 14)
+    np.testing.assert_allclose(features[:, :11], quality)
+
+
+def test_trust_gate_outputs_alpha_inside_unit_interval() -> None:
+    rng = np.random.default_rng(3)
+    x_val = rng.normal(size=(80, 14)).astype(np.float32)
+    pred_full_val = rng.normal(size=(80,)).astype(np.float32)
+    pred_route_val = rng.normal(size=(80,)).astype(np.float32)
+    y_val = rng.normal(size=(80,)).astype(np.float32)
+    x_test = rng.normal(size=(40, 14)).astype(np.float32)
+    pred_full_test = rng.normal(size=(40,)).astype(np.float32)
+    pred_route_test = rng.normal(size=(40,)).astype(np.float32)
+
+    result = fit_trust_gate(
+        x_val=x_val,
+        pred_full_val=pred_full_val,
+        pred_route_val=pred_route_val,
+        y_val=y_val,
+        x_test=x_test,
+        pred_full_test=pred_full_test,
+        pred_route_test=pred_route_test,
+        seed=0,
+        max_epochs=20,
+        patience=5,
+    )
+
+    assert result.alpha_val.shape == (80,)
+    assert result.alpha_test.shape == (40,)
+    assert np.all(result.alpha_val >= 0.0)
+    assert np.all(result.alpha_val <= 1.0)
+    assert np.all(result.alpha_test >= 0.0)
+    assert np.all(result.alpha_test <= 1.0)
+
+
+def test_oracle_blend_prefers_closer_prediction() -> None:
+    y_true = np.array([0.0, 1.0, 2.0], dtype=np.float32)
+    pred_full = np.array([0.1, 1.5, 3.0], dtype=np.float32)
+    pred_route = np.array([0.3, 1.1, 2.1], dtype=np.float32)
+
+    pred, alpha = oracle_full_route_blend(y_true, pred_full, pred_route)
+
+    np.testing.assert_allclose(pred, np.array([0.1, 1.1, 2.1], dtype=np.float32))
+    np.testing.assert_allclose(alpha, np.array([0.0, 1.0, 1.0], dtype=np.float32))
