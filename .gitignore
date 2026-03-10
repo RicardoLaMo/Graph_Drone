@@ -63,6 +63,9 @@ ENV/
 .DS_Store
 *.DS_Store
 
+# Repo-local git worktrees
+.worktrees/
+.external/
 # Data and Models (Keep directory structure but ignore contents unless explicitly added)
 data/
 !data/**/.gitkeep
