@@ -1,0 +1,21 @@
+\section{GraphDrone.fit() Phase I-A Skeleton}
+
+Phase I-A establishes the first experiment-independent package surface for GraphDrone. The implemented package introduces explicit configuration, descriptor validation, manifest-based portfolio loading, expert batching, token construction, bootstrap routing, and defer-to-FULL integration. This phase does not yet implement learned routing.
+
+The key architectural decision is that benchmark runners no longer define the model boundary. Instead, the core object lives under \texttt{src/graphdrone\_fit/} and exposes a public \texttt{fit()} / \texttt{predict()} API. The benchmark layer is reduced to an adapter that converts registry-backed view declarations into typed descriptors.
+
+For row $i$ and expert $v$, Phase I-A builds a token tensor containing:
+\[
+[\,\hat y_{i,v},\ \hat y_{i,v} - \hat y_{i,\mathrm{FULL}},\ \hat y_{i,v} - \bar y_i,\ q_{i,v},\ s_{i,v},\ d_v\,].
+\]
+Here $\bar y_i$ is the row-wise portfolio mean, used as a neutral within-row baseline for this phase only. Support encoding remains a zero-width placeholder tensor in Phase I-A; its explicit API keeps later contextual support work from leaking into benchmark scripts.
+
+External review identified one real boundary issue: benchmark-specific family assignment logic was still partly hardcoded in the OpenML adapter. The final Phase I-A state fixes that by making family overrides explicit and by testing the override path directly, including \texttt{LOWRANK}.
+
+Validation:
+\begin{itemize}
+\item \texttt{python -m py\_compile ...} passed
+\item \texttt{pytest -q tests/graphdrone\_fit/test\_graphdrone\_fit.py tests/openml\_regression\_benchmark/test\_graphdrone\_fit\_adapter.py} passed with 6 tests
+\end{itemize}
+
+Phase I-A is therefore a valid checkpoint for the next implementation step: Phase I-B expert-factory work, still without learned contextual routing.
