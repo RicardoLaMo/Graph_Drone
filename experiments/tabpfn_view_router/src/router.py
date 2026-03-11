@@ -222,3 +222,115 @@ def fit_crossfit_router(
         weights_test=final.weights_test,
         n_splits=n_splits,
     )
+
+
+def quality_feature_names(view_names: list[str]) -> list[str]:
+    pair_names = [
+        f"J_{view_names[i]}_{view_names[j]}"
+        for i in range(len(view_names))
+        for j in range(i + 1, len(view_names))
+    ]
+    return [
+        *(f"sigma2_{name}" for name in view_names),
+        *pair_names,
+        "mean_J",
+    ]
+
+
+def summarize_router_diagnostics(
+    *,
+    y_true: np.ndarray,
+    pred_views: np.ndarray,
+    weights: np.ndarray,
+    quality_features: np.ndarray,
+    view_names: list[str],
+    anchor_view: str = "FULL",
+) -> dict[str, object]:
+    if pred_views.shape != weights.shape:
+        raise ValueError(f"Expected pred_views and weights to share shape, got {pred_views.shape} vs {weights.shape}")
+    if pred_views.shape[0] != len(y_true):
+        raise ValueError(f"Expected one target per row, got {len(y_true)} targets for {pred_views.shape[0]} rows")
+
+    y_true = y_true.astype(np.float32)
+    pred_views = pred_views.astype(np.float32)
+    weights = weights.astype(np.float32)
+    quality_features = quality_features.astype(np.float32)
+
+    abs_err = np.abs(pred_views - y_true[:, None])
+    sq_err = (pred_views - y_true[:, None]) ** 2
+    best_idx = abs_err.argmin(axis=1)
+    top_idx = weights.argmax(axis=1)
+    top_match = float((top_idx == best_idx).mean())
+    entropy = -(weights * np.log(np.clip(weights, 1e-8, 1.0))).sum(axis=1)
+    if anchor_view not in view_names:
+        raise ValueError(f"Expected anchor_view={anchor_view!r} in view_names={view_names!r}")
+    anchor_idx = view_names.index(anchor_view)
+
+    quality_names = quality_feature_names(view_names)
+    if quality_features.shape[1] != len(quality_names):
+        raise ValueError(
+            f"Expected {len(quality_names)} quality features for {view_names}, got {quality_features.shape[1]}"
+        )
+
+    sigma2_corr: dict[str, float] = {}
+    mean_j_corr: dict[str, float] = {}
+    mean_j = quality_features[:, -1]
+
+    for i, name in enumerate(view_names):
+        sigma2_corr[name] = _safe_corr(weights[:, i], quality_features[:, i])
+        mean_j_corr[name] = _safe_corr(weights[:, i], mean_j)
+
+    mean_weight_when_best: dict[str, float] = {}
+    top_weight_fraction: dict[str, float] = {}
+    oracle_best_fraction: dict[str, float] = {}
+    weight_summary: dict[str, dict[str, float]] = {}
+
+    for i, name in enumerate(view_names):
+        mask = best_idx == i
+        mean_weight_when_best[name] = float(weights[mask, i].mean()) if mask.any() else 0.0
+        top_weight_fraction[name] = float((top_idx == i).mean())
+        oracle_best_fraction[name] = float(mask.mean())
+        weight_summary[name] = {
+            "mean": float(weights[:, i].mean()),
+            "std": float(weights[:, i].std()),
+            "min": float(weights[:, i].min()),
+            "max": float(weights[:, i].max()),
+        }
+
+    oracle_pred = pred_views[np.arange(len(y_true)), best_idx]
+    oracle_rmse = float(np.sqrt(np.mean((oracle_pred - y_true) ** 2)))
+    anchor_rmse = float(np.sqrt(np.mean(sq_err[:, anchor_idx])))
+
+    return {
+        "view_names": list(view_names),
+        "n_rows": int(len(y_true)),
+        "anchor_view": view_names[anchor_idx],
+        "quality_feature_names": quality_names,
+        "weight_summary": weight_summary,
+        "top_weight_fraction": top_weight_fraction,
+        "oracle_best_fraction": oracle_best_fraction,
+        "mean_weight_when_oracle_best": mean_weight_when_best,
+        "top_weight_matches_oracle_best_fraction": top_match,
+        "weight_entropy": {
+            "mean": float(entropy.mean()),
+            "std": float(entropy.std()),
+            "min": float(entropy.min()),
+            "max": float(entropy.max()),
+        },
+        "oracle_best_rmse": oracle_rmse,
+        "anchor_rmse": anchor_rmse,
+        "anchor_oracle_rmse_gap": float(anchor_rmse - oracle_rmse),
+        "weight_vs_sigma2_corr": sigma2_corr,
+        "weight_vs_mean_j_corr": mean_j_corr,
+    }
+
+
+def _safe_corr(a: np.ndarray, b: np.ndarray) -> float:
+    a = a.astype(np.float32)
+    b = b.astype(np.float32)
+    if len(a) < 2 or float(a.std()) < 1e-8 or float(b.std()) < 1e-8:
+        return 0.0
+    corr = float(np.corrcoef(a, b)[0, 1])
+    if np.isnan(corr):
+        return 0.0
+    return corr

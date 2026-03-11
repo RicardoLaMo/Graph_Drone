@@ -10,7 +10,9 @@ from experiments.tabpfn_view_router.src.data import (
 from experiments.tabpfn_view_router.src.router import (
     fit_crossfit_router,
     fit_soft_router,
+    quality_feature_names,
     sigma2_mix,
+    summarize_router_diagnostics,
     uniform_mix,
 )
 
@@ -82,3 +84,65 @@ def test_uniform_and_sigma2_mix_shapes() -> None:
     assert p_s.shape == (10,)
     assert w_u.shape == (10, 4)
     assert w_s.shape == (10, 4)
+
+
+def test_quality_feature_names_match_four_view_layout() -> None:
+    names = quality_feature_names(["FULL", "GEO", "SOCIO", "LOWRANK"])
+    assert names == [
+        "sigma2_FULL",
+        "sigma2_GEO",
+        "sigma2_SOCIO",
+        "sigma2_LOWRANK",
+        "J_FULL_GEO",
+        "J_FULL_SOCIO",
+        "J_FULL_LOWRANK",
+        "J_GEO_SOCIO",
+        "J_GEO_LOWRANK",
+        "J_SOCIO_LOWRANK",
+        "mean_J",
+    ]
+
+
+def test_summarize_router_diagnostics_reports_alignment_and_entropy() -> None:
+    y_true = np.array([0.0, 1.0, 2.0], dtype=np.float32)
+    pred_views = np.array(
+        [
+            [0.0, 0.3, 0.4, 0.5],
+            [1.4, 1.0, 1.2, 1.1],
+            [2.2, 2.3, 2.0, 2.5],
+        ],
+        dtype=np.float32,
+    )
+    weights = np.array(
+        [
+            [0.80, 0.10, 0.05, 0.05],
+            [0.10, 0.70, 0.10, 0.10],
+            [0.10, 0.10, 0.70, 0.10],
+        ],
+        dtype=np.float32,
+    )
+    quality = np.array(
+        [
+            [0.1, 0.3, 0.4, 0.5, 0.6, 0.2, 0.2, 0.1, 0.1, 0.1, 0.2],
+            [0.4, 0.1, 0.3, 0.2, 0.6, 0.2, 0.2, 0.1, 0.1, 0.1, 0.5],
+            [0.4, 0.3, 0.1, 0.2, 0.6, 0.2, 0.2, 0.1, 0.1, 0.1, 0.7],
+        ],
+        dtype=np.float32,
+    )
+
+    summary = summarize_router_diagnostics(
+        y_true=y_true,
+        pred_views=pred_views,
+        weights=weights,
+        quality_features=quality,
+        view_names=["FULL", "GEO", "SOCIO", "LOWRANK"],
+        anchor_view="FULL",
+    )
+
+    assert summary["n_rows"] == 3
+    assert summary["anchor_view"] == "FULL"
+    assert summary["top_weight_matches_oracle_best_fraction"] == 1.0
+    assert summary["top_weight_fraction"]["FULL"] == 1.0 / 3.0
+    assert summary["oracle_best_fraction"]["SOCIO"] == 1.0 / 3.0
+    np.testing.assert_allclose(summary["mean_weight_when_oracle_best"]["GEO"], 0.7)
+    assert summary["anchor_oracle_rmse_gap"] > 0.0

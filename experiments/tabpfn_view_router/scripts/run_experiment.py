@@ -30,6 +30,7 @@ from experiments.tabpfn_view_router.src.router import (
     gora_mix,
     score_regression,
     sigma2_mix,
+    summarize_router_diagnostics,
     uniform_mix,
 )
 
@@ -118,6 +119,8 @@ def write_report(
     path: Path,
     rows: list[dict],
     weights_summary: dict[str, list[float]],
+    router_diagnostics: dict[str, object],
+    crossfit_diagnostics: dict[str, object],
     seed: int,
     split_seed: int,
     n_estimators: int,
@@ -171,6 +174,22 @@ def write_report(
     )
     for name, vals in weights_summary.items():
         lines.append(f"- {name}: val `{vals[0]:.3f}` / test `{vals[1]:.3f}`")
+    lines.extend(
+        [
+            "",
+            "## Router Diagnostics",
+            "",
+            f"- router top-weight matches oracle-best fraction: `{router_diagnostics['test']['top_weight_matches_oracle_best_fraction']:.3f}`",
+            f"- router FULL-oracle RMSE gap: `{router_diagnostics['test']['anchor_oracle_rmse_gap']:.4f}`",
+            f"- crossfit top-weight matches oracle-best fraction: `{crossfit_diagnostics['test']['top_weight_matches_oracle_best_fraction']:.3f}`",
+            f"- crossfit FULL-oracle RMSE gap: `{crossfit_diagnostics['test']['anchor_oracle_rmse_gap']:.4f}`",
+            "",
+            "### Router Top-Weight Fractions (test)",
+            "",
+        ]
+    )
+    for name, value in router_diagnostics["test"]["top_weight_fraction"].items():
+        lines.append(f"- {name}: `{value:.3f}`")
     path.write_text("\n".join(lines) + "\n")
 
 
@@ -337,6 +356,62 @@ def main() -> None:
             float(crossfit.weights_test[:, i].mean()),
         ]
 
+    router_diagnostics = {
+        "val": summarize_router_diagnostics(
+            y_true=split.y_val,
+            pred_views=pred_val,
+            weights=router.weights_val,
+            quality_features=quality.val,
+            view_names=view_order,
+            anchor_view="FULL",
+        ),
+        "test": summarize_router_diagnostics(
+            y_true=split.y_test,
+            pred_views=pred_test,
+            weights=router.weights_test,
+            quality_features=quality.test,
+            view_names=view_order,
+            anchor_view="FULL",
+        ),
+    }
+    crossfit_diagnostics = {
+        "val": summarize_router_diagnostics(
+            y_true=split.y_val,
+            pred_views=pred_val,
+            weights=crossfit.weights_val_oof,
+            quality_features=quality.val,
+            view_names=view_order,
+            anchor_view="FULL",
+        ),
+        "test": summarize_router_diagnostics(
+            y_true=split.y_test,
+            pred_views=pred_test,
+            weights=crossfit.weights_test,
+            quality_features=quality.test,
+            view_names=view_order,
+            anchor_view="FULL",
+        ),
+    }
+
+    np.savez_compressed(
+        artifacts_dir / "p0_router_diagnostics.npz",
+        view_names=np.array(view_order),
+        y_val=split.y_val,
+        y_test=split.y_test,
+        quality_val=quality.val,
+        quality_test=quality.test,
+        pred_val=pred_val,
+        pred_test=pred_test,
+        router_pred_val=router.pred_val,
+        router_pred_test=router.pred_test,
+        router_weights_val=router.weights_val,
+        router_weights_test=router.weights_test,
+        crossfit_pred_val=crossfit.pred_val_oof,
+        crossfit_pred_test=crossfit.pred_test,
+        crossfit_weights_val=crossfit.weights_val_oof,
+        crossfit_weights_test=crossfit.weights_test,
+    )
+
     payload = {
         "seed": args.seed,
         "split_seed": args.split_seed,
@@ -357,6 +432,8 @@ def main() -> None:
         },
         "results": model_rows,
         "weights_summary": weights_summary,
+        "router_diagnostics": router_diagnostics,
+        "crossfit_diagnostics": crossfit_diagnostics,
         "references": {
             "tabr_rmse": TABR_RMSE,
             "tabm_rmse": TABM_RMSE,
@@ -368,10 +445,14 @@ def main() -> None:
 
     (output_dir / "p0_results.json").write_text(json.dumps(payload, indent=2) + "\n")
     write_metrics_csv(artifacts_dir / "metrics.csv", model_rows)
+    (artifacts_dir / "router_diagnostics.json").write_text(json.dumps(router_diagnostics, indent=2) + "\n")
+    (artifacts_dir / "crossfit_diagnostics.json").write_text(json.dumps(crossfit_diagnostics, indent=2) + "\n")
     write_report(
         output_dir / "report.md",
         model_rows,
         weights_summary,
+        router_diagnostics,
+        crossfit_diagnostics,
         args.seed,
         args.split_seed,
         args.n_estimators,

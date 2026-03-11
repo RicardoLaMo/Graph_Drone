@@ -30,6 +30,7 @@ from experiments.tabpfn_view_router.src.router import (
     gora_mix,
     score_regression,
     sigma2_mix,
+    summarize_router_diagnostics,
     uniform_mix,
 )
 from experiments.tabpfn_view_router.src.runtime import build_device_plan
@@ -71,6 +72,8 @@ def write_report(
     run_name: str,
     rows: list[dict[str, object]],
     weights_summary: dict[str, list[float]],
+    router_diagnostics: dict[str, object],
+    crossfit_diagnostics: dict[str, object],
     dataset_summary: dict[str, object],
     runtime_summary: dict[str, object],
 ) -> None:
@@ -103,6 +106,22 @@ def write_report(
     lines.extend(["", "## View Weights", ""])
     for name, values in weights_summary.items():
         lines.append(f"- {name}: val `{values[0]:.3f}` / test `{values[1]:.3f}`")
+    lines.extend(
+        [
+            "",
+            "## Router Diagnostics",
+            "",
+            f"- router top-weight matches oracle-best fraction: `{router_diagnostics['test']['top_weight_matches_oracle_best_fraction']:.3f}`",
+            f"- router FULL-oracle RMSE gap: `{router_diagnostics['test']['anchor_oracle_rmse_gap']:.4f}`",
+            f"- crossfit top-weight matches oracle-best fraction: `{crossfit_diagnostics['test']['top_weight_matches_oracle_best_fraction']:.3f}`",
+            f"- crossfit FULL-oracle RMSE gap: `{crossfit_diagnostics['test']['anchor_oracle_rmse_gap']:.4f}`",
+            "",
+            "### Router Top-Weight Fractions (test)",
+            "",
+        ]
+    )
+    for name, value in router_diagnostics["test"]["top_weight_fraction"].items():
+        lines.append(f"- {name}: `{value:.3f}`")
     output_path.write_text("\n".join(lines) + "\n")
 
 
@@ -288,6 +307,43 @@ def main() -> None:
             float(crossfit.weights_test[:, idx].mean()),
         ]
 
+    router_diagnostics = {
+        "val": summarize_router_diagnostics(
+            y_true=split.y_val,
+            pred_views=pred_val,
+            weights=router.weights_val,
+            quality_features=quality.val,
+            view_names=views.view_names,
+            anchor_view="FULL",
+        ),
+        "test": summarize_router_diagnostics(
+            y_true=split.y_test,
+            pred_views=pred_test,
+            weights=router.weights_test,
+            quality_features=quality.test,
+            view_names=views.view_names,
+            anchor_view="FULL",
+        ),
+    }
+    crossfit_diagnostics = {
+        "val": summarize_router_diagnostics(
+            y_true=split.y_val,
+            pred_views=pred_val,
+            weights=crossfit.weights_val_oof,
+            quality_features=quality.val,
+            view_names=views.view_names,
+            anchor_view="FULL",
+        ),
+        "test": summarize_router_diagnostics(
+            y_true=split.y_test,
+            pred_views=pred_test,
+            weights=crossfit.weights_test,
+            quality_features=quality.test,
+            view_names=views.view_names,
+            anchor_view="FULL",
+        ),
+    }
+
     run_name = dataset_run_tag(args.dataset, repeat=args.repeat, fold=args.fold, smoke=args.smoke)
     output_dir = (args.output_root / run_name).resolve()
     artifacts_dir = output_dir / "artifacts"
@@ -298,6 +354,8 @@ def main() -> None:
         view_names=np.array(views.view_names),
         y_val=split.y_val,
         y_test=split.y_test,
+        quality_val=quality.val,
+        quality_test=quality.test,
         pred_val=pred_val,
         pred_test=pred_test,
         sigma2_val=quality.sigma2_val,
@@ -336,13 +394,19 @@ def main() -> None:
         },
         "rows": model_rows,
         "weights_summary": weights_summary,
+        "router_diagnostics": router_diagnostics,
+        "crossfit_diagnostics": crossfit_diagnostics,
     }
     (output_dir / "graphdrone_results.json").write_text(json.dumps(payload, indent=2) + "\n")
+    (artifacts_dir / "router_diagnostics.json").write_text(json.dumps(router_diagnostics, indent=2) + "\n")
+    (artifacts_dir / "crossfit_diagnostics.json").write_text(json.dumps(crossfit_diagnostics, indent=2) + "\n")
     write_report(
         output_dir / "report.md",
         run_name=run_name,
         rows=model_rows,
         weights_summary=weights_summary,
+        router_diagnostics=router_diagnostics,
+        crossfit_diagnostics=crossfit_diagnostics,
         dataset_summary=payload["dataset"],
         runtime_summary=payload["runtime"],
     )
