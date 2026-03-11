@@ -8,6 +8,7 @@ from experiments.tabpfn_view_router.src.data import (
     build_view_data,
 )
 from experiments.tabpfn_view_router.src.router import (
+    fixed_weight_mix,
     fit_crossfit_router,
     fit_soft_router,
     quality_feature_names,
@@ -84,6 +85,13 @@ def test_uniform_and_sigma2_mix_shapes() -> None:
     assert p_s.shape == (10,)
     assert w_u.shape == (10, 4)
     assert w_s.shape == (10, 4)
+
+
+def test_fixed_weight_mix_normalizes_and_repeats_global_weights() -> None:
+    preds = np.array([[1.0, 3.0], [2.0, 4.0]], dtype=np.float32)
+    pred, weights = fixed_weight_mix(preds, np.array([2.0, 6.0], dtype=np.float32))
+    np.testing.assert_allclose(weights, np.array([[0.25, 0.75], [0.25, 0.75]], dtype=np.float32))
+    np.testing.assert_allclose(pred, np.array([2.5, 3.5], dtype=np.float32))
 
 
 def test_quality_feature_names_match_four_view_layout() -> None:

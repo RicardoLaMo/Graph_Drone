@@ -25,6 +25,7 @@ from experiments.openml_regression_benchmark.src.openml_tasks import (
 from experiments.tabpfn_view_router.scripts.run_experiment import fit_view_experts
 from experiments.tabpfn_view_router.src.data import build_quality_features
 from experiments.tabpfn_view_router.src.router import (
+    fixed_weight_mix,
     fit_crossfit_router,
     fit_soft_router,
     gora_mix,
@@ -74,6 +75,8 @@ def write_report(
     weights_summary: dict[str, list[float]],
     router_diagnostics: dict[str, object],
     crossfit_diagnostics: dict[str, object],
+    router_fixed_diagnostics: dict[str, object],
+    crossfit_fixed_diagnostics: dict[str, object],
     dataset_summary: dict[str, object],
     runtime_summary: dict[str, object],
 ) -> None:
@@ -111,10 +114,15 @@ def write_report(
             "",
             "## Router Diagnostics",
             "",
+            "- fixed-weight baselines use mean learned validation weights; their test metrics are clean, while val metrics are retrospective diagnostics.",
             f"- router top-weight matches oracle-best fraction: `{router_diagnostics['test']['top_weight_matches_oracle_best_fraction']:.3f}`",
             f"- router FULL-oracle RMSE gap: `{router_diagnostics['test']['anchor_oracle_rmse_gap']:.4f}`",
+            f"- router fixed-weight top-weight matches oracle-best fraction: `{router_fixed_diagnostics['test']['top_weight_matches_oracle_best_fraction']:.3f}`",
+            f"- router fixed-weight FULL-oracle RMSE gap: `{router_fixed_diagnostics['test']['anchor_oracle_rmse_gap']:.4f}`",
             f"- crossfit top-weight matches oracle-best fraction: `{crossfit_diagnostics['test']['top_weight_matches_oracle_best_fraction']:.3f}`",
             f"- crossfit FULL-oracle RMSE gap: `{crossfit_diagnostics['test']['anchor_oracle_rmse_gap']:.4f}`",
+            f"- crossfit fixed-weight top-weight matches oracle-best fraction: `{crossfit_fixed_diagnostics['test']['top_weight_matches_oracle_best_fraction']:.3f}`",
+            f"- crossfit fixed-weight FULL-oracle RMSE gap: `{crossfit_fixed_diagnostics['test']['anchor_oracle_rmse_gap']:.4f}`",
             "",
             "### Router Top-Weight Fractions (test)",
             "",
@@ -275,6 +283,29 @@ def main() -> None:
             float(router.weights_test[:, idx].mean()),
         ]
 
+    router_fixed_mean_weights = router.weights_val.mean(axis=0)
+    router_fixed_val, router_fixed_weights_val = fixed_weight_mix(pred_val, router_fixed_mean_weights)
+    router_fixed_test, router_fixed_weights_test = fixed_weight_mix(pred_test, router_fixed_mean_weights)
+    val_metrics = score_regression(split.y_val, router_fixed_val)
+    test_metrics = score_regression(split.y_test, router_fixed_test)
+    model_rows.append(
+        {
+            "model": "GraphDrone_router_fixed",
+            "val_rmse": val_metrics["rmse"],
+            "test_rmse": test_metrics["rmse"],
+            "val_mae": val_metrics["mae"],
+            "test_mae": test_metrics["mae"],
+            "val_r2": val_metrics["r2"],
+            "test_r2": test_metrics["r2"],
+            "notes": "test-clean fixed hedge using mean learned router val weights; val metric is retrospective",
+        }
+    )
+    for idx, name in enumerate(views.view_names):
+        weights_summary[f"router_fixed_{name}"] = [
+            float(router_fixed_weights_val[:, idx].mean()),
+            float(router_fixed_weights_test[:, idx].mean()),
+        ]
+
     crossfit = fit_crossfit_router(
         x_val=quality.val,
         pred_val=pred_val,
@@ -307,6 +338,29 @@ def main() -> None:
             float(crossfit.weights_test[:, idx].mean()),
         ]
 
+    crossfit_fixed_mean_weights = crossfit.weights_val_oof.mean(axis=0)
+    crossfit_fixed_val, crossfit_fixed_weights_val = fixed_weight_mix(pred_val, crossfit_fixed_mean_weights)
+    crossfit_fixed_test, crossfit_fixed_weights_test = fixed_weight_mix(pred_test, crossfit_fixed_mean_weights)
+    val_metrics = score_regression(split.y_val, crossfit_fixed_val)
+    test_metrics = score_regression(split.y_test, crossfit_fixed_test)
+    model_rows.append(
+        {
+            "model": "GraphDrone_crossfit_fixed",
+            "val_rmse": val_metrics["rmse"],
+            "test_rmse": test_metrics["rmse"],
+            "val_mae": val_metrics["mae"],
+            "test_mae": test_metrics["mae"],
+            "val_r2": val_metrics["r2"],
+            "test_r2": test_metrics["r2"],
+            "notes": "test-clean fixed hedge using mean crossfit OOF val weights; val metric is retrospective",
+        }
+    )
+    for idx, name in enumerate(views.view_names):
+        weights_summary[f"crossfit_fixed_{name}"] = [
+            float(crossfit_fixed_weights_val[:, idx].mean()),
+            float(crossfit_fixed_weights_test[:, idx].mean()),
+        ]
+
     router_diagnostics = {
         "val": summarize_router_diagnostics(
             y_true=split.y_val,
@@ -325,6 +379,24 @@ def main() -> None:
             anchor_view="FULL",
         ),
     }
+    router_fixed_diagnostics = {
+        "val": summarize_router_diagnostics(
+            y_true=split.y_val,
+            pred_views=pred_val,
+            weights=router_fixed_weights_val,
+            quality_features=quality.val,
+            view_names=views.view_names,
+            anchor_view="FULL",
+        ),
+        "test": summarize_router_diagnostics(
+            y_true=split.y_test,
+            pred_views=pred_test,
+            weights=router_fixed_weights_test,
+            quality_features=quality.test,
+            view_names=views.view_names,
+            anchor_view="FULL",
+        ),
+    }
     crossfit_diagnostics = {
         "val": summarize_router_diagnostics(
             y_true=split.y_val,
@@ -338,6 +410,24 @@ def main() -> None:
             y_true=split.y_test,
             pred_views=pred_test,
             weights=crossfit.weights_test,
+            quality_features=quality.test,
+            view_names=views.view_names,
+            anchor_view="FULL",
+        ),
+    }
+    crossfit_fixed_diagnostics = {
+        "val": summarize_router_diagnostics(
+            y_true=split.y_val,
+            pred_views=pred_val,
+            weights=crossfit_fixed_weights_val,
+            quality_features=quality.val,
+            view_names=views.view_names,
+            anchor_view="FULL",
+        ),
+        "test": summarize_router_diagnostics(
+            y_true=split.y_test,
+            pred_views=pred_test,
+            weights=crossfit_fixed_weights_test,
             quality_features=quality.test,
             view_names=views.view_names,
             anchor_view="FULL",
@@ -366,10 +456,18 @@ def main() -> None:
         router_pred_test=router.pred_test,
         router_weights_val=router.weights_val,
         router_weights_test=router.weights_test,
+        router_fixed_pred_val=router_fixed_val,
+        router_fixed_pred_test=router_fixed_test,
+        router_fixed_weights_val=router_fixed_weights_val,
+        router_fixed_weights_test=router_fixed_weights_test,
         crossfit_pred_val=crossfit.pred_val_oof,
         crossfit_pred_test=crossfit.pred_test,
         crossfit_weights_val=crossfit.weights_val_oof,
         crossfit_weights_test=crossfit.weights_test,
+        crossfit_fixed_pred_val=crossfit_fixed_val,
+        crossfit_fixed_pred_test=crossfit_fixed_test,
+        crossfit_fixed_weights_val=crossfit_fixed_weights_val,
+        crossfit_fixed_weights_test=crossfit_fixed_weights_test,
         uniform_weights_val=w_uniform_val,
         uniform_weights_test=w_uniform_test,
         sigma2_weights_val=w_sigma_val,
@@ -395,11 +493,17 @@ def main() -> None:
         "rows": model_rows,
         "weights_summary": weights_summary,
         "router_diagnostics": router_diagnostics,
+        "router_fixed_diagnostics": router_fixed_diagnostics,
         "crossfit_diagnostics": crossfit_diagnostics,
+        "crossfit_fixed_diagnostics": crossfit_fixed_diagnostics,
     }
     (output_dir / "graphdrone_results.json").write_text(json.dumps(payload, indent=2) + "\n")
     (artifacts_dir / "router_diagnostics.json").write_text(json.dumps(router_diagnostics, indent=2) + "\n")
+    (artifacts_dir / "router_fixed_diagnostics.json").write_text(json.dumps(router_fixed_diagnostics, indent=2) + "\n")
     (artifacts_dir / "crossfit_diagnostics.json").write_text(json.dumps(crossfit_diagnostics, indent=2) + "\n")
+    (artifacts_dir / "crossfit_fixed_diagnostics.json").write_text(
+        json.dumps(crossfit_fixed_diagnostics, indent=2) + "\n"
+    )
     write_report(
         output_dir / "report.md",
         run_name=run_name,
@@ -407,6 +511,8 @@ def main() -> None:
         weights_summary=weights_summary,
         router_diagnostics=router_diagnostics,
         crossfit_diagnostics=crossfit_diagnostics,
+        router_fixed_diagnostics=router_fixed_diagnostics,
+        crossfit_fixed_diagnostics=crossfit_fixed_diagnostics,
         dataset_summary=payload["dataset"],
         runtime_summary=payload["runtime"],
     )

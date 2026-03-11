@@ -21,6 +21,24 @@ def uniform_mix(preds: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return preds.mean(axis=1).astype(np.float32), weights
 
 
+def fixed_weight_mix(preds: np.ndarray, mean_weights: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    mean_weights = np.asarray(mean_weights, dtype=np.float32).reshape(-1)
+    if preds.ndim != 2:
+        raise ValueError(f"Expected preds to be 2D, got shape {preds.shape}")
+    if mean_weights.shape[0] != preds.shape[1]:
+        raise ValueError(
+            f"Expected {preds.shape[1]} fixed weights for preds shape {preds.shape}, got {mean_weights.shape[0]}"
+        )
+    clipped = np.clip(mean_weights, 0.0, None)
+    total = float(clipped.sum())
+    if total <= 0.0:
+        raise ValueError("Expected positive total fixed weight mass")
+    normalized = (clipped / total).astype(np.float32)
+    weights = np.broadcast_to(normalized[None, :], preds.shape).copy().astype(np.float32)
+    pred = (weights * preds).sum(axis=1)
+    return pred.astype(np.float32), weights
+
+
 def sigma2_mix(preds: np.ndarray, sigma2_v: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     inv = 1.0 / (np.maximum(sigma2_v, -5.0) + 6.0)
     weights = inv / (inv.sum(axis=1, keepdims=True) + 1e-8)
