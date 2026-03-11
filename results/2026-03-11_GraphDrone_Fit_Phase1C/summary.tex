@@ -1,0 +1,45 @@
+\section{GraphDrone.fit() Phase I-C Token Builder and Support Encoder}
+
+Phase I-C upgrades the \texttt{GraphDrone.fit()} package from a placeholder token surface to a traceable row-level tokenization layer. The architectural goal of this phase is not yet learned routing; it is to ensure that future routing decisions can be expressed over explicit expert tokens rather than over ad hoc scalar runner features.
+
+For row \(i\) and expert \(v\), the package now builds token fields of the form
+\[
+t_{i,v} =
+\big[
+p_{i,v},
+q_{i,v},
+s_{i,v},
+d_v
+\big],
+\]
+where \(p_{i,v}\) are prediction residual fields, \(q_{i,v}\) are named quality fields, \(s_{i,v}\) are pooled support summaries, and \(d_v\) is a normalized descriptor embedding.
+
+The important bridge in this phase is the compatibility layer for legacy scalar priors. The old flat routing surface
+\[
+\left[\sigma^2_v,\ J_{\mathrm{flat}},\ \mathrm{mean}\,J\right]
+\]
+is no longer treated as the routing object itself. Instead, it is transformed into per-expert token subfields:
+\[
+q_{i,v} =
+\big[
+\sigma^2_{i,v},
+\sigma^2_{i,v} - \bar{\sigma}^2_i,
+\mathrm{overlapMean}_{i,v},
+\mathrm{overlapMax}_{i,v},
+\mathrm{mean}J_i
+\big].
+\]
+This preserves the old prior signal while moving it into the new token protocol.
+
+Support encoding is also no longer a pure placeholder. The package now accepts support tensors with shape \([N, E, K, F]\) and pools them into per-expert summaries using means, standard deviations, absolute maxima, and support count. The benchmark smoke runner does not yet provide such tensors, but the path is validated by unit tests and exposed through the public diagnostics surface.
+
+Descriptor embeddings remain explicit rather than learned in this phase. However, the numeric descriptor channels are now normalized before concatenation with family and projection one-hots, preventing raw integer magnitude from dominating any later attention-style router.
+
+Validation for this phase consisted of:
+\begin{itemize}
+\item \texttt{pytest -q} over the GraphDrone fit, expert-factory, token-builder, and benchmark-adapter tests, passing 18 tests,
+\item a refreshed \texttt{houses} smoke run through the package benchmark runner,
+\item external Gemini and Claude code review on the Phase I-C diff and smoke diagnostics.
+\end{itemize}
+
+The resulting checkpoint is still deliberately conservative: the current router remains \texttt{bootstrap\_full\_only}. Therefore Phase I-C proves the token and diagnostics surface, not contextual routing gains. That is the correct stopping point before Phase I-D, which must introduce the first non-trivial set-router on top of these token fields.

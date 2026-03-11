@@ -14,7 +14,7 @@ from src.graphdrone_fit import (
     ViewDescriptor,
 )
 from src.graphdrone_fit.portfolio_loader import load_portfolio
-from src.graphdrone_fit.token_builder import PerViewTokenBuilder
+from src.graphdrone_fit.token_builder import PerViewTokenBuilder, build_legacy_quality_encoding_from_flat
 from src.graphdrone_fit.view_descriptor import normalize_descriptor_set
 
 
@@ -102,11 +102,17 @@ def test_graphdrone_bootstrap_predict_uses_explicit_full_anchor(tmp_path) -> Non
     model.fit(X_train)
 
     X_test = np.array([[3.0, 4.0], [0.0, 2.0]], dtype=np.float32)
-    result = model.predict(X_test, return_diagnostics=True)
+    quality = build_legacy_quality_encoding_from_flat(
+        view_names=["FULL", "SUPPORT"],
+        flat_quality=np.array([[0.1, 0.2, 0.4, 0.7], [0.2, 0.1, 0.3, 0.6]], dtype=np.float32),
+    )
+    result = model.predict(X_test, quality_features=quality, return_diagnostics=True)
     expected = np.array([3.0 - 2.0 + 0.25, 0.0 - 1.0 + 0.25], dtype=np.float32)
     assert np.allclose(result.predictions, expected)
     assert result.diagnostics["router_kind"] == "bootstrap_full_only"
     assert result.diagnostics["full_expert_id"] == "FULL"
+    assert result.diagnostics["quality_feature_names"][0] == "quality_sigma2_self"
+    assert "descriptor_is_anchor" in result.diagnostics["token_field_names"]["descriptor"]
     assert result.token_shape[0] == len(X_test)
     assert result.token_shape[1] == 2
 
@@ -228,3 +234,38 @@ def test_graphdrone_fit_requires_y_for_expert_specs() -> None:
         assert "y is required" in str(exc)
     else:
         raise AssertionError("Expected GraphDrone.fit() to require y when expert_specs are provided")
+
+
+def test_graphdrone_predict_records_support_summary_fields_from_4d_support_tensor(tmp_path) -> None:
+    _write_manifest(tmp_path)
+    model = GraphDrone(
+        GraphDroneConfig(
+            portfolio=PortfolioLoadConfig(manifest_path=tmp_path / "portfolio_manifest.json"),
+            full_expert_id="FULL",
+            router=SetRouterConfig(kind="bootstrap_full_only"),
+        )
+    )
+    model.fit(np.array([[1.0, 2.0], [2.0, 0.5]], dtype=np.float32))
+    X_test = np.array([[3.0, 4.0], [0.0, 2.0]], dtype=np.float32)
+    support = np.array(
+        [
+            [
+                [[1.0], [2.0], [3.0]],
+                [[0.5], [1.5], [2.5]],
+            ],
+            [
+                [[0.0], [1.0], [2.0]],
+                [[1.0], [2.0], [3.0]],
+            ],
+        ],
+        dtype=np.float32,
+    )
+
+    result = model.predict(X_test, support_tensor=support, return_diagnostics=True)
+    assert result.diagnostics["support_feature_names"] == [
+        "support_mean_0",
+        "support_std_0",
+        "support_absmax_0",
+        "support_count",
+    ]
+    assert result.diagnostics["token_field_slices"]["support"] == [3, 7]

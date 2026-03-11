@@ -9,8 +9,8 @@ from .defer_integrator import IntegrationOutputs, integrate_predictions
 from .expert_factory import ExpertBuildSpec, ExpertPredictionBatch, PortfolioExpertFactory, fit_portfolio_from_specs
 from .portfolio_loader import LoadedPortfolio, load_portfolio
 from .set_router import build_set_router
-from .support_encoder import SupportEncoding, ZeroSupportEncoder
-from .token_builder import PerViewTokenBuilder, TokenBatch
+from .support_encoder import MomentSupportEncoder, SupportEncoding
+from .token_builder import PerViewTokenBuilder, QualityEncoding, TokenBatch
 
 
 @dataclass(frozen=True)
@@ -27,7 +27,7 @@ class GraphDrone:
         self._portfolio: LoadedPortfolio | None = None
         self._expert_factory: PortfolioExpertFactory | None = None
         self._token_builder: PerViewTokenBuilder | None = None
-        self._support_encoder: ZeroSupportEncoder | None = None
+        self._support_encoder: MomentSupportEncoder | None = None
         self._router = None
         self.n_features_in_: int | None = None
 
@@ -62,7 +62,7 @@ class GraphDrone:
             self._portfolio = load_portfolio(self.config.portfolio, full_expert_id=self.config.full_expert_id)
         self._expert_factory = PortfolioExpertFactory(self._portfolio)
         self._token_builder = PerViewTokenBuilder()
-        self._support_encoder = ZeroSupportEncoder()
+        self._support_encoder = MomentSupportEncoder()
         self._router = build_set_router(self.config.router)
         return self
 
@@ -70,8 +70,8 @@ class GraphDrone:
         self,
         X: np.ndarray,
         *,
-        quality_features: np.ndarray | None = None,
-        support_tensor: np.ndarray | None = None,
+        quality_features: np.ndarray | QualityEncoding | None = None,
+        support_tensor: np.ndarray | SupportEncoding | None = None,
         return_diagnostics: bool = False,
     ) -> np.ndarray | GraphDronePredictResult:
         result = self.predict_with_diagnostics(
@@ -97,8 +97,8 @@ class GraphDrone:
         self,
         X: np.ndarray,
         *,
-        quality_features: np.ndarray | None = None,
-        support_tensor: np.ndarray | None = None,
+        quality_features: np.ndarray | QualityEncoding | None = None,
+        support_tensor: np.ndarray | SupportEncoding | None = None,
     ) -> GraphDronePredictResult:
         if self._expert_factory is None or self._token_builder is None or self._support_encoder is None or self._router is None:
             raise RuntimeError("GraphDrone.fit() must be called before predict()")
@@ -151,6 +151,8 @@ def _build_diagnostics(
         "full_expert_id": batch.full_expert_id,
         "expert_ids": list(batch.expert_ids),
         "token_field_slices": {key: list(value) for key, value in tokens.field_slices.items()},
+        "token_field_names": {key: list(value) for key, value in tokens.field_names.items()},
+        "quality_feature_names": list(tokens.field_names.get("quality", ())),
         "support_feature_names": list(support_encoding.feature_names),
         **integration.diagnostics,
     }

@@ -7,8 +7,9 @@ import numpy as np
 from experiments.openml_regression_benchmark.src.graphdrone_fit_adapter import (
     build_benchmark_descriptors,
     build_benchmark_expert_plan,
+    build_benchmark_quality_encodings,
 )
-from experiments.tabpfn_view_router.src.data import ViewData
+from experiments.tabpfn_view_router.src.data import QualityFeatures, ViewData
 
 
 def test_build_benchmark_descriptors_handles_variable_view_kinds() -> None:
@@ -70,7 +71,7 @@ def test_build_benchmark_descriptors_handles_variable_view_kinds() -> None:
     geo = descriptor_set.descriptors[1]
     lowrank = descriptor_set.descriptors[-1]
     assert full.is_anchor is True
-    assert geo.family == "bootstrap"
+    assert geo.family == "domain_semantic"
     assert lowrank.projection_kind == "external_transform"
 
 
@@ -204,3 +205,28 @@ def test_build_benchmark_expert_plan_creates_tabpfn_specs() -> None:
     assert len(plan.specs) == 4
     assert plan.specs[0].model_kind == "tabpfn_regressor"
     assert plan.specs[-1].descriptor.family == "structural_subspace"
+
+
+def test_build_benchmark_quality_encodings_maps_legacy_flat_priors() -> None:
+    views = ViewData(
+        train={"FULL": np.ones((2, 4), dtype=np.float32), "GEO": np.ones((2, 2), dtype=np.float32)},
+        val={"FULL": np.ones((2, 4), dtype=np.float32), "GEO": np.ones((2, 2), dtype=np.float32)},
+        test={"FULL": np.ones((2, 4), dtype=np.float32), "GEO": np.ones((2, 2), dtype=np.float32)},
+        view_names=["FULL", "GEO"],
+    )
+    quality = QualityFeatures(
+        train=np.array([[0.2, 0.5, 0.8, 0.7], [0.1, 0.4, 0.7, 0.6]], dtype=np.float32),
+        val=np.array([[0.3, 0.6, 0.9, 0.8], [0.2, 0.5, 0.8, 0.7]], dtype=np.float32),
+        test=np.array([[0.4, 0.7, 1.0, 0.9], [0.3, 0.6, 0.9, 0.8]], dtype=np.float32),
+        sigma2_train=np.zeros((2, 2), dtype=np.float32),
+        sigma2_val=np.zeros((2, 2), dtype=np.float32),
+        sigma2_test=np.zeros((2, 2), dtype=np.float32),
+        mean_j_train=np.zeros(2, dtype=np.float32),
+        mean_j_val=np.zeros(2, dtype=np.float32),
+        mean_j_test=np.zeros(2, dtype=np.float32),
+    )
+
+    encodings = build_benchmark_quality_encodings(views, quality)
+    assert set(encodings) == {"train", "val", "test"}
+    assert encodings["train"].tensor.shape == (2, 2, 5)
+    assert encodings["train"].feature_names[0] == "quality_sigma2_self"

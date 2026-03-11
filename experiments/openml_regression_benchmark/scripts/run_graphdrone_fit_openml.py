@@ -21,9 +21,11 @@ from experiments.openml_regression_benchmark.src.openml_tasks import (
     limit_train_rows,
     split_summary,
 )
+from experiments.tabpfn_view_router.src.data import build_quality_features
 from experiments.tabpfn_view_router.src.runtime import build_device_plan
 from src.graphdrone_fit import GraphDrone, GraphDroneConfig, SetRouterConfig
 from src.graphdrone_fit.metrics import regression_metrics
+from experiments.openml_regression_benchmark.src.graphdrone_fit_adapter import build_benchmark_quality_encodings
 
 
 def parse_args() -> argparse.Namespace:
@@ -71,6 +73,7 @@ def main() -> None:
         seed=args.seed,
     )
     views = build_graphdrone_view_data(split)
+    quality = build_quality_features(split, views, k=24)
     device_plan = build_device_plan(
         views.view_names,
         requested_device=args.device,
@@ -86,6 +89,7 @@ def main() -> None:
         n_preprocessing_jobs=args.n_preprocessing_jobs,
         view_devices=device_plan.view_devices,
     )
+    quality_encodings = build_benchmark_quality_encodings(views, quality)
     model = GraphDrone(
         GraphDroneConfig(
             portfolio=None,
@@ -97,8 +101,16 @@ def main() -> None:
 
     batch_val = model.predict_experts(split.X_val)
     batch_test = model.predict_experts(split.X_test)
-    bootstrap_val = model.predict(split.X_val, return_diagnostics=True)
-    bootstrap_test = model.predict(split.X_test, return_diagnostics=True)
+    bootstrap_val = model.predict(
+        split.X_val,
+        quality_features=quality_encodings["val"],
+        return_diagnostics=True,
+    )
+    bootstrap_test = model.predict(
+        split.X_test,
+        quality_features=quality_encodings["test"],
+        return_diagnostics=True,
+    )
 
     rows: list[dict[str, object]] = []
     for idx, expert_id in enumerate(batch_val.expert_ids):

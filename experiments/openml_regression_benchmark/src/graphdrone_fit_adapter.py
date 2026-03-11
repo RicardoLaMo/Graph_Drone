@@ -3,8 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from experiments.tabpfn_view_router.src.data import ViewData
+from experiments.tabpfn_view_router.src.data import QualityFeatures, ViewData
 from src.graphdrone_fit.expert_factory import ExpertBuildSpec, IdentitySelectorAdapter, PcaProjectionAdapter
+from src.graphdrone_fit.token_builder import QualityEncoding, build_legacy_quality_encoding_from_flat
 from src.graphdrone_fit.view_descriptor import ViewDescriptor, normalize_descriptor_set
 
 if TYPE_CHECKING:
@@ -91,10 +92,17 @@ def build_benchmark_descriptors(
 
 
 def _default_family_for_view(view_name: str) -> str:
-    if view_name == "FULL":
+    upper_name = view_name.upper()
+    if upper_name == "FULL":
         return "FULL"
-    if view_name == "LOWRANK":
+    if upper_name in {"LOWRANK", "PCA", "SVD"}:
         return "structural_subspace"
+    if upper_name in {"GEO", "DOMAIN", "SOCIO"}:
+        return "domain_semantic"
+    if "LOCAL" in upper_name or "SUPPORT" in upper_name or "KNN" in upper_name:
+        return "local_support"
+    if "REGIME" in upper_name or "CLUSTER" in upper_name:
+        return "learned_regime"
     return "bootstrap"
 
 
@@ -145,3 +153,23 @@ def build_benchmark_expert_plan(
         descriptors=descriptor_set.descriptors,
         specs=tuple(specs),
     )
+
+
+def build_benchmark_quality_encodings(
+    views: ViewData,
+    quality: QualityFeatures,
+) -> dict[str, QualityEncoding]:
+    return {
+        "train": build_legacy_quality_encoding_from_flat(
+            view_names=views.view_names,
+            flat_quality=quality.train,
+        ),
+        "val": build_legacy_quality_encoding_from_flat(
+            view_names=views.view_names,
+            flat_quality=quality.val,
+        ),
+        "test": build_legacy_quality_encoding_from_flat(
+            view_names=views.view_names,
+            flat_quality=quality.test,
+        ),
+    }
