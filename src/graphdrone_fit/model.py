@@ -6,7 +6,7 @@ import numpy as np
 
 from .config import GraphDroneConfig
 from .defer_integrator import IntegrationOutputs, integrate_predictions
-from .expert_factory import PortfolioExpertFactory
+from .expert_factory import ExpertBuildSpec, ExpertPredictionBatch, PortfolioExpertFactory, fit_portfolio_from_specs
 from .portfolio_loader import LoadedPortfolio, load_portfolio
 from .set_router import build_set_router
 from .support_encoder import SupportEncoding, ZeroSupportEncoder
@@ -37,10 +37,29 @@ class GraphDrone:
         y: np.ndarray | None = None,
         *,
         portfolio: LoadedPortfolio | None = None,
+        expert_specs: tuple[ExpertBuildSpec, ...] | None = None,
     ) -> "GraphDrone":
         matrix = _coerce_matrix(X)
         self.n_features_in_ = matrix.shape[1]
-        self._portfolio = portfolio or load_portfolio(self.config.portfolio, full_expert_id=self.config.full_expert_id)
+        if portfolio is not None and expert_specs is not None:
+            raise ValueError("Provide either portfolio or expert_specs, not both")
+        if portfolio is not None:
+            self._portfolio = portfolio
+        elif expert_specs is not None:
+            if y is None:
+                raise ValueError("y is required when fitting GraphDrone from expert_specs")
+            self._portfolio = fit_portfolio_from_specs(
+                X_train=matrix,
+                y_train=np.asarray(y, dtype=np.float32),
+                specs=expert_specs,
+                full_expert_id=self.config.full_expert_id,
+            )
+        else:
+            if self.config.portfolio is None:
+                raise ValueError(
+                    "GraphDroneConfig.portfolio is required when portfolio and expert_specs are not provided"
+                )
+            self._portfolio = load_portfolio(self.config.portfolio, full_expert_id=self.config.full_expert_id)
         self._expert_factory = PortfolioExpertFactory(self._portfolio)
         self._token_builder = PerViewTokenBuilder()
         self._support_encoder = ZeroSupportEncoder()
@@ -63,6 +82,16 @@ class GraphDrone:
         if return_diagnostics:
             return result
         return result.predictions
+
+    def predict_experts(self, X: np.ndarray) -> ExpertPredictionBatch:
+        if self._expert_factory is None:
+            raise RuntimeError("GraphDrone.fit() must be called before predict_experts()")
+        matrix = _coerce_matrix(X)
+        if self.n_features_in_ is not None and matrix.shape[1] != self.n_features_in_:
+            raise ValueError(
+                f"Expected {self.n_features_in_} features after fit(), got {matrix.shape[1]}"
+            )
+        return self._expert_factory.predict_all(matrix)
 
     def predict_with_diagnostics(
         self,

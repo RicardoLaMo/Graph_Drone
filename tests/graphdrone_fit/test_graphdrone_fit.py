@@ -4,7 +4,15 @@ import json
 
 import numpy as np
 
-from src.graphdrone_fit import GraphDrone, GraphDroneConfig, PortfolioLoadConfig, SetRouterConfig, ViewDescriptor
+from src.graphdrone_fit import (
+    ExpertBuildSpec,
+    GraphDrone,
+    GraphDroneConfig,
+    IdentitySelectorAdapter,
+    PortfolioLoadConfig,
+    SetRouterConfig,
+    ViewDescriptor,
+)
 from src.graphdrone_fit.portfolio_loader import load_portfolio
 from src.graphdrone_fit.token_builder import PerViewTokenBuilder
 from src.graphdrone_fit.view_descriptor import normalize_descriptor_set
@@ -143,3 +151,80 @@ def test_token_builder_emits_tensor_fields() -> None:
     assert batch.tokens.shape[1] == 2
     assert batch.field_slices["prediction"] == (0, 3)
     assert batch.field_slices["quality"] == (3, 5)
+
+
+def test_graphdrone_fit_accepts_real_expert_specs_without_manifest() -> None:
+    X_train = np.array([[1.0, 2.0], [2.0, 0.5], [0.0, 1.5]], dtype=np.float32)
+    y_train = np.array([1.0, 0.0, 0.5], dtype=np.float32)
+    config = GraphDroneConfig(
+        portfolio=None,
+        full_expert_id="FULL",
+        router=SetRouterConfig(kind="bootstrap_full_only"),
+    )
+    model = GraphDrone(config)
+    specs = (
+        ExpertBuildSpec(
+            descriptor=ViewDescriptor(
+                expert_id="FULL",
+                family="FULL",
+                view_name="FULL",
+                projection_kind="identity_subselect",
+                input_dim=2,
+                input_indices=(0, 1),
+                is_anchor=True,
+            ),
+            model_kind="linear",
+            input_adapter=IdentitySelectorAdapter(indices=(0, 1)),
+        ),
+        ExpertBuildSpec(
+            descriptor=ViewDescriptor(
+                expert_id="SPECIALIST",
+                family="local_support",
+                view_name="SPECIALIST",
+                projection_kind="identity_subselect",
+                input_dim=1,
+                input_indices=(1,),
+            ),
+            model_kind="constant",
+            input_adapter=IdentitySelectorAdapter(indices=(1,)),
+            model_params={"value": 0.25},
+        ),
+    )
+
+    model.fit(X_train, y_train, expert_specs=specs)
+    result = model.predict(X_train, return_diagnostics=True)
+    assert result.diagnostics["full_expert_id"] == "FULL"
+    assert result.token_shape[1] == 2
+
+
+def test_graphdrone_fit_requires_y_for_expert_specs() -> None:
+    X_train = np.array([[1.0, 2.0], [2.0, 0.5]], dtype=np.float32)
+    model = GraphDrone(
+        GraphDroneConfig(
+            portfolio=None,
+            full_expert_id="FULL",
+            router=SetRouterConfig(kind="bootstrap_full_only"),
+        )
+    )
+    specs = (
+        ExpertBuildSpec(
+            descriptor=ViewDescriptor(
+                expert_id="FULL",
+                family="FULL",
+                view_name="FULL",
+                projection_kind="identity_subselect",
+                input_dim=2,
+                input_indices=(0, 1),
+                is_anchor=True,
+            ),
+            model_kind="linear",
+            input_adapter=IdentitySelectorAdapter(indices=(0, 1)),
+        ),
+    )
+
+    try:
+        model.fit(X_train, expert_specs=specs)
+    except ValueError as exc:
+        assert "y is required" in str(exc)
+    else:
+        raise AssertionError("Expected GraphDrone.fit() to require y when expert_specs are provided")

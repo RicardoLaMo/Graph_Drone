@@ -1,0 +1,26 @@
+\section{GraphDrone.fit() Phase I-B Expert Factory}
+
+Phase I-B upgrades GraphDrone from a manifest-only bootstrap package to a package that can construct a portfolio of experts directly from training data. The core shift is that \texttt{GraphDrone.fit()} now accepts an explicit set of expert build specifications:
+\[
+\mathcal{E} = \{(d_v, a_v, m_v, \theta_v)\}_{v=1}^V,
+\]
+where \(d_v\) is the typed descriptor, \(a_v\) is the input adapter, \(m_v\) is the expert model family, and \(\theta_v\) are model parameters.
+
+For each expert \(v\), Phase I-B fits
+\[
+f_v \leftarrow \mathrm{FitExpert}(a_v(X_{\mathrm{train}}), y_{\mathrm{train}}; m_v, \theta_v),
+\]
+then packages the fitted experts into a validated portfolio with a required anchor \(\mathrm{FULL}\). This means benchmark scripts no longer need to fit TabPFN experts inline; they only define an expert plan and call the package API.
+
+The benchmark adapter remains intentionally thin. It constructs a \texttt{GraphDroneBenchmarkExpertPlan} from registered OpenML split metadata and view declarations, then hands those specs to the model package. In the current phase, supported expert kinds are \texttt{constant}, \texttt{linear}, and \texttt{tabpfn\_regressor}. The important architectural result is not model novelty but ownership transfer: expert construction now lives inside \texttt{src/graphdrone\_fit/}.
+
+Validation for this phase consisted of:
+\begin{itemize}
+\item targeted unit and adapter tests, passing at 12 tests,
+\item a real smoke benchmark on \texttt{houses},
+\item external Gemini review of the file-level implementation.
+\end{itemize}
+
+The smoke run behaved as expected for a bootstrap-only router: the \texttt{FULL} expert and the explicit \texttt{GraphDroneFit\_bootstrap} output matched, while specialist experts were still exposed separately for inspection. This confirms that the package can now own expert construction without yet claiming contextual routing gains.
+
+The remaining gaps are operational rather than conceptual: serialization of spec-built portfolios, multi-device validation of the new expert-construction path, and replacement of the bootstrap router with a real contextual set-router in later phases.

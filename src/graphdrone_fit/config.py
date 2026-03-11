@@ -27,7 +27,7 @@ class SetRouterConfig:
 
 @dataclass(frozen=True)
 class GraphDroneConfig:
-    portfolio: PortfolioLoadConfig
+    portfolio: PortfolioLoadConfig | None = None
     full_expert_id: str = "FULL"
     router: SetRouterConfig = field(default_factory=SetRouterConfig)
 
@@ -35,5 +35,6 @@ class GraphDroneConfig:
         if not self.full_expert_id.strip():
             raise ValueError("full_expert_id must be non-empty")
         self.router.validate()
-        self.portfolio.resolved_manifest_path()
+        if self.portfolio is not None:
+            self.portfolio.resolved_manifest_path()
         return self

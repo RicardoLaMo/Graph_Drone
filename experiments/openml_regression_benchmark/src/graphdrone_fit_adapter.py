@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from experiments.tabpfn_view_router.src.data import ViewData
+from src.graphdrone_fit.expert_factory import ExpertBuildSpec, IdentitySelectorAdapter, PcaProjectionAdapter
 from src.graphdrone_fit.view_descriptor import ViewDescriptor, normalize_descriptor_set
 
 if TYPE_CHECKING:
@@ -14,6 +15,13 @@ if TYPE_CHECKING:
 class GraphDroneBenchmarkDescriptorSet:
     dataset_key: str
     descriptors: tuple[ViewDescriptor, ...]
+
+
+@dataclass(frozen=True)
+class GraphDroneBenchmarkExpertPlan:
+    dataset_key: str
+    descriptors: tuple[ViewDescriptor, ...]
+    specs: tuple[ExpertBuildSpec, ...]
 
 
 def build_benchmark_descriptors(
@@ -88,3 +96,52 @@ def _default_family_for_view(view_name: str) -> str:
     if view_name == "LOWRANK":
         return "structural_subspace"
     return "bootstrap"
+
+
+def build_benchmark_expert_plan(
+    split: PreparedOpenMLSplit,
+    views: ViewData,
+    *,
+    seed: int,
+    n_estimators: int,
+    n_preprocessing_jobs: int,
+    view_devices: dict[str, str | list[str]],
+    family_overrides: dict[str, str] | None = None,
+) -> GraphDroneBenchmarkExpertPlan:
+    descriptor_set = build_benchmark_descriptors(
+        split,
+        views,
+        family_overrides=family_overrides,
+    )
+    descriptor_by_name = {descriptor.expert_id: descriptor for descriptor in descriptor_set.descriptors}
+
+    specs: list[ExpertBuildSpec] = []
+    for name in views.view_names:
+        descriptor = descriptor_by_name[name]
+        if name == "LOWRANK":
+            adapter = PcaProjectionAdapter(
+                n_components=views.train[name].shape[1],
+                random_state=split.split_seed,
+            )
+        else:
+            adapter = IdentitySelectorAdapter(indices=descriptor.input_indices)
+        specs.append(
+            ExpertBuildSpec(
+                descriptor=descriptor,
+                model_kind="tabpfn_regressor",
+                input_adapter=adapter,
+                model_params={
+                    "n_estimators": n_estimators,
+                    "random_state": seed,
+                    "device": view_devices[name],
+                    "ignore_pretraining_limits": len(split.y_train) > 1000,
+                    "n_preprocessing_jobs": n_preprocessing_jobs,
+                },
+            )
+        )
+
+    return GraphDroneBenchmarkExpertPlan(
+        dataset_key=split.dataset_key,
+        descriptors=descriptor_set.descriptors,
+        specs=tuple(specs),
+    )
