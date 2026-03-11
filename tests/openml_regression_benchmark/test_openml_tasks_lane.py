@@ -58,6 +58,7 @@ def _fake_split() -> PreparedOpenMLSplit:
 
 def test_expanded_registry_contains_new_datasets() -> None:
     expected = {
+        "california_housing_openml",
         "diamonds",
         "healthcare_insurance_expenses",
         "concrete_compressive_strength",

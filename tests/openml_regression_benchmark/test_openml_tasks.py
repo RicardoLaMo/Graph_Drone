@@ -19,6 +19,11 @@ def test_get_openml_regression_spec_returns_expected_ids() -> None:
     assert spec.task_id == 363686
     assert "LATITUDE" in spec.geo_columns
 
+    california = get_openml_regression_spec("california_housing_openml")
+    assert california.dataset_id == 44024
+    assert california.task_id == 362499
+    assert california.target_transform == "expm1"
+
 
 def test_encode_feature_parts_imputes_numeric_and_handles_unknown_categories() -> None:
     numeric = {

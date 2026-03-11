@@ -25,6 +25,7 @@ class OpenMLRegressionSpec:
     target_name: str
     geo_columns: tuple[str, ...]
     domain_view_name: str = "DOMAIN"
+    target_transform: str | None = None
 
 
 OPENML_REGRESSION_SPECS: dict[str, OpenMLRegressionSpec] = {
@@ -109,6 +110,16 @@ OPENML_REGRESSION_SPECS: dict[str, OpenMLRegressionSpec] = {
         display_name="Houses",
         target_name="LnMedianHouseValue",
         geo_columns=("Latitude", "Longitude"),
+    ),
+    "california_housing_openml": OpenMLRegressionSpec(
+        key="california_housing_openml",
+        dataset_id=44024,
+        task_id=362499,
+        display_name="California Housing (OpenML)",
+        target_name="median_house_value",
+        geo_columns=("Latitude", "Longitude"),
+        domain_view_name="SOCIO",
+        target_transform="expm1",
     ),
 }
 
@@ -212,6 +223,9 @@ def build_openml_regression_split(
     view_columns = build_view_columns(encoded_feature_names, spec.geo_columns, spec.domain_view_name)
 
     y_all = y_series.to_numpy(dtype=np.float32)
+    if spec.target_transform == "expm1":
+        # OpenML 44024 stores California targets on the log1p scale.
+        y_all = np.expm1(y_all).astype(np.float32)
     return PreparedOpenMLSplit(
         dataset_key=spec.key,
         dataset_name=spec.display_name,
