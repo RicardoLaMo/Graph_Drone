@@ -1,0 +1,43 @@
+{
+  "phase": "phase0_router_mechanism",
+  "objective": "Prove or falsify row-level adaptive routing as the mechanism behind GraphDrone wins.",
+  "datasets": [
+    {
+      "key": "california_housing_openml",
+      "role": "primary_win_case",
+      "required_checks": [
+        "adaptive_vs_fixed_test_delta",
+        "row_level_weight_change_profile",
+        "disagreement_and_uncertainty_correlation",
+        "anchor_vs_oracle_gap"
+      ]
+    },
+    {
+      "key": "houses",
+      "role": "small_gain_stability_probe",
+      "required_checks": [
+        "adaptive_vs_fixed_seed_sweep",
+        "gain_mean_and_std",
+        "noise_vs_signal_decision"
+      ]
+    },
+    {
+      "key": "miami_housing",
+      "role": "loss_case",
+      "required_checks": [
+        "adaptive_vs_fixed_test_delta",
+        "failure_mode_note",
+        "foundation_dominance_check"
+      ]
+    },
+    {
+      "key": "diamonds",
+      "role": "loss_case",
+      "required_checks": [
+        "adaptive_vs_fixed_test_delta",
+        "failure_mode_note",
+        "row_level_behavior_contrast"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,129 @@
+{
+  "program_id": "graphdrone_row_level_2026_03_11",
+  "objective": "Evaluate GraphDrone as a row-level integration system across the registered regression portfolio before any per-dataset tuning.",
+  "phase0_focus_subset": [
+    "california_housing_openml",
+    "houses",
+    "miami_housing",
+    "diamonds"
+  ],
+  "phase1_registered_portfolio": [
+    {
+      "key": "california_housing_openml",
+      "dataset_id": 44024,
+      "task_id": 362499,
+      "display_name": "California Housing OpenML",
+      "rows": 20640,
+      "features": 8,
+      "registration_status": "required_first_class_portfolio_dataset",
+      "phase0_role": "primary_win_case",
+      "phase1_role": "mandatory_portfolio_member",
+      "benchmark_surface": "aligned_openml_california_surface",
+      "notes": "Must not remain an appendix or external anchor by the end of Phase 1."
+    },
+    {
+      "key": "houses",
+      "dataset_id": 46934,
+      "task_id": 363678,
+      "display_name": "Houses",
+      "rows": 20640,
+      "features": 9,
+      "registration_status": "registered",
+      "phase0_role": "small_adaptive_gain_probe",
+      "phase1_role": "portfolio_member",
+      "benchmark_surface": "openml_regression_benchmark",
+      "notes": "Needs seed-stability check before being cited as row-level evidence."
+    },
+    {
+      "key": "miami_housing",
+      "dataset_id": 46942,
+      "task_id": 363686,
+      "display_name": "Miami Housing",
+      "rows": 13776,
+      "features": 16,
+      "registration_status": "registered",
+      "phase0_role": "loss_case",
+      "phase1_role": "portfolio_member",
+      "benchmark_surface": "openml_regression_benchmark",
+      "notes": "Use as a failure-mode diagnostic against foundation dominance."
+    },
+    {
+      "key": "diamonds",
+      "dataset_id": 46923,
+      "task_id": 363631,
+      "display_name": "Diamonds",
+      "rows": 53940,
+      "features": 10,
+      "registration_status": "registered",
+      "phase0_role": "loss_case",
+      "phase1_role": "portfolio_member",
+      "benchmark_surface": "openml_regression_benchmark",
+      "notes": "Large structured regression task; useful to test whether routing hurts when foundation is strong."
+    },
+    {
+      "key": "healthcare_insurance_expenses",
+      "dataset_id": 46931,
+      "task_id": 363675,
+      "display_name": "Healthcare Insurance Expenses",
+      "rows": 1338,
+      "features": 7,
+      "registration_status": "registered",
+      "phase0_role": "reserve_win_case",
+      "phase1_role": "portfolio_member",
+      "benchmark_surface": "openml_regression_benchmark",
+      "notes": "Small dataset where prior GraphDrone wins should be re-read through the Phase 0 mechanism lens."
+    },
+    {
+      "key": "concrete_compressive_strength",
+      "dataset_id": 46917,
+      "task_id": 363625,
+      "display_name": "Concrete Compressive Strength",
+      "rows": 1030,
+      "features": 9,
+      "registration_status": "registered",
+      "phase0_role": "reserve_loss_case",
+      "phase1_role": "portfolio_member",
+      "benchmark_surface": "openml_regression_benchmark",
+      "notes": "Useful compact sanity check for whether routing helps beyond foundation on numeric data."
+    },
+    {
+      "key": "airfoil_self_noise",
+      "dataset_id": 46904,
+      "task_id": 363612,
+      "display_name": "Airfoil Self Noise",
+      "rows": 1503,
+      "features": 6,
+      "registration_status": "registered",
+      "phase0_role": "reserve_loss_case",
+      "phase1_role": "portfolio_member",
+      "benchmark_surface": "openml_regression_benchmark",
+      "notes": "Compact numeric regression task for portfolio profiling."
+    },
+    {
+      "key": "wine_quality",
+      "dataset_id": 46964,
+      "task_id": 363708,
+      "display_name": "Wine Quality",
+      "rows": 6497,
+      "features": 13,
+      "registration_status": "registered",
+      "phase0_role": "reserve_loss_case",
+      "phase1_role": "portfolio_member",
+      "benchmark_surface": "openml_regression_benchmark",
+      "notes": "Mid-size regression task where AutoGluon previously looked strong."
+    },
+    {
+      "key": "used_fiat_500",
+      "dataset_id": 46907,
+      "task_id": 363615,
+      "display_name": "Used Fiat 500",
+      "rows": 1538,
+      "features": 8,
+      "registration_status": "registered",
+      "phase0_role": "reserve_loss_case",
+      "phase1_role": "portfolio_member",
+      "benchmark_surface": "openml_regression_benchmark",
+      "notes": "Price/value regression task for broader portfolio coverage."
+    }
+  ]
+}
