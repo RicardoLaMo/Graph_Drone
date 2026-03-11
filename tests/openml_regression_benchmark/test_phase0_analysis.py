@@ -12,10 +12,16 @@ from experiments.openml_regression_benchmark.scripts.analyze_router_mechanism im
 from experiments.openml_regression_benchmark.scripts.analyze_view_home_quality import (
     analyze_run as analyze_view_home_run,
 )
+from experiments.openml_regression_benchmark.scripts.analyze_two_expert_competition import (
+    analyze_run as analyze_two_expert_run,
+)
 from experiments.openml_regression_benchmark.scripts.summarize_full_regret_suite import (
     summarize as summarize_full_regret_suite,
 )
 from experiments.openml_regression_benchmark.scripts.summarize_houses_seed_sweep import summarize
+from experiments.openml_regression_benchmark.scripts.summarize_two_expert_suite import (
+    summarize as summarize_two_expert_suite,
+)
 from experiments.openml_regression_benchmark.scripts.summarize_view_home_suite import (
     summarize as summarize_view_home_suite,
 )
@@ -257,3 +263,70 @@ def test_summarize_view_home_suite_aggregates_per_view_metrics(tmp_path) -> None
     summary = summarize_view_home_suite(root, adaptive_prefix="router")
     assert summary["n_runs"] == 2
     assert summary["per_view"]["GEO"]["capture_gap_vs_fixed"]["mean"] == pytest.approx(0.005)
+
+
+def test_analyze_two_expert_competition_reports_best_candidate(tmp_path) -> None:
+    run_dir = tmp_path / "miami_housing__r0f0"
+    artifacts = run_dir / "artifacts"
+    artifacts.mkdir(parents=True)
+
+    payload = {
+        "rows": [
+            {"model": "GraphDrone_FULL", "test_rmse": 0.40},
+            {"model": "GraphDrone_router", "test_rmse": 0.39},
+            {"model": "GraphDrone_router_fixed", "test_rmse": 0.395},
+        ],
+        "runtime": {"resolved_device": "cpu"},
+    }
+    (run_dir / "graphdrone_results.json").write_text(json.dumps(payload) + "\n")
+
+    np.savez_compressed(
+        artifacts / "graphdrone_predictions.npz",
+        view_names=np.array(["FULL", "GEO", "DOMAIN"]),
+        y_val=np.array([0.0, 0.0, 1.0, 1.0], dtype=np.float32),
+        y_test=np.array([0.0, 0.0, 1.0, 1.0], dtype=np.float32),
+        pred_val=np.array(
+            [
+                [0.0, 0.3, 0.2],
+                [0.1, 0.2, 0.4],
+                [0.8, 0.9, 0.1],
+                [0.9, 0.8, 0.2],
+            ],
+            dtype=np.float32,
+        ),
+        pred_test=np.array(
+            [
+                [0.0, 0.25, 0.2],
+                [0.1, 0.15, 0.3],
+                [0.8, 0.9, 0.2],
+                [0.9, 0.85, 0.25],
+            ],
+            dtype=np.float32,
+        ),
+        quality_val=np.array([[0.1] * 11, [0.2] * 11, [0.3] * 11, [0.4] * 11], dtype=np.float32),
+        quality_test=np.array([[0.1] * 11, [0.2] * 11, [0.3] * 11, [0.4] * 11], dtype=np.float32),
+    )
+
+    summary = analyze_two_expert_run(run_dir, adaptive_prefix="router", label="GraphDrone", seed=7)
+    assert summary["best_candidate_view"] in {"GEO", "DOMAIN"}
+    assert set(summary["candidates"].keys()) == {"GEO", "DOMAIN"}
+
+
+def test_summarize_two_expert_suite_aggregates_best_pair_gains(tmp_path) -> None:
+    root = tmp_path / "suite"
+    for idx, gain in enumerate([0.01, -0.02]):
+        artifacts = root / f"seed{idx}" / "artifacts"
+        artifacts.mkdir(parents=True)
+        payload = {
+            "best_candidate_view": "GEO" if idx == 0 else "DOMAIN",
+            "best_two_expert": {
+                "adaptive_minus_full_router": gain,
+                "adaptive_minus_full_expert": gain - 0.01,
+            },
+        }
+        (artifacts / "router_two_expert_summary.json").write_text(json.dumps(payload) + "\n")
+
+    summary = summarize_two_expert_suite(root, adaptive_prefix="router")
+    assert summary["n_runs"] == 2
+    assert summary["best_two_expert_gain_vs_full_router"]["mean"] == pytest.approx(-0.005)
+    assert summary["best_candidate_counts"]["GEO"] == 1
