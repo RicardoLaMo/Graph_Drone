@@ -15,12 +15,18 @@ from experiments.openml_regression_benchmark.scripts.analyze_view_home_quality i
 from experiments.openml_regression_benchmark.scripts.analyze_two_expert_competition import (
     analyze_run as analyze_two_expert_run,
 )
+from experiments.openml_regression_benchmark.scripts.analyze_signal_noise_tradeoff import (
+    analyze_run as analyze_signal_noise_run,
+)
 from experiments.openml_regression_benchmark.scripts.summarize_full_regret_suite import (
     summarize as summarize_full_regret_suite,
 )
 from experiments.openml_regression_benchmark.scripts.summarize_houses_seed_sweep import summarize
 from experiments.openml_regression_benchmark.scripts.summarize_two_expert_suite import (
     summarize as summarize_two_expert_suite,
+)
+from experiments.openml_regression_benchmark.scripts.summarize_signal_noise_suite import (
+    summarize as summarize_signal_noise_suite,
 )
 from experiments.openml_regression_benchmark.scripts.summarize_view_home_suite import (
     summarize as summarize_view_home_suite,
@@ -330,3 +336,90 @@ def test_summarize_two_expert_suite_aggregates_best_pair_gains(tmp_path) -> None
     assert summary["n_runs"] == 2
     assert summary["best_two_expert_gain_vs_full_router"]["mean"] == pytest.approx(-0.005)
     assert summary["best_candidate_counts"]["GEO"] == 1
+
+
+def test_analyze_signal_noise_tradeoff_classifies_competition_plus_weak_expert(tmp_path) -> None:
+    run_dir = tmp_path / "diamonds__r0f0"
+    artifacts = run_dir / "artifacts"
+    artifacts.mkdir(parents=True)
+
+    full_regret = {
+        "global": {"full_oracle_fraction": 0.5},
+        "full_oracle_case": {
+            "false_diversion_mean_cost": 10.0,
+            "false_diversion_positive_fraction": 0.7,
+        },
+        "non_full_oracle_case": {
+            "mean_potential_gain": 5.0,
+            "mean_adaptive_realized_gain": 1.0,
+            "adaptive_capture_ratio_total": 0.2,
+            "fixed_capture_ratio_total": 0.15,
+        },
+    }
+    view_home = {
+        "per_view_home_subset": {
+            "GEO": {
+                "row_fraction": 0.3,
+                "mean_potential_gain_vs_full": 4.0,
+                "adaptive_capture_ratio_total": 0.25,
+                "fixed_capture_ratio_total": 0.20,
+                "capture_gap_vs_fixed": 0.05,
+                "mean_adaptive_full_weight": 0.8,
+                "mean_adaptive_view_weight": 0.2,
+            }
+        }
+    }
+    two_expert = {
+        "best_candidate_view": "GEO",
+        "best_two_expert": {
+            "pair_name": "FULL+GEO",
+            "adaptive_test_rmse": 1.0,
+            "adaptive_minus_full_router": 0.4,
+            "adaptive_minus_full_expert": -0.1,
+            "adaptive_minus_full_fixed": 0.5,
+        },
+        "global_reference": {
+            "full_router_test_rmse": 1.4,
+            "full_expert_test_rmse": 0.9,
+        },
+    }
+    (artifacts / "router_full_regret_summary.json").write_text(json.dumps(full_regret) + "\n")
+    (artifacts / "router_view_home_summary.json").write_text(json.dumps(view_home) + "\n")
+    (artifacts / "router_two_expert_summary.json").write_text(json.dumps(two_expert) + "\n")
+
+    summary = analyze_signal_noise_run(run_dir, adaptive_prefix="router")
+    assert summary["classification"] == "competition_noise_plus_weak_expert"
+    assert summary["best_view"] == "GEO"
+
+
+def test_summarize_signal_noise_suite_aggregates_classifications(tmp_path) -> None:
+    root = tmp_path / "suite"
+    payloads = [
+        {
+            "classification": "useful_signal_obscured_by_competition",
+            "best_view": "GEO",
+            "global": {
+                "competition_noise_gain_vs_full_router": 0.1,
+                "best_pair_gain_vs_full_expert": 0.02,
+            },
+            "best_view_tradeoff": {"capture_gap_vs_fixed": 0.03},
+        },
+        {
+            "classification": "competition_noise_plus_weak_expert",
+            "best_view": "LOWRANK",
+            "global": {
+                "competition_noise_gain_vs_full_router": 0.2,
+                "best_pair_gain_vs_full_expert": -0.01,
+            },
+            "best_view_tradeoff": {"capture_gap_vs_fixed": -0.02},
+        },
+    ]
+    for idx, payload in enumerate(payloads):
+        artifacts = root / f"seed{idx}" / "artifacts"
+        artifacts.mkdir(parents=True)
+        (artifacts / "router_signal_noise_tradeoff.json").write_text(json.dumps(payload) + "\n")
+
+    summary = summarize_signal_noise_suite(root, adaptive_prefix="router")
+    assert summary["n_runs"] == 2
+    assert summary["classification_counts"]["useful_signal_obscured_by_competition"] == 1
+    assert summary["best_view_counts"]["LOWRANK"] == 1
