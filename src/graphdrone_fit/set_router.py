@@ -98,12 +98,25 @@ class ContextualSparseRouter(torch.nn.Module):
     ) -> dict[str, object]:
         tokens = torch.as_tensor(tokens, dtype=torch.float32)
         expert_predictions = torch.as_tensor(expert_predictions, dtype=torch.float32)
-        y_true = torch.as_tensor(y_true, dtype=torch.float32).reshape(-1)
         if tokens.ndim != 3:
             raise ValueError(f"Expected token tensor [N, E, D], got {tuple(tokens.shape)}")
-        if expert_predictions.shape != tokens.shape[:2]:
+        if expert_predictions.ndim == 2:
+            expected = tokens.shape[:2]
+            if expert_predictions.shape != expected:
+                raise ValueError(
+                    f"Expected expert_predictions shape {tuple(expected)}, got {tuple(expert_predictions.shape)}"
+                )
+            y_true = torch.as_tensor(y_true, dtype=torch.float32).reshape(-1)
+        elif expert_predictions.ndim == 3:
+            expected = (tokens.shape[0], tokens.shape[1])
+            if expert_predictions.shape[:2] != expected:
+                raise ValueError(
+                    f"Expected expert_predictions leading shape {tuple(expected)}, got {tuple(expert_predictions.shape[:2])}"
+                )
+            y_true = torch.as_tensor(y_true, dtype=torch.long).reshape(-1)
+        else:
             raise ValueError(
-                f"Expected expert_predictions shape {tuple(tokens.shape[:2])}, got {tuple(expert_predictions.shape)}"
+                f"Expected expert_predictions rank 2 or 3, got {tuple(expert_predictions.shape)}"
             )
         if y_true.shape[0] != tokens.shape[0]:
             raise ValueError(f"Expected y_true with {tokens.shape[0]} rows, got {y_true.shape[0]}")
@@ -137,7 +150,7 @@ class ContextualSparseRouter(torch.nn.Module):
             self.train()
             optimizer.zero_grad(set_to_none=True)
             outputs = self._forward_router(train_tokens, full_index=full_index)
-            train_loss = _router_mse_loss(
+            train_loss = _router_task_loss(
                 router_outputs=outputs,
                 expert_predictions=train_preds,
                 y_true=train_targets,
@@ -148,7 +161,7 @@ class ContextualSparseRouter(torch.nn.Module):
             self.eval()
             with torch.no_grad():
                 val_outputs = self._forward_router(val_tokens, full_index=full_index)
-                val_loss = _router_mse_loss(
+                val_loss = _router_task_loss(
                     router_outputs=val_outputs,
                     expert_predictions=val_preds,
                     y_true=val_targets,
@@ -270,16 +283,27 @@ def _apply_top_k_mask(logits: torch.Tensor, *, full_index: int, top_k: int) -> t
     return torch.where(keep_mask, masked, floor)
 
 
-def _router_mse_loss(
+def _router_task_loss(
     *,
     router_outputs: RouterOutputs,
     expert_predictions: torch.Tensor,
     y_true: torch.Tensor,
 ) -> torch.Tensor:
-    full_pred = expert_predictions[:, router_outputs.full_index : router_outputs.full_index + 1]
-    specialist_pred = (router_outputs.specialist_weights * expert_predictions).sum(dim=1, keepdim=True)
+    if expert_predictions.ndim == 2:
+        full_pred = expert_predictions[:, router_outputs.full_index : router_outputs.full_index + 1]
+        specialist_pred = (router_outputs.specialist_weights * expert_predictions).sum(dim=1, keepdim=True)
+        blended = (1.0 - router_outputs.defer_prob) * full_pred + router_outputs.defer_prob * specialist_pred
+        return torch.mean((blended.squeeze(1) - y_true) ** 2)
+    if expert_predictions.ndim != 3:
+        raise ValueError(
+            f"Expected expert_predictions rank 2 or 3, got {tuple(expert_predictions.shape)}"
+        )
+    full_pred = expert_predictions[:, router_outputs.full_index, :]
+    specialist_pred = torch.einsum("ne,nec->nc", router_outputs.specialist_weights, expert_predictions)
     blended = (1.0 - router_outputs.defer_prob) * full_pred + router_outputs.defer_prob * specialist_pred
-    return torch.mean((blended.squeeze(1) - y_true) ** 2)
+    blended = blended.clamp_min(1e-8)
+    blended = blended / blended.sum(dim=1, keepdim=True).clamp_min(1e-8)
+    return torch.nn.functional.nll_loss(blended.log(), y_true)
 
 
 def _split_router_indices(*, n_rows: int, validation_fraction: float, seed: int) -> tuple[torch.Tensor, torch.Tensor]:

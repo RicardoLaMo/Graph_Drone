@@ -112,6 +112,62 @@ def test_fit_portfolio_from_specs_rejects_unsupported_model_kind() -> None:
         raise AssertionError("Expected unsupported model_kind to raise ValueError")
 
 
+def test_fit_portfolio_from_specs_builds_classification_portfolio() -> None:
+    X_train = np.array(
+        [
+            [0.0, 0.0],
+            [0.2, 0.1],
+            [1.0, 1.0],
+            [1.2, 1.1],
+        ],
+        dtype=np.float32,
+    )
+    y_train = np.array([0, 0, 1, 1], dtype=np.int64)
+    specs = (
+        ExpertBuildSpec(
+            descriptor=ViewDescriptor(
+                expert_id="FULL",
+                family="FULL",
+                view_name="FULL",
+                projection_kind="identity_subselect",
+                input_dim=2,
+                input_indices=(0, 1),
+                is_anchor=True,
+            ),
+            model_kind="logistic_classifier",
+            input_adapter=IdentitySelectorAdapter(indices=(0, 1)),
+        ),
+        ExpertBuildSpec(
+            descriptor=ViewDescriptor(
+                expert_id="SPECIALIST",
+                family="bootstrap",
+                view_name="SPECIALIST",
+                projection_kind="identity_subselect",
+                input_dim=1,
+                input_indices=(1,),
+            ),
+            model_kind="constant_classifier",
+            input_adapter=IdentitySelectorAdapter(indices=(1,)),
+        ),
+    )
+
+    portfolio = fit_portfolio_from_specs(
+        X_train=X_train,
+        y_train=y_train,
+        specs=specs,
+        full_expert_id="FULL",
+        task_type="classification",
+    )
+    batch = portfolio.experts["FULL"].predict_values(X_train)
+    specialist = portfolio.experts["SPECIALIST"].predict_values(X_train)
+    assert portfolio.task_type == "classification"
+    assert portfolio.class_labels == (0, 1)
+    assert batch.shape == (4, 2)
+    assert specialist.shape == (4, 2)
+    assert np.allclose(batch.sum(axis=1), 1.0, atol=1e-5)
+    assert np.allclose(specialist.sum(axis=1), 1.0, atol=1e-5)
+
+
 def test_geometry_feature_adapter_appends_lid_and_lof_features() -> None:
     X_train = np.array(
         [

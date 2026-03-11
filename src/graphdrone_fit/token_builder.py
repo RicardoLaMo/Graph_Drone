@@ -45,22 +45,17 @@ class PerViewTokenBuilder:
         It is not yet a learned family baseline or a final routing objective.
         """
         pred_tensor = torch.as_tensor(predictions, dtype=torch.float32)
-        if pred_tensor.ndim != 2:
-            raise ValueError(f"Expected predictions with shape [N, E], got {tuple(pred_tensor.shape)}")
+        if pred_tensor.ndim not in {2, 3}:
+            raise ValueError(
+                f"Expected predictions with shape [N, E] or [N, E, C], got {tuple(pred_tensor.shape)}"
+            )
         expert_ids = tuple(descriptor.expert_id for descriptor in descriptors)
         if full_expert_id not in expert_ids:
             raise ValueError(f"full_expert_id={full_expert_id!r} is missing from {expert_ids!r}")
         full_index = expert_ids.index(full_expert_id)
-
-        full_pred = pred_tensor[:, full_index : full_index + 1]
-        row_mean = pred_tensor.mean(dim=1, keepdim=True)
-        prediction_fields = torch.stack(
-            (
-                pred_tensor,
-                pred_tensor - full_pred,
-                pred_tensor - row_mean,
-            ),
-            dim=-1,
+        prediction_fields, prediction_feature_names = _build_prediction_fields(
+            pred_tensor=pred_tensor,
+            full_index=full_index,
         )
 
         quality_encoding = _coerce_quality_encoding(
@@ -87,11 +82,7 @@ class PerViewTokenBuilder:
             width = tensor.shape[-1]
             field_slices[name] = (cursor, cursor + width)
             if name == "prediction":
-                field_names[name] = (
-                    "prediction_raw",
-                    "prediction_minus_full",
-                    "prediction_minus_row_mean",
-                )
+                field_names[name] = prediction_feature_names
             elif name == "quality":
                 field_names[name] = tuple(quality_encoding.feature_names)
             elif name == "support":
@@ -106,6 +97,75 @@ class PerViewTokenBuilder:
             field_slices=field_slices,
             field_names=field_names,
         )
+
+
+def _build_prediction_fields(
+    *,
+    pred_tensor: torch.Tensor,
+    full_index: int,
+) -> tuple[torch.Tensor, tuple[str, ...]]:
+    if pred_tensor.ndim == 2:
+        full_pred = pred_tensor[:, full_index : full_index + 1]
+        row_mean = pred_tensor.mean(dim=1, keepdim=True)
+        fields = torch.stack(
+            (
+                pred_tensor,
+                pred_tensor - full_pred,
+                pred_tensor - row_mean,
+            ),
+            dim=-1,
+        )
+        names = (
+            "prediction_raw",
+            "prediction_minus_full",
+            "prediction_minus_row_mean",
+        )
+        return fields, names
+
+    if pred_tensor.ndim != 3:
+        raise ValueError(f"Expected prediction tensor rank 2 or 3, got {pred_tensor.ndim}")
+    full_pred = pred_tensor[:, full_index : full_index + 1, :]
+    row_mean = pred_tensor.mean(dim=1, keepdim=True)
+    safe_pred = pred_tensor.clamp_min(1e-8)
+    full_safe_pred = full_pred.clamp_min(1e-8)
+
+    max_prob = pred_tensor.max(dim=-1, keepdim=True).values
+    full_max_prob = full_pred.max(dim=-1, keepdim=True).values
+    entropy = -(safe_pred * safe_pred.log()).sum(dim=-1, keepdim=True)
+    full_entropy = -(full_safe_pred * full_safe_pred.log()).sum(dim=-1, keepdim=True)
+
+    top_k = min(2, pred_tensor.shape[-1])
+    top_probs = torch.topk(pred_tensor, k=top_k, dim=-1).values
+    if top_k == 1:
+        margin = top_probs[..., :1]
+    else:
+        margin = (top_probs[..., :1] - top_probs[..., 1:2])
+
+    fields = torch.cat(
+        [
+            pred_tensor,
+            pred_tensor - full_pred,
+            pred_tensor - row_mean,
+            max_prob,
+            margin,
+            entropy,
+            max_prob - full_max_prob,
+            entropy - full_entropy,
+        ],
+        dim=-1,
+    )
+    n_classes = pred_tensor.shape[-1]
+    names = (
+        *(f"prediction_proba_class_{idx}" for idx in range(n_classes)),
+        *(f"prediction_proba_minus_full_class_{idx}" for idx in range(n_classes)),
+        *(f"prediction_proba_minus_row_mean_class_{idx}" for idx in range(n_classes)),
+        "prediction_max_prob",
+        "prediction_margin_top2",
+        "prediction_entropy",
+        "prediction_max_prob_minus_full",
+        "prediction_entropy_minus_full",
+    )
+    return fields, tuple(names)
 
 
 def _coerce_quality_encoding(

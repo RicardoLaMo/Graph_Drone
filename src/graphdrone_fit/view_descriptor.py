@@ -6,11 +6,15 @@ from dataclasses import dataclass
 VALID_EXPERT_FAMILIES = frozenset(
     {
         "FULL",
+        "anchor_generalist",
+        "feature_subset",
         "structural_subspace",
         "local_support",
         "learned_regime",
         "domain_semantic",
         "geometry_signal",
+        "numeric_subset",
+        "categorical_subset",
         "bootstrap",
     }
 )
@@ -61,8 +65,8 @@ class ViewDescriptor:
             raise ValueError(
                 "identity_subselect descriptors must provide one input index per input dimension"
             )
-        if self.is_anchor and self.family != "FULL":
-            raise ValueError("Only FULL experts may be marked as anchors")
+        if self.is_anchor and self.family not in {"FULL", "anchor_generalist"}:
+            raise ValueError("Only anchor-capable expert families may be marked as anchors")
         return self
 
     def to_dict(self) -> dict[str, object]:

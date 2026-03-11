@@ -401,3 +401,105 @@ def test_graphdrone_fit_router_records_summary_on_contextual_router() -> None:
     assert summary["fit_status"] == "fitted"
     assert result.diagnostics["router_fit_summary"]["fit_status"] == "fitted"
     assert result.diagnostics["router_kind"] == "contextual_sparse_mlp"
+
+
+def test_graphdrone_classification_bootstrap_predicts_probabilities() -> None:
+    X_train = np.array(
+        [
+            [0.0, 0.1],
+            [0.2, 0.0],
+            [1.0, 1.1],
+            [1.2, 1.0],
+        ],
+        dtype=np.float32,
+    )
+    y_train = np.array([0, 0, 1, 1], dtype=np.int64)
+    model = GraphDrone(
+        GraphDroneConfig(
+            portfolio=None,
+            full_expert_id="FULL",
+            task_type="classification",
+            router=SetRouterConfig(kind="bootstrap_full_only"),
+        )
+    )
+    specs = (
+        ExpertBuildSpec(
+            descriptor=ViewDescriptor(
+                expert_id="FULL",
+                family="FULL",
+                view_name="FULL",
+                projection_kind="identity_subselect",
+                input_dim=2,
+                input_indices=(0, 1),
+                is_anchor=True,
+            ),
+            model_kind="logistic_classifier",
+            input_adapter=IdentitySelectorAdapter(indices=(0, 1)),
+        ),
+        ExpertBuildSpec(
+            descriptor=ViewDescriptor(
+                expert_id="SPECIALIST",
+                family="bootstrap",
+                view_name="SPECIALIST",
+                projection_kind="identity_subselect",
+                input_dim=1,
+                input_indices=(1,),
+            ),
+            model_kind="constant_classifier",
+            input_adapter=IdentitySelectorAdapter(indices=(1,)),
+        ),
+    )
+
+    model.fit(X_train, y_train, expert_specs=specs)
+    probabilities = model.predict_proba(X_train)
+    labels = model.predict(X_train)
+    result = model.predict(X_train, return_diagnostics=True)
+
+    assert probabilities.shape == (4, 2)
+    assert np.allclose(probabilities.sum(axis=1), 1.0, atol=1e-5)
+    assert labels.shape == (4,)
+    assert result.probabilities is not None
+    assert result.class_labels == (0, 1)
+    assert result.diagnostics["task_type"] == "classification"
+
+
+def test_token_builder_emits_classification_tensor_fields() -> None:
+    descriptors = normalize_descriptor_set(
+        [
+            ViewDescriptor(
+                expert_id="FULL",
+                family="FULL",
+                view_name="FULL",
+                projection_kind="identity_subselect",
+                input_dim=2,
+                input_indices=(0, 1),
+                is_anchor=True,
+            ),
+            ViewDescriptor(
+                expert_id="SPECIALIST",
+                family="bootstrap",
+                view_name="SPECIALIST",
+                projection_kind="identity_subselect",
+                input_dim=1,
+                input_indices=(1,),
+            ),
+        ],
+        required_anchor_id="FULL",
+    )
+    probabilities = np.array(
+        [
+            [[0.8, 0.2], [0.6, 0.4]],
+            [[0.3, 0.7], [0.4, 0.6]],
+        ],
+        dtype=np.float32,
+    )
+    batch = PerViewTokenBuilder().build(
+        predictions=probabilities,
+        descriptors=descriptors,
+        full_expert_id="FULL",
+    )
+    assert batch.tokens.shape[0] == 2
+    assert batch.tokens.shape[1] == 2
+    assert batch.field_slices["prediction"] == (0, 11)
+    assert "prediction_proba_class_0" in batch.field_names["prediction"]
+    assert "prediction_entropy_minus_full" in batch.field_names["prediction"]

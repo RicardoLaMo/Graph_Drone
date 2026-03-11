@@ -1,0 +1,49 @@
+\section{GraphDrone.fit Classification Checkpoint}
+
+\paragraph{Objective.}
+Extend \texttt{GraphDrone.fit()} to OpenML classification with a clean public benchmark surface:
+\texttt{GraphDrone}, \texttt{TabPFN}, \texttt{TabR}, and \texttt{TabM}.
+
+\paragraph{Portfolio.}
+The initial TabArena-style OpenML classification portfolio contains nine tasks:
+\texttt{diabetes}, \texttt{anneal}, \texttt{maternal\_health\_risk},
+\texttt{website\_phishing}, \texttt{bioresponse},
+\texttt{students\_dropout\_and\_academic\_success},
+\texttt{bank\_customer\_churn}, \texttt{bank\_marketing}, and \texttt{apsfailure}.
+
+\paragraph{Implementation.}
+Classification support is now first-class in the GraphDrone core package.
+The implementation includes:
+\begin{itemize}
+\item probability-aware prediction paths in \texttt{GraphDrone.fit()}
+\item classification metrics: accuracy, macro-F1, weighted-F1, ROC-AUC, PR-AUC, and log-loss
+\item a dedicated OpenML classification benchmark lane
+\item baseline wrappers for TabPFN, TabR, and TabM
+\item metrics recomputation from saved upstream predictions for TabR and TabM
+\end{itemize}
+
+\paragraph{Validation.}
+Targeted classification tests passed (\texttt{25 passed}).
+Smoke validation succeeded for:
+\begin{itemize}
+\item GraphDrone on binary classification (\texttt{diabetes})
+\item GraphDrone on multiclass classification (\texttt{maternal\_health\_risk})
+\item TabPFN, TabR, and TabM on binary classification (\texttt{diabetes})
+\item the public suite smoke on \texttt{diabetes}
+\end{itemize}
+
+\paragraph{Smoke Results.}
+On the \texttt{diabetes} suite smoke:
+\begin{itemize}
+\item GraphDrone: accuracy $0.7734$, macro-F1 $0.7398$, ROC-AUC $0.8478$, PR-AUC $0.7490$
+\item TabPFN: accuracy $0.7734$, macro-F1 $0.7398$, ROC-AUC $0.8480$, PR-AUC $0.7492$
+\item TabM: accuracy $0.7422$, macro-F1 $0.7076$, ROC-AUC $0.7877$, PR-AUC $0.6632$
+\item TabR: accuracy $0.6641$, macro-F1 $0.4397$, ROC-AUC $0.7539$, PR-AUC $0.6066$
+\end{itemize}
+
+\paragraph{Key Engineering Fixes.}
+\begin{itemize}
+\item TabR classification requires explicit TOML null encoding for numeric-only \texttt{cat\_policy}
+\item public classification metrics are computed from \texttt{predictions.npz} for baseline parity
+\item suite summary no longer requires optional \texttt{tabulate}
+\end{itemize}

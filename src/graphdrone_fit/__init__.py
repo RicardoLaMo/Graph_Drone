@@ -1,4 +1,4 @@
-from .config import GraphDroneConfig, PortfolioLoadConfig, SetRouterConfig
+from .config import GraphDroneConfig, PortfolioLoadConfig, SetRouterConfig, TaskType
 from .expert_factory import (
     ExpertBuildSpec,
     GeometryFeatureAdapter,
@@ -7,6 +7,7 @@ from .expert_factory import (
     fit_portfolio_from_specs,
 )
 from .model import GraphDrone, GraphDronePredictResult
+from .metrics import classification_metrics, regression_metrics
 from .support_encoder import MomentSupportEncoder, SupportEncoding
 from .token_builder import (
     QualityEncoding,
@@ -28,9 +29,12 @@ __all__ = [
     "QualityEncoding",
     "SetRouterConfig",
     "SupportEncoding",
+    "TaskType",
     "ViewDescriptor",
     "build_legacy_quality_encoding",
     "build_legacy_quality_encoding_from_flat",
+    "classification_metrics",
     "fit_portfolio_from_specs",
     "normalize_descriptor_set",
+    "regression_metrics",
 ]

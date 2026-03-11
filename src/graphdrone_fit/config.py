@@ -5,6 +5,10 @@ from pathlib import Path
 from typing import Literal
 
 
+TaskType = Literal["regression", "classification"]
+ClassificationBlendMode = Literal["probability"]
+
+
 @dataclass(frozen=True)
 class PortfolioLoadConfig:
     manifest_path: Path
@@ -51,11 +55,22 @@ class SetRouterConfig:
 class GraphDroneConfig:
     portfolio: PortfolioLoadConfig | None = None
     full_expert_id: str = "FULL"
+    task_type: TaskType = "regression"
+    class_labels: tuple[str | int, ...] | None = None
+    classification_blend_mode: ClassificationBlendMode = "probability"
     router: SetRouterConfig = field(default_factory=SetRouterConfig)
 
     def validate(self) -> "GraphDroneConfig":
         if not self.full_expert_id.strip():
             raise ValueError("full_expert_id must be non-empty")
+        if self.task_type not in {"regression", "classification"}:
+            raise ValueError(f"Unsupported task_type={self.task_type!r}")
+        if self.task_type == "classification" and self.class_labels is not None and len(self.class_labels) < 2:
+            raise ValueError("classification GraphDroneConfig requires at least two class_labels")
+        if self.classification_blend_mode != "probability":
+            raise ValueError(
+                "classification_blend_mode currently supports only 'probability'"
+            )
         self.router.validate()
         if self.portfolio is not None:
             self.portfolio.resolved_manifest_path()

@@ -5,9 +5,17 @@ from typing import Protocol
 
 import numpy as np
 from sklearn.decomposition import PCA
+from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import NearestNeighbors
 
-from .portfolio_loader import ConstantPredictor, LinearPredictor, LoadedExpert, LoadedPortfolio
+from .config import TaskType
+from .portfolio_loader import (
+    ConstantClassifierPredictor,
+    ConstantPredictor,
+    LinearPredictor,
+    LoadedExpert,
+    LoadedPortfolio,
+)
 from .view_descriptor import ViewDescriptor
 
 
@@ -18,6 +26,8 @@ class ExpertPredictionBatch:
     predictions: np.ndarray
     full_expert_id: str
     full_index: int
+    task_type: TaskType
+    class_labels: tuple[int, ...] | None = None
 
 
 class InputAdapterProtocol(Protocol):
@@ -189,19 +199,26 @@ class PortfolioExpertFactory:
         self.descriptors = self.portfolio.descriptors
         self.full_expert_id = self.portfolio.full_expert_id
         self.full_index = self.expert_ids.index(self.full_expert_id)
+        self.task_type = self.portfolio.task_type
+        self.class_labels = self.portfolio.class_labels
 
     def predict_all(self, X: np.ndarray) -> ExpertPredictionBatch:
         preds = [
-            self.portfolio.experts[expert_id].predict(X)
+            self.portfolio.experts[expert_id].predict_values(X)
             for expert_id in self.expert_ids
         ]
-        stacked = np.column_stack(preds).astype(np.float32)
+        if self.task_type == "classification":
+            stacked = np.stack(preds, axis=1).astype(np.float32)
+        else:
+            stacked = np.column_stack(preds).astype(np.float32)
         return ExpertPredictionBatch(
             expert_ids=self.expert_ids,
             descriptors=self.descriptors,
             predictions=stacked,
             full_expert_id=self.full_expert_id,
             full_index=self.full_index,
+            task_type=self.task_type,
+            class_labels=self.class_labels,
         )
 
 
@@ -211,11 +228,20 @@ def fit_portfolio_from_specs(
     y_train: np.ndarray,
     specs: tuple[ExpertBuildSpec, ...],
     full_expert_id: str,
+    task_type: TaskType = "regression",
+    class_labels: tuple[int, ...] | None = None,
 ) -> LoadedPortfolio:
     matrix = np.asarray(X_train, dtype=np.float32)
-    target = np.asarray(y_train, dtype=np.float32).reshape(-1)
     if matrix.ndim != 2:
         raise ValueError(f"Expected X_train to be 2D, got {matrix.shape}")
+    if task_type == "classification":
+        target = np.asarray(y_train, dtype=np.int64).reshape(-1)
+        effective_class_labels = tuple(int(v) for v in (class_labels or tuple(np.unique(target).tolist())))
+        if not effective_class_labels:
+            raise ValueError("Classification portfolios require at least one class label")
+    else:
+        target = np.asarray(y_train, dtype=np.float32).reshape(-1)
+        effective_class_labels = None
     if target.shape[0] != matrix.shape[0]:
         raise ValueError(
             f"Expected y_train with {matrix.shape[0]} rows, got {target.shape[0]}"
@@ -232,11 +258,15 @@ def fit_portfolio_from_specs(
             X_view=X_view,
             y_train=target,
             model_params=spec.model_params,
+            task_type=task_type,
+            class_labels=effective_class_labels,
         )
         experts[descriptor.expert_id] = LoadedExpert(
             descriptor=descriptor,
             predictor=predictor,
             artifact_kind=spec.model_kind,
+            task_type=task_type,
+            class_labels=effective_class_labels,
             input_adapter=fitted_adapter.transform,
         )
         expert_order.append(descriptor.expert_id)
@@ -245,6 +275,8 @@ def fit_portfolio_from_specs(
         expert_order=tuple(expert_order),
         experts=experts,
         full_expert_id=full_expert_id,
+        task_type=task_type,
+        class_labels=effective_class_labels,
     ).validate()
 
 
@@ -254,19 +286,67 @@ def _fit_predictor(
     X_view: np.ndarray,
     y_train: np.ndarray,
     model_params: dict[str, object],
+    task_type: TaskType,
+    class_labels: tuple[int, ...] | None,
 ):
     if model_kind == "constant":
+        if task_type != "regression":
+            raise ValueError("model_kind='constant' is regression-only")
         value = float(model_params.get("value", float(np.mean(y_train))))
         return ConstantPredictor(value=value)
 
     if model_kind == "linear":
+        if task_type != "regression":
+            raise ValueError("model_kind='linear' is regression-only")
         coef, *_ = np.linalg.lstsq(X_view, y_train, rcond=None)
         return LinearPredictor(coefficients=np.asarray(coef, dtype=np.float32), bias=0.0)
 
     if model_kind == "tabpfn_regressor":
+        if task_type != "regression":
+            raise ValueError("model_kind='tabpfn_regressor' is regression-only")
         from tabpfn import TabPFNRegressor
 
         model = TabPFNRegressor(
+            n_estimators=int(model_params.get("n_estimators", 1)),
+            random_state=int(model_params.get("random_state", 42)),
+            device=model_params.get("device", "auto"),
+            ignore_pretraining_limits=bool(model_params.get("ignore_pretraining_limits", len(X_view) > 1000)),
+            n_preprocessing_jobs=int(model_params.get("n_preprocessing_jobs", 1)),
+        )
+        model.fit(X_view, y_train)
+        return model
+
+    if model_kind == "constant_classifier":
+        if task_type != "classification":
+            raise ValueError("model_kind='constant_classifier' is classification-only")
+        if class_labels is None:
+            raise ValueError("class_labels are required for constant_classifier")
+        labels = np.asarray(class_labels, dtype=np.int64)
+        counts = np.array([(y_train == label).sum() for label in labels], dtype=np.float32)
+        probabilities = counts / np.maximum(counts.sum(), 1.0)
+        return ConstantClassifierPredictor(
+            class_probabilities=probabilities,
+            class_labels=tuple(int(v) for v in labels.tolist()),
+        )
+
+    if model_kind == "logistic_classifier":
+        if task_type != "classification":
+            raise ValueError("model_kind='logistic_classifier' is classification-only")
+        model = LogisticRegression(
+            max_iter=int(model_params.get("max_iter", 1000)),
+            random_state=int(model_params.get("random_state", 42)),
+            class_weight=model_params.get("class_weight"),
+            n_jobs=model_params.get("n_jobs"),
+        )
+        model.fit(X_view, y_train)
+        return model
+
+    if model_kind == "tabpfn_classifier":
+        if task_type != "classification":
+            raise ValueError("model_kind='tabpfn_classifier' is classification-only")
+        from tabpfn import TabPFNClassifier
+
+        model = TabPFNClassifier(
             n_estimators=int(model_params.get("n_estimators", 1)),
             random_state=int(model_params.get("random_state", 42)),
             device=model_params.get("device", "auto"),
