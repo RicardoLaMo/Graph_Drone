@@ -205,19 +205,28 @@ def test_build_benchmark_expert_plan_creates_tabpfn_specs() -> None:
         view_devices={"FULL": "cpu", "GEO": "cpu", "DOMAIN": "cpu", "LOWRANK": "cpu"},
         family_overrides={"GEO": "domain_semantic"},
     )
-    assert len(plan.specs) == 4
+    assert len(plan.specs) == 6
     assert plan.specs[0].model_kind == "tabpfn_regressor"
-    assert plan.specs[-1].descriptor.family == "structural_subspace"
+    assert any(spec.descriptor.family == "structural_subspace" for spec in plan.specs)
     assert plan.full_expert_id == "ANCHOR"
     assert plan.expert_view_map["ANCHOR"] == "FULL"
     assert plan.expert_view_map["SEMANTIC_1"] == "GEO"
+    assert plan.expert_view_map["GEOMETRY_1"] == "GEOMETRY_LID"
+    assert plan.expert_view_map["GEOMETRY_2"] == "GEOMETRY_LOF"
+    assert plan.expert_quality_source["ANCHOR"] == "FULL"
+    assert plan.expert_quality_source["GEOMETRY_1"] == "FULL"
+    assert plan.specs[-2].descriptor.family == "geometry_signal"
+    assert plan.specs[-2].descriptor.projection_kind == "derived_features"
 
 
 def test_build_benchmark_quality_encodings_maps_legacy_flat_priors() -> None:
+    full_train = np.array([[1.0, 0.0, 0.1, 1.0], [0.9, 0.2, 0.0, 0.8]], dtype=np.float32)
+    full_val = np.array([[0.8, 0.1, 0.2, 0.9], [1.1, 0.3, 0.1, 0.7]], dtype=np.float32)
+    full_test = np.array([[1.2, 0.2, 0.3, 0.6], [0.7, 0.4, 0.2, 1.1]], dtype=np.float32)
     views = ViewData(
-        train={"FULL": np.ones((2, 4), dtype=np.float32), "GEO": np.ones((2, 2), dtype=np.float32)},
-        val={"FULL": np.ones((2, 4), dtype=np.float32), "GEO": np.ones((2, 2), dtype=np.float32)},
-        test={"FULL": np.ones((2, 4), dtype=np.float32), "GEO": np.ones((2, 2), dtype=np.float32)},
+        train={"FULL": full_train, "GEO": full_train[:, 1:3]},
+        val={"FULL": full_val, "GEO": full_val[:, 1:3]},
+        test={"FULL": full_test, "GEO": full_test[:, 1:3]},
         view_names=["FULL", "GEO"],
     )
     quality = QualityFeatures(
@@ -232,7 +241,56 @@ def test_build_benchmark_quality_encodings_maps_legacy_flat_priors() -> None:
         mean_j_test=np.zeros(2, dtype=np.float32),
     )
 
-    encodings = build_benchmark_quality_encodings(views, quality)
+    split = SimpleNamespace(
+        dataset_key="houses",
+        dataset_name="Houses",
+        dataset_id=46934,
+        task_id=363678,
+        target_name="LnMedianHouseValue",
+        repeat=0,
+        fold=0,
+        split_seed=42,
+        X_train=full_train,
+        X_val=full_val,
+        X_test=full_test,
+        y_train=np.ones(2, dtype=np.float32),
+        y_val=np.ones(2, dtype=np.float32),
+        y_test=np.ones(2, dtype=np.float32),
+        train_idx=np.arange(2, dtype=np.int64),
+        val_idx=np.arange(2, dtype=np.int64),
+        test_idx=np.arange(2, dtype=np.int64),
+        X_num_train=full_train,
+        X_num_val=full_val,
+        X_num_test=full_test,
+        X_cat_train=None,
+        X_cat_val=None,
+        X_cat_test=None,
+        feature_names=("MedianIncome", "Latitude", "Longitude", "Population"),
+        num_feature_names=("MedianIncome", "Latitude", "Longitude", "Population"),
+        cat_feature_names=(),
+        view_columns={"FULL": (0, 1, 2, 3), "GEO": (1, 2)},
+    )
+    plan = build_benchmark_expert_plan(
+        split,
+        views,
+        seed=42,
+        n_estimators=1,
+        n_preprocessing_jobs=1,
+        view_devices={"FULL": "cpu", "GEO": "cpu"},
+    )
+    encodings = build_benchmark_quality_encodings(views, quality, plan)
     assert set(encodings) == {"train", "val", "test"}
-    assert encodings["train"].tensor.shape == (2, 2, 5)
+    assert encodings["train"].tensor.shape == (2, 4, 8)
     assert encodings["train"].feature_names[0] == "quality_sigma2_self"
+    assert encodings["train"].feature_names[-3:] == (
+        "quality_geometry_lid",
+        "quality_geometry_lof",
+        "quality_geometry_mean_knn_distance",
+    )
+    train_tensor = np.asarray(encodings["train"].tensor, dtype=np.float32)
+    test_tensor = np.asarray(encodings["test"].tensor, dtype=np.float32)
+    assert np.allclose(train_tensor[:, 0, -3:], 0.0)
+    assert np.allclose(train_tensor[:, 1, -3:], 0.0)
+    assert np.isfinite(train_tensor).all()
+    assert np.isfinite(test_tensor).all()
+    assert not np.allclose(test_tensor[:, 2:, -3:], 0.0)

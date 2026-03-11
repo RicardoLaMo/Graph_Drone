@@ -1,6 +1,7 @@
 from .config import GraphDroneConfig, PortfolioLoadConfig, SetRouterConfig
 from .expert_factory import (
     ExpertBuildSpec,
+    GeometryFeatureAdapter,
     IdentitySelectorAdapter,
     PcaProjectionAdapter,
     fit_portfolio_from_specs,
@@ -16,6 +17,7 @@ from .view_descriptor import ViewDescriptor, normalize_descriptor_set
 
 __all__ = [
     "ExpertBuildSpec",
+    "GeometryFeatureAdapter",
     "GraphDrone",
     "GraphDroneConfig",
     "GraphDronePredictResult",

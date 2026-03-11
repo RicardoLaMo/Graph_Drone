@@ -236,6 +236,76 @@ def test_graphdrone_fit_requires_y_for_expert_specs() -> None:
         raise AssertionError("Expected GraphDrone.fit() to require y when expert_specs are provided")
 
 
+def test_graphdrone_predict_exposes_active_specialist_ids_after_router_fit() -> None:
+    X_train = np.array(
+        [
+            [-1.0, 0.0],
+            [-0.5, 0.0],
+            [0.5, 0.0],
+            [1.0, 0.0],
+            [1.5, 0.0],
+        ],
+        dtype=np.float32,
+    )
+    y_train = np.clip(X_train[:, 0], 0.0, None).astype(np.float32)
+    model = GraphDrone(
+        GraphDroneConfig(
+            portfolio=None,
+            full_expert_id="FULL",
+            router=SetRouterConfig(
+                kind="contextual_sparse_mlp",
+                hidden_dim=8,
+                learning_rate=5e-2,
+                weight_decay=0.0,
+                max_epochs=40,
+                patience=5,
+                validation_fraction=0.4,
+                random_seed=7,
+                sparse_top_k=1,
+            ),
+        )
+    )
+    specs = (
+        ExpertBuildSpec(
+            descriptor=ViewDescriptor(
+                expert_id="FULL",
+                family="FULL",
+                view_name="FULL",
+                projection_kind="identity_subselect",
+                input_dim=2,
+                input_indices=(0, 1),
+                is_anchor=True,
+            ),
+            model_kind="constant",
+            input_adapter=IdentitySelectorAdapter(indices=(0, 1)),
+            model_params={"value": 0.0},
+        ),
+        ExpertBuildSpec(
+            descriptor=ViewDescriptor(
+                expert_id="SPECIALIST",
+                family="local_support",
+                view_name="SPECIALIST",
+                projection_kind="identity_subselect",
+                input_dim=1,
+                input_indices=(0,),
+            ),
+            model_kind="linear",
+            input_adapter=IdentitySelectorAdapter(indices=(0,)),
+        ),
+    )
+    model.fit(X_train, y_train, expert_specs=specs)
+    quality = np.zeros((len(X_train), 2, 2), dtype=np.float32)
+    quality[:, 1, 0] = np.clip(X_train[:, 0], 0.0, None)
+    quality[:, 1, 1] = 1.0
+    model.fit_router(X_train, y_train, quality_features=quality)
+    result = model.predict(X_train, quality_features=quality, return_diagnostics=True)
+    summary = result.diagnostics["router_fit_summary"]
+    assert "active_specialist_ids" in summary
+    assert isinstance(summary["active_specialist_ids"], list)
+    if summary["active_specialist_ids"]:
+        assert summary["active_specialist_ids"] == ["SPECIALIST"]
+
+
 def test_graphdrone_predict_records_support_summary_fields_from_4d_support_tensor(tmp_path) -> None:
     _write_manifest(tmp_path)
     model = GraphDrone(

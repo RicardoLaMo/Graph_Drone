@@ -1,0 +1,45 @@
+\section{GraphDrone Fit Phase II-A}
+
+\paragraph{Goal.}
+Phase II-A extends the new \texttt{GraphDrone.fit()} package with portfolio-generic geometry experts while keeping the public benchmark surface limited to real model families:
+\texttt{GraphDrone}, \texttt{TabPFN}, \texttt{TabR}, and \texttt{TabM}.
+
+\paragraph{Implementation.}
+Two internal geometry specialists were added on top of the anchor feature space:
+\[
+\texttt{GEOMETRY\_1} = \texttt{LID} + \texttt{mean\_knn\_distance},
+\qquad
+\texttt{GEOMETRY\_2} = \texttt{LOF} + \texttt{mean\_knn\_distance}.
+\]
+The first implementation reused anchor quality channels for these geometry experts.
+That created a routing ambiguity: the router could identify the expert family from descriptor tokens, but not their row-level reliability from the quality channels.
+
+\paragraph{Correction.}
+The quality tensor was then extended with geometry-specific channels:
+\[
+q^{\text{geom}}_{i,e}
+=
+\big[
+\texttt{lid}_{i,e},
+\texttt{lof}_{i,e},
+\texttt{mean\_knn\_distance}_{i,e}
+\big],
+\]
+and these were appended to the legacy quality features.
+The adapter was also hardened against degenerate LID cases so the geometry channels remain finite.
+
+\paragraph{Smoke outcome.}
+On the initial registered-portfolio smoke pass, GraphDrone beat TabPFN on six of nine datasets.
+Internal diagnostics showed that geometry experts were sometimes individually stronger than the anchor, but the public GraphDrone row often remained at or near the anchor.
+After the geometry-quality correction, routing behavior changed materially:
+\begin{itemize}
+\item specialist identities are now explicit in diagnostics;
+\item geometry specialists are now selected in routed solutions;
+\item performance improved on \texttt{healthcare\_insurance\_expenses};
+\item performance regressed slightly on \texttt{houses} and \texttt{concrete\_compressive\_strength};
+\item \texttt{diamonds} stayed flat.
+\end{itemize}
+
+\paragraph{Conclusion.}
+Phase II-A closes a real implementation gap: geometry experts are no longer present only as detached diagnostics.
+The remaining issue is no longer hidden channel aliasing, but routing sensitivity and specialist integration quality.

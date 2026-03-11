@@ -3,8 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+import numpy as np
+
 from experiments.tabpfn_view_router.src.data import QualityFeatures, ViewData
-from src.graphdrone_fit.expert_factory import ExpertBuildSpec, IdentitySelectorAdapter, PcaProjectionAdapter
+from src.graphdrone_fit.expert_factory import (
+    ExpertBuildSpec,
+    GeometryFeatureAdapter,
+    IdentitySelectorAdapter,
+    PcaProjectionAdapter,
+)
 from src.graphdrone_fit.token_builder import QualityEncoding, build_legacy_quality_encoding_from_flat
 from src.graphdrone_fit.view_descriptor import ViewDescriptor, normalize_descriptor_set
 
@@ -25,6 +32,10 @@ class GraphDroneBenchmarkExpertPlan:
     specs: tuple[ExpertBuildSpec, ...]
     full_expert_id: str
     expert_view_map: dict[str, str]
+    expert_quality_source: dict[str, str]
+
+
+GEOMETRY_QUALITY_FEATURE_KEYS = ("lid", "lof", "mean_knn_distance")
 
 
 def build_benchmark_descriptors(
@@ -118,6 +129,7 @@ def _canonical_expert_id(*, family: str, family_counts: dict[str, int]) -> str:
         "structural_subspace": "SUBSPACE",
         "local_support": "SUPPORT",
         "learned_regime": "REGIME",
+        "geometry_signal": "GEOMETRY",
         "bootstrap": "SPECIALIST",
         "FULL": "ANCHOR",
     }.get(family, "EXPERT")
@@ -149,9 +161,11 @@ def build_benchmark_expert_plan(
 
     specs: list[ExpertBuildSpec] = []
     expert_view_map: dict[str, str] = {}
+    expert_quality_source: dict[str, str] = {}
     for name in views.view_names:
         descriptor = descriptor_by_name[name]
         expert_view_map[descriptor.expert_id] = name
+        expert_quality_source[descriptor.expert_id] = name
         if name == "LOWRANK":
             adapter = PcaProjectionAdapter(
                 n_components=views.train[name].shape[1],
@@ -174,30 +188,142 @@ def build_benchmark_expert_plan(
             )
         )
 
+    anchor_descriptor = descriptor_by_name["FULL"]
+    geometry_specs = _build_geometry_specs(
+        split=split,
+        anchor_descriptor=anchor_descriptor,
+        seed=seed,
+        n_estimators=n_estimators,
+        n_preprocessing_jobs=n_preprocessing_jobs,
+        device=view_devices["FULL"],
+    )
+    for spec in geometry_specs:
+        specs.append(spec)
+        expert_view_map[spec.descriptor.expert_id] = spec.descriptor.view_name
+        expert_quality_source[spec.descriptor.expert_id] = "FULL"
+
     return GraphDroneBenchmarkExpertPlan(
         dataset_key=split.dataset_key,
-        descriptors=descriptor_set.descriptors,
+        descriptors=tuple(list(descriptor_set.descriptors) + [spec.descriptor for spec in geometry_specs]),
         specs=tuple(specs),
         full_expert_id="ANCHOR",
         expert_view_map=expert_view_map,
+        expert_quality_source=expert_quality_source,
     )
+
+
+def _build_geometry_specs(
+    *,
+    split: PreparedOpenMLSplit,
+    anchor_descriptor: ViewDescriptor,
+    seed: int,
+    n_estimators: int,
+    n_preprocessing_jobs: int,
+    device: str | list[str],
+) -> tuple[ExpertBuildSpec, ...]:
+    base_names = anchor_descriptor.feature_names
+    base_dim = len(base_names)
+    geometry_defs = (
+        ("GEOMETRY_LID", ("lid", "mean_knn_distance")),
+        ("GEOMETRY_LOF", ("lof", "mean_knn_distance")),
+    )
+    specs: list[ExpertBuildSpec] = []
+    for offset, (view_name, feature_keys) in enumerate(geometry_defs, start=1):
+        adapter = GeometryFeatureAdapter(
+            indices=anchor_descriptor.input_indices,
+            feature_keys=feature_keys,
+            include_base_features=True,
+            k_neighbors=min(24, max(4, len(split.y_train) - 1)),
+        )
+        feature_names = adapter.output_feature_names(base_names)
+        descriptor = ViewDescriptor(
+            expert_id=f"GEOMETRY_{offset}",
+            family="geometry_signal",
+            view_name=view_name,
+            projection_kind="derived_features",
+            input_dim=adapter.output_dim(base_dim),
+            feature_names=feature_names,
+            source_name=split.dataset_key,
+            tags=("portfolio", "geometry", *(f"geometry_{key}" for key in feature_keys)),
+        )
+        specs.append(
+            ExpertBuildSpec(
+                descriptor=descriptor,
+                model_kind="tabpfn_regressor",
+                input_adapter=adapter,
+                model_params={
+                    "n_estimators": n_estimators,
+                    "random_state": seed + offset,
+                    "device": device,
+                    "ignore_pretraining_limits": len(split.y_train) > 1000,
+                    "n_preprocessing_jobs": n_preprocessing_jobs,
+                },
+            )
+        )
+    return tuple(specs)
 
 
 def build_benchmark_quality_encodings(
     views: ViewData,
     quality: QualityFeatures,
+    expert_plan: GraphDroneBenchmarkExpertPlan,
 ) -> dict[str, QualityEncoding]:
+    view_index = {name: idx for idx, name in enumerate(views.view_names)}
+    expert_ids = tuple(descriptor.expert_id for descriptor in expert_plan.descriptors)
+    geometry_specs = {
+        spec.descriptor.expert_id: spec
+        for spec in expert_plan.specs
+        if isinstance(spec.input_adapter, GeometryFeatureAdapter)
+    }
+
+    def build_geometry_tensor(full_matrix: np.ndarray) -> np.ndarray:
+        extra = np.zeros(
+            (full_matrix.shape[0], len(expert_ids), len(GEOMETRY_QUALITY_FEATURE_KEYS)),
+            dtype=np.float32,
+        )
+        full_feature_names = tuple(f"full_{idx}" for idx in range(full_matrix.shape[1]))
+        for expert_index, expert_id in enumerate(expert_ids):
+            spec = geometry_specs.get(expert_id)
+            if spec is None:
+                continue
+            original = spec.input_adapter
+            adapter = GeometryFeatureAdapter(
+                indices=original.indices,
+                feature_keys=original.feature_keys,
+                include_base_features=original.include_base_features,
+                k_neighbors=original.k_neighbors,
+            ).fit(views.train["FULL"])
+            transformed = adapter.transform(full_matrix)
+            output_names = adapter.output_feature_names(full_feature_names)
+            field_to_column = {name.removeprefix("geometry_"): idx for idx, name in enumerate(output_names)}
+            for feature_pos, feature_key in enumerate(GEOMETRY_QUALITY_FEATURE_KEYS):
+                column_index = field_to_column.get(feature_key)
+                if column_index is not None:
+                    extra[:, expert_index, feature_pos] = transformed[:, column_index]
+        return extra
+
+    def expand(flat_quality: np.ndarray, full_matrix: np.ndarray) -> QualityEncoding:
+        base = build_legacy_quality_encoding_from_flat(
+            view_names=views.view_names,
+            flat_quality=flat_quality,
+        )
+        expanded_base = np.stack(
+            [
+                base.tensor[:, view_index[expert_plan.expert_quality_source[expert_id]], :].detach().cpu().numpy()
+                for expert_id in expert_ids
+            ],
+            axis=1,
+        ).astype(np.float32)
+        geometry_extra = build_geometry_tensor(full_matrix)
+        expanded = np.concatenate([expanded_base, geometry_extra], axis=-1).astype(np.float32)
+        return QualityEncoding(
+            tensor=expanded,
+            feature_names=base.feature_names
+            + tuple(f"quality_geometry_{name}" for name in GEOMETRY_QUALITY_FEATURE_KEYS),
+        )
+
     return {
-        "train": build_legacy_quality_encoding_from_flat(
-            view_names=views.view_names,
-            flat_quality=quality.train,
-        ),
-        "val": build_legacy_quality_encoding_from_flat(
-            view_names=views.view_names,
-            flat_quality=quality.val,
-        ),
-        "test": build_legacy_quality_encoding_from_flat(
-            view_names=views.view_names,
-            flat_quality=quality.test,
-        ),
+        "train": expand(quality.train, views.train["FULL"]),
+        "val": expand(quality.val, views.val["FULL"]),
+        "test": expand(quality.test, views.test["FULL"]),
     }

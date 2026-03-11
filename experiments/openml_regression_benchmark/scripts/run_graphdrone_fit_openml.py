@@ -89,7 +89,7 @@ def main() -> None:
         n_preprocessing_jobs=args.n_preprocessing_jobs,
         view_devices=device_plan.view_devices,
     )
-    quality_encodings = build_benchmark_quality_encodings(views, quality)
+    quality_encodings = build_benchmark_quality_encodings(views, quality, expert_plan)
     model = GraphDrone(
         GraphDroneConfig(
             portfolio=None,

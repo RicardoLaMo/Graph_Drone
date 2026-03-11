@@ -5,6 +5,7 @@ from typing import Protocol
 
 import numpy as np
 from sklearn.decomposition import PCA
+from sklearn.neighbors import NearestNeighbors
 
 from .portfolio_loader import ConstantPredictor, LinearPredictor, LoadedExpert, LoadedPortfolio
 from .view_descriptor import ViewDescriptor
@@ -70,6 +71,107 @@ class PcaProjectionAdapter:
             raise RuntimeError("PcaProjectionAdapter.fit() must be called before transform()")
         matrix = np.asarray(X, dtype=np.float32)
         return self._pca.transform(matrix).astype(np.float32)
+
+
+@dataclass
+class GeometryFeatureAdapter:
+    indices: tuple[int, ...]
+    feature_keys: tuple[str, ...]
+    include_base_features: bool = True
+    k_neighbors: int = 24
+    _knn: NearestNeighbors | None = field(default=None, init=False, repr=False)
+    _train_view: np.ndarray | None = field(default=None, init=False, repr=False)
+    _train_density: np.ndarray | None = field(default=None, init=False, repr=False)
+    _train_ref: np.ndarray | None = field(default=None, init=False, repr=False)
+    _feature_mean: np.ndarray | None = field(default=None, init=False, repr=False)
+    _feature_std: np.ndarray | None = field(default=None, init=False, repr=False)
+
+    def fit(self, X: np.ndarray) -> "GeometryFeatureAdapter":
+        matrix = np.asarray(X, dtype=np.float32)
+        if matrix.ndim != 2:
+            raise ValueError(f"Expected 2D matrix, got {matrix.shape}")
+        if len(self.indices) == 0:
+            raise ValueError("GeometryFeatureAdapter requires at least one feature index")
+        if max(self.indices) >= matrix.shape[1]:
+            raise ValueError(
+                f"GeometryFeatureAdapter expects at least {max(self.indices) + 1} features, got {matrix.shape[1]}"
+            )
+        view = matrix[:, self.indices].astype(np.float32)
+        n_neighbors = min(max(self.k_neighbors + 1, 2), len(view))
+        self._knn = NearestNeighbors(n_neighbors=n_neighbors, n_jobs=-1)
+        self._knn.fit(view)
+        self._train_view = view
+        self._train_ref = matrix
+        mean_distance = self._mean_knn_distance(view, drop_self=True)
+        self._train_density = 1.0 / np.maximum(mean_distance, 1e-6)
+        train_geometry = self._compute_geometry(view, drop_self=True)
+        self._feature_mean = train_geometry.mean(axis=0).astype(np.float32)
+        self._feature_std = np.maximum(train_geometry.std(axis=0), 1e-6).astype(np.float32)
+        return self
+
+    def transform(self, X: np.ndarray) -> np.ndarray:
+        if self._knn is None or self._train_view is None or self._feature_mean is None or self._feature_std is None:
+            raise RuntimeError("GeometryFeatureAdapter.fit() must be called before transform()")
+        matrix = np.asarray(X, dtype=np.float32)
+        view = matrix[:, self.indices].astype(np.float32)
+        drop_self = self._train_ref is not None and X is self._train_ref
+        geometry = self._compute_geometry(view, drop_self=drop_self)
+        normalized_geometry = ((geometry - self._feature_mean) / self._feature_std).astype(np.float32)
+        if not self.include_base_features:
+            return normalized_geometry
+        return np.concatenate([view, normalized_geometry], axis=1).astype(np.float32)
+
+    def output_feature_names(self, base_feature_names: tuple[str, ...]) -> tuple[str, ...]:
+        suffix_names = tuple(f"geometry_{name}" for name in self.feature_keys)
+        if self.include_base_features:
+            return tuple(base_feature_names) + suffix_names
+        return suffix_names
+
+    def output_dim(self, base_dim: int) -> int:
+        return (base_dim if self.include_base_features else 0) + len(self.feature_keys)
+
+    def _compute_geometry(self, view: np.ndarray, *, drop_self: bool) -> np.ndarray:
+        if self._knn is None or self._train_view is None:
+            raise RuntimeError("GeometryFeatureAdapter.fit() must be called before geometry computation")
+        distances, indices = self._query_neighbors(view, drop_self=drop_self)
+        distances = np.maximum(distances.astype(np.float32), 1e-6)
+
+        features: list[np.ndarray] = []
+        mean_distance = distances.mean(axis=1).astype(np.float32)
+        if "lid" in self.feature_keys:
+            r_max = distances[:, -1:]
+            log_ratios = np.log(distances / r_max)
+            denominator = np.sum(log_ratios, axis=1)
+            safe_denominator = np.where(np.abs(denominator) < 1e-6, -1e-6, denominator)
+            lid = np.clip(-distances.shape[1] / safe_denominator, 0.0, 100.0)
+            features.append(lid.astype(np.float32))
+        if "lof" in self.feature_keys:
+            if self._train_density is None:
+                raise RuntimeError("Training density cache is unavailable for LOF computation")
+            query_density = 1.0 / np.maximum(mean_distance, 1e-6)
+            neighbor_density = self._train_density[indices].mean(axis=1)
+            lof = (neighbor_density / np.maximum(query_density, 1e-6)).astype(np.float32)
+            features.append(lof)
+        if "mean_knn_distance" in self.feature_keys:
+            features.append(mean_distance)
+        if not features:
+            raise ValueError("GeometryFeatureAdapter requires at least one feature key")
+        return np.stack(features, axis=1).astype(np.float32)
+
+    def _mean_knn_distance(self, view: np.ndarray, *, drop_self: bool) -> np.ndarray:
+        distances, _ = self._query_neighbors(view, drop_self=drop_self)
+        distances = np.maximum(distances.astype(np.float32), 1e-6)
+        return distances.mean(axis=1).astype(np.float32)
+
+    def _query_neighbors(self, view: np.ndarray, *, drop_self: bool) -> tuple[np.ndarray, np.ndarray]:
+        if self._knn is None or self._train_view is None:
+            raise RuntimeError("GeometryFeatureAdapter.fit() must be called before neighbor queries")
+        n_neighbors = min(max(self.k_neighbors + (1 if drop_self else 0), 1), len(self._train_view))
+        distances, indices = self._knn.kneighbors(view, n_neighbors=n_neighbors, return_distance=True)
+        if drop_self and distances.shape[1] > 1:
+            distances = distances[:, 1:]
+            indices = indices[:, 1:]
+        return distances, indices
 
 
 @dataclass(frozen=True)

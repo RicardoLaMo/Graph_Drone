@@ -1,0 +1,26 @@
+{
+  "phase": "phase2a_registered_portfolio",
+  "datasets": [
+    "california_housing_openml",
+    "houses",
+    "miami_housing",
+    "diamonds",
+    "healthcare_insurance_expenses",
+    "concrete_compressive_strength",
+    "airfoil_self_noise",
+    "wine_quality",
+    "used_fiat_500"
+  ],
+  "models": [
+    "GraphDrone",
+    "TabPFN",
+    "TabR",
+    "TabM"
+  ],
+  "repeat": 0,
+  "folds": [
+    0,
+    1,
+    2
+  ]
+}

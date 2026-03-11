@@ -10,6 +10,7 @@ VALID_EXPERT_FAMILIES = frozenset(
         "local_support",
         "learned_regime",
         "domain_semantic",
+        "geometry_signal",
         "bootstrap",
     }
 )
@@ -17,6 +18,7 @@ VALID_PROJECTION_KINDS = frozenset(
     {
         "identity_subselect",
         "external_transform",
+        "derived_features",
         "support_defined",
         "opaque",
     }

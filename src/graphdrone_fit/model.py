@@ -194,6 +194,15 @@ def _build_diagnostics(
     integration: IntegrationOutputs,
     router_fit_summary: dict[str, object],
 ) -> dict[str, object]:
+    router_summary = dict(router_fit_summary)
+    if "active_specialist_ids" not in router_summary:
+        active_indices = router_summary.get("active_specialist_indices")
+        if isinstance(active_indices, list):
+            router_summary["active_specialist_ids"] = [
+                batch.expert_ids[index]
+                for index in active_indices
+                if isinstance(index, int) and 0 <= index < len(batch.expert_ids)
+            ]
     return {
         "full_expert_id": batch.full_expert_id,
         "expert_ids": list(batch.expert_ids),
@@ -201,7 +210,7 @@ def _build_diagnostics(
         "token_field_names": {key: list(value) for key, value in tokens.field_names.items()},
         "quality_feature_names": list(tokens.field_names.get("quality", ())),
         "support_feature_names": list(support_encoding.feature_names),
-        "router_fit_summary": dict(router_fit_summary),
+        "router_fit_summary": router_summary,
         **integration.diagnostics,
     }
 

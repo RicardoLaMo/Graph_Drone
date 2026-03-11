@@ -4,6 +4,7 @@ import numpy as np
 
 from src.graphdrone_fit.expert_factory import (
     ExpertBuildSpec,
+    GeometryFeatureAdapter,
     IdentitySelectorAdapter,
     PcaProjectionAdapter,
     fit_portfolio_from_specs,
@@ -109,3 +110,33 @@ def test_fit_portfolio_from_specs_rejects_unsupported_model_kind() -> None:
         assert "Unsupported model_kind" in str(exc)
     else:
         raise AssertionError("Expected unsupported model_kind to raise ValueError")
+
+
+def test_geometry_feature_adapter_appends_lid_and_lof_features() -> None:
+    X_train = np.array(
+        [
+            [0.0, 0.0],
+            [0.1, 0.0],
+            [0.0, 0.2],
+            [1.0, 1.0],
+            [1.1, 1.0],
+            [1.0, 1.2],
+        ],
+        dtype=np.float32,
+    )
+    adapter = GeometryFeatureAdapter(
+        indices=(0, 1),
+        feature_keys=("lid", "lof", "mean_knn_distance"),
+        include_base_features=True,
+        k_neighbors=2,
+    ).fit(X_train)
+    transformed = adapter.transform(X_train)
+    assert transformed.shape == (6, 5)
+    assert np.isfinite(transformed).all()
+    assert adapter.output_feature_names(("f0", "f1")) == (
+        "f0",
+        "f1",
+        "geometry_lid",
+        "geometry_lof",
+        "geometry_mean_knn_distance",
+    )
