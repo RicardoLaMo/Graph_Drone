@@ -1,0 +1,27 @@
+{
+  "topic": "GraphDrone_Fit_Phase1D",
+  "date": "2026-03-11",
+  "description": "Phase I-D milestone for GraphDrone.fit(), adding the first contextual sparse router, cleaning the public benchmark surface to a single GraphDrone row, and making H200/.external runtime discovery worktree-safe.",
+  "worktree": "/home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-fit-phase1d",
+  "branch": "codex/graphdrone-fit-phase1d",
+  "inputs": [
+    "src/graphdrone_fit/config.py",
+    "src/graphdrone_fit/set_router.py",
+    "src/graphdrone_fit/model.py",
+    "experiments/openml_regression_benchmark/src/graphdrone_fit_adapter.py",
+    "experiments/openml_regression_benchmark/scripts/run_graphdrone_fit_openml.py",
+    "experiments/openml_regression_benchmark/scripts/run_openml_suite.py",
+    "experiments/openml_regression_benchmark/scripts/summarize_openml_suite.py",
+    "experiments/tab_foundation_compare/src/runtime_support.py",
+    "tests/graphdrone_fit/test_graphdrone_fit.py",
+    "tests/graphdrone_fit/test_set_router.py",
+    "tests/openml_regression_benchmark/test_graphdrone_fit_adapter.py",
+    "tests/test_runtime_support.py",
+    "experiments/openml_regression_benchmark/reports_fit_phase1d_suite_smoke_r3/openml_benchmark_summary.md",
+    "/home/wliu23/projects/Graph_Drone/.gemini-cross-checks/20260311T213645Z-phase1d-review/20260311T213731Z/cleaned_output.txt"
+  ],
+  "outputs": [
+    "docs/plans/2026-03-11-phase1d-contextual-router-and-benchmark-cleanup.md",
+    "results/2026-03-11_GraphDrone_Fit_Phase1D/summary.tex"
+  ]
+}

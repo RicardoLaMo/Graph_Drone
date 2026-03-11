@@ -11,7 +11,6 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = Path(__file__).resolve().parents[3]
-SHARED_PYTHON = REPO_ROOT / ".venv-h200" / "bin" / "python"
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -19,11 +18,19 @@ from experiments.openml_regression_benchmark.src.openml_tasks import available_d
 
 
 MODEL_SCRIPTS = {
-    "GraphDrone": SCRIPT_DIR / "run_graphdrone_openml.py",
+    "GraphDrone": SCRIPT_DIR / "run_graphdrone_fit_openml.py",
     "TabPFN": SCRIPT_DIR / "run_tabpfn_openml.py",
     "TabR": SCRIPT_DIR / "run_tabr_openml.py",
     "TabM": SCRIPT_DIR / "run_tabm_openml.py",
 }
+
+
+def resolve_shared_python() -> Path:
+    for candidate_root in (REPO_ROOT, *REPO_ROOT.parents):
+        candidate = candidate_root / ".venv-h200" / "bin" / "python"
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError("Could not locate shared .venv-h200/bin/python from the worktree path")
 
 
 def parse_args() -> argparse.Namespace:
@@ -171,6 +178,7 @@ def take_gpu_allocation(available: list[int], *, span: int) -> tuple[int, ...] |
 def main() -> None:
     args = parse_args()
     args.output_root.mkdir(parents=True, exist_ok=True)
+    shared_python = resolve_shared_python()
 
     gpu_status = query_gpu_status()
     gpu_pool = resolve_gpu_pool(
@@ -232,7 +240,7 @@ def main() -> None:
             tasks.popleft()
             script = MODEL_SCRIPTS[model]
             cmd = [
-                str(SHARED_PYTHON),
+                str(shared_python),
                 str(script),
                 "--dataset",
                 str(task["dataset"]),

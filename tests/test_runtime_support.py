@@ -29,6 +29,19 @@ def test_default_foundation_python_prefers_shared_h200_env(tmp_path: Path):
     shared_python.write_text("")
     repo_root.mkdir(parents=True)
     assert default_foundation_python(repo_root) == shared_python
+    assert default_tabr_upstream_root(repo_root) == tmp_path / ".external" / "tabr"
+    assert default_tabm_upstream_root(repo_root) == tmp_path / ".external" / "tabm" / "paper"
+
+
+def test_default_upstream_roots_fall_back_to_sibling_worktree_external(tmp_path: Path):
+    repo_root = tmp_path / ".worktrees" / "graphdrone-phase"
+    sibling_tabr = tmp_path / ".worktrees" / "tab-foundation-baseline" / ".external" / "tabr"
+    sibling_tabm = tmp_path / ".worktrees" / "tab-foundation-baseline" / ".external" / "tabm" / "paper"
+    sibling_tabr.mkdir(parents=True)
+    sibling_tabm.mkdir(parents=True)
+    repo_root.mkdir(parents=True)
+    assert default_tabr_upstream_root(repo_root) == sibling_tabr
+    assert default_tabm_upstream_root(repo_root) == sibling_tabm
 
 
 def test_seed_aware_dataset_name_preserves_canonical_seed():

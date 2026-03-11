@@ -269,3 +269,65 @@ def test_graphdrone_predict_records_support_summary_fields_from_4d_support_tenso
         "support_count",
     ]
     assert result.diagnostics["token_field_slices"]["support"] == [3, 7]
+
+
+def test_graphdrone_fit_router_records_summary_on_contextual_router() -> None:
+    X_train = np.array(
+        [[-1.0], [-0.5], [0.0], [0.5], [1.0], [1.5]],
+        dtype=np.float32,
+    )
+    y_train = X_train[:, 0].copy()
+    X_router = np.array([[-1.0], [-0.5], [0.5], [1.0]], dtype=np.float32)
+    y_router = np.clip(X_router[:, 0], 0.0, None)
+    model = GraphDrone(
+        GraphDroneConfig(
+            portfolio=None,
+            full_expert_id="FULL",
+            router=SetRouterConfig(
+                kind="contextual_sparse_mlp",
+                sparse_top_k=1,
+                hidden_dim=16,
+                learning_rate=5e-2,
+                weight_decay=0.0,
+                max_epochs=80,
+                patience=10,
+                validation_fraction=0.25,
+                random_seed=3,
+            ),
+        )
+    )
+    specs = (
+        ExpertBuildSpec(
+            descriptor=ViewDescriptor(
+                expert_id="FULL",
+                family="FULL",
+                view_name="FULL",
+                projection_kind="identity_subselect",
+                input_dim=1,
+                input_indices=(0,),
+                is_anchor=True,
+            ),
+            model_kind="constant",
+            input_adapter=IdentitySelectorAdapter(indices=(0,)),
+            model_params={"value": 0.0},
+        ),
+        ExpertBuildSpec(
+            descriptor=ViewDescriptor(
+                expert_id="SPECIALIST",
+                family="local_support",
+                view_name="SPECIALIST",
+                projection_kind="identity_subselect",
+                input_dim=1,
+                input_indices=(0,),
+            ),
+            model_kind="linear",
+            input_adapter=IdentitySelectorAdapter(indices=(0,)),
+        ),
+    )
+    model.fit(X_train, y_train, expert_specs=specs)
+    summary = model.fit_router(X_router, y_router)
+    result = model.predict(X_router, return_diagnostics=True)
+
+    assert summary["fit_status"] == "fitted"
+    assert result.diagnostics["router_fit_summary"]["fit_status"] == "fitted"
+    assert result.diagnostics["router_kind"] == "contextual_sparse_mlp"

@@ -12,6 +12,24 @@ def shared_h200_python(repo_root: Path) -> Path:
     return root / ".venv-h200" / "bin" / "python"
 
 
+def repository_root(repo_root: Path) -> Path:
+    return repo_root.parent.parent if repo_root.parent.name == ".worktrees" else repo_root
+
+
+def resolve_upstream_root(repo_root: Path, *suffix: str) -> Path:
+    root = repository_root(repo_root)
+    direct = root.joinpath(".external", *suffix)
+    if direct.exists():
+        return direct
+    worktrees_root = root / ".worktrees"
+    if worktrees_root.exists():
+        for sibling in sorted(worktrees_root.iterdir()):
+            candidate = sibling.joinpath(".external", *suffix)
+            if candidate.exists():
+                return candidate
+    return direct
+
+
 def default_foundation_python(repo_root: Path) -> Path:
     shared_python = shared_h200_python(repo_root)
     if shared_python.exists():
@@ -20,11 +38,11 @@ def default_foundation_python(repo_root: Path) -> Path:
 
 
 def default_tabr_upstream_root(repo_root: Path) -> Path:
-    return repo_root / ".external" / "tabr"
+    return resolve_upstream_root(repo_root, "tabr")
 
 
 def default_tabm_upstream_root(repo_root: Path) -> Path:
-    return repo_root / ".external" / "tabm" / "paper"
+    return resolve_upstream_root(repo_root, "tabm", "paper")
 
 
 def default_single_gpu_cuda_visible_devices() -> str:

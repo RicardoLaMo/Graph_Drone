@@ -112,14 +112,14 @@ def main() -> None:
         dataset_rows = dataset_rows.sort_index()
         lines.extend(["### Per Fold Test RMSE", "", dataframe_to_markdown(dataset_rows.reset_index()), ""])
 
-        if {"GraphDrone_router", "TabR", "TabM", "TabPFN"} <= set(dataset_rows.columns):
-            router = dataset_rows["GraphDrone_router"]
+        if {"GraphDrone", "TabR", "TabM", "TabPFN"} <= set(dataset_rows.columns):
+            router = dataset_rows["GraphDrone"]
             deltas = {
                 "vs TabR": float((router - dataset_rows["TabR"]).mean()),
                 "vs TabM": float((router - dataset_rows["TabM"]).mean()),
                 "vs TabPFN": float((router - dataset_rows["TabPFN"]).mean()),
             }
-            lines.extend(["### GraphDrone Router Deltas", ""])
+            lines.extend(["### GraphDrone Deltas", ""])
             for label, value in deltas.items():
                 lines.append(f"- {label}: `{value:+.4f}` mean RMSE delta")
             lines.append("")

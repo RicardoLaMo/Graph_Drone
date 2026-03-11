@@ -29,6 +29,7 @@ class GraphDrone:
         self._token_builder: PerViewTokenBuilder | None = None
         self._support_encoder: MomentSupportEncoder | None = None
         self._router = None
+        self._router_fit_summary: dict[str, object] = {}
         self.n_features_in_: int | None = None
 
     def fit(
@@ -64,7 +65,51 @@ class GraphDrone:
         self._token_builder = PerViewTokenBuilder()
         self._support_encoder = MomentSupportEncoder()
         self._router = build_set_router(self.config.router)
+        self._router_fit_summary = {}
         return self
+
+    def fit_router(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        *,
+        quality_features: np.ndarray | QualityEncoding | None = None,
+        support_tensor: np.ndarray | SupportEncoding | None = None,
+    ) -> dict[str, object]:
+        if self._expert_factory is None or self._token_builder is None or self._support_encoder is None or self._router is None:
+            raise RuntimeError("GraphDrone.fit() must be called before fit_router()")
+        matrix = _coerce_matrix(X)
+        if self.n_features_in_ is not None and matrix.shape[1] != self.n_features_in_:
+            raise ValueError(
+                f"Expected {self.n_features_in_} features after fit(), got {matrix.shape[1]}"
+            )
+        target = np.asarray(y, dtype=np.float32).reshape(-1)
+        if target.shape[0] != matrix.shape[0]:
+            raise ValueError(f"Expected y with {matrix.shape[0]} rows, got {target.shape[0]}")
+        batch = self._expert_factory.predict_all(matrix)
+        support_encoding = self._support_encoder.encode(
+            n_rows=matrix.shape[0],
+            descriptors=batch.descriptors,
+            support_tensor=support_tensor,
+        )
+        tokens = self._token_builder.build(
+            predictions=batch.predictions,
+            descriptors=batch.descriptors,
+            full_expert_id=batch.full_expert_id,
+            quality_features=quality_features,
+            support_encoding=support_encoding,
+        )
+        fit_fn = getattr(self._router, "fit_router", None)
+        if fit_fn is None:
+            raise RuntimeError("Configured router does not support fit_router()")
+        summary = fit_fn(
+            tokens.tokens,
+            np.asarray(batch.predictions, dtype=np.float32),
+            target,
+            full_index=batch.full_index,
+        )
+        self._router_fit_summary = dict(summary)
+        return dict(self._router_fit_summary)
 
     def predict(
         self,
@@ -134,6 +179,7 @@ class GraphDrone:
                 tokens=tokens,
                 support_encoding=support_encoding,
                 integration=integration,
+                router_fit_summary=self._router_fit_summary,
             ),
             expert_ids=batch.expert_ids,
             token_shape=tuple(int(v) for v in tokens.tokens.shape),
@@ -146,6 +192,7 @@ def _build_diagnostics(
     tokens: TokenBatch,
     support_encoding: SupportEncoding,
     integration: IntegrationOutputs,
+    router_fit_summary: dict[str, object],
 ) -> dict[str, object]:
     return {
         "full_expert_id": batch.full_expert_id,
@@ -154,6 +201,7 @@ def _build_diagnostics(
         "token_field_names": {key: list(value) for key, value in tokens.field_names.items()},
         "quality_feature_names": list(tokens.field_names.get("quality", ())),
         "support_feature_names": list(support_encoding.feature_names),
+        "router_fit_summary": dict(router_fit_summary),
         **integration.diagnostics,
     }
 

@@ -66,11 +66,12 @@ def test_build_benchmark_descriptors_handles_variable_view_kinds() -> None:
 
     descriptor_set = build_benchmark_descriptors(split, views)
     ids = [descriptor.expert_id for descriptor in descriptor_set.descriptors]
-    assert ids == ["FULL", "GEO", "SOCIO", "LOWRANK"]
+    assert ids == ["ANCHOR", "SEMANTIC_1", "SEMANTIC_2", "SUBSPACE_1"]
     full = descriptor_set.descriptors[0]
     geo = descriptor_set.descriptors[1]
     lowrank = descriptor_set.descriptors[-1]
     assert full.is_anchor is True
+    assert full.view_name == "FULL"
     assert geo.family == "domain_semantic"
     assert lowrank.projection_kind == "external_transform"
 
@@ -139,6 +140,8 @@ def test_build_benchmark_descriptors_accepts_explicit_family_overrides() -> None
     assert descriptor_set.descriptors[1].family == "domain_semantic"
     assert descriptor_set.descriptors[2].family == "domain_semantic"
     assert descriptor_set.descriptors[3].family == "learned_regime"
+    assert descriptor_set.descriptors[1].expert_id == "SEMANTIC_1"
+    assert descriptor_set.descriptors[3].expert_id == "REGIME_1"
 
 
 def test_build_benchmark_expert_plan_creates_tabpfn_specs() -> None:
@@ -205,6 +208,9 @@ def test_build_benchmark_expert_plan_creates_tabpfn_specs() -> None:
     assert len(plan.specs) == 4
     assert plan.specs[0].model_kind == "tabpfn_regressor"
     assert plan.specs[-1].descriptor.family == "structural_subspace"
+    assert plan.full_expert_id == "ANCHOR"
+    assert plan.expert_view_map["ANCHOR"] == "FULL"
+    assert plan.expert_view_map["SEMANTIC_1"] == "GEO"
 
 
 def test_build_benchmark_quality_encodings_maps_legacy_flat_priors() -> None:

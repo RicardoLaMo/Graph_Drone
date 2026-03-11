@@ -23,6 +23,8 @@ class GraphDroneBenchmarkExpertPlan:
     dataset_key: str
     descriptors: tuple[ViewDescriptor, ...]
     specs: tuple[ExpertBuildSpec, ...]
+    full_expert_id: str
+    expert_view_map: dict[str, str]
 
 
 def build_benchmark_descriptors(
@@ -34,37 +36,39 @@ def build_benchmark_descriptors(
     descriptors: list[ViewDescriptor] = []
     full_indices = tuple(range(split.X_train.shape[1]))
     family_overrides = dict(family_overrides or {})
+    family_counts: dict[str, int] = {}
 
     for name in views.view_names:
         if name == "FULL":
             descriptors.append(
                 ViewDescriptor(
-                    expert_id="FULL",
+                    expert_id="ANCHOR",
                     family="FULL",
-                    view_name="FULL",
+                    view_name=name,
                     projection_kind="identity_subselect",
                     input_dim=len(full_indices),
                     input_indices=full_indices,
                     feature_names=split.feature_names,
                     is_anchor=True,
                     source_name=split.dataset_key,
-                    tags=("anchor", "portfolio"),
+                    tags=("anchor", "portfolio", f"registry_view_{_tagify(name)}"),
                 )
             )
             continue
 
         family = family_overrides.get(name, _default_family_for_view(name))
+        expert_id = _canonical_expert_id(family=family, family_counts=family_counts)
         if name == "LOWRANK":
             descriptors.append(
                 ViewDescriptor(
-                    expert_id="LOWRANK",
+                    expert_id=expert_id,
                     family=family,
-                    view_name="LOWRANK",
+                    view_name=name,
                     projection_kind="external_transform",
                     input_dim=views.train[name].shape[1],
                     feature_names=tuple(f"lowrank_{idx}" for idx in range(views.train[name].shape[1])),
                     source_name=split.dataset_key,
-                    tags=("portfolio", "transformed"),
+                    tags=("portfolio", "transformed", f"registry_view_{_tagify(name)}"),
                 )
             )
             continue
@@ -73,7 +77,7 @@ def build_benchmark_descriptors(
         feature_names = tuple(split.feature_names[idx] for idx in input_indices)
         descriptors.append(
             ViewDescriptor(
-                expert_id=name,
+                expert_id=expert_id,
                 family=family,
                 view_name=name,
                 projection_kind="identity_subselect",
@@ -81,13 +85,13 @@ def build_benchmark_descriptors(
                 input_indices=input_indices,
                 feature_names=feature_names,
                 source_name=split.dataset_key,
-                tags=("portfolio", "registry"),
+                tags=("portfolio", "registry", f"registry_view_{_tagify(name)}"),
             )
         )
 
     return GraphDroneBenchmarkDescriptorSet(
         dataset_key=split.dataset_key,
-        descriptors=normalize_descriptor_set(descriptors, required_anchor_id="FULL"),
+        descriptors=normalize_descriptor_set(descriptors, required_anchor_id="ANCHOR"),
     )
 
 
@@ -106,6 +110,26 @@ def _default_family_for_view(view_name: str) -> str:
     return "bootstrap"
 
 
+def _canonical_expert_id(*, family: str, family_counts: dict[str, int]) -> str:
+    family_counts[family] = family_counts.get(family, 0) + 1
+    index = family_counts[family]
+    prefix = {
+        "domain_semantic": "SEMANTIC",
+        "structural_subspace": "SUBSPACE",
+        "local_support": "SUPPORT",
+        "learned_regime": "REGIME",
+        "bootstrap": "SPECIALIST",
+        "FULL": "ANCHOR",
+    }.get(family, "EXPERT")
+    if prefix == "ANCHOR":
+        return "ANCHOR"
+    return f"{prefix}_{index}"
+
+
+def _tagify(text: str) -> str:
+    return "".join(char.lower() if char.isalnum() else "_" for char in text).strip("_")
+
+
 def build_benchmark_expert_plan(
     split: PreparedOpenMLSplit,
     views: ViewData,
@@ -121,11 +145,13 @@ def build_benchmark_expert_plan(
         views,
         family_overrides=family_overrides,
     )
-    descriptor_by_name = {descriptor.expert_id: descriptor for descriptor in descriptor_set.descriptors}
+    descriptor_by_name = {descriptor.view_name: descriptor for descriptor in descriptor_set.descriptors}
 
     specs: list[ExpertBuildSpec] = []
+    expert_view_map: dict[str, str] = {}
     for name in views.view_names:
         descriptor = descriptor_by_name[name]
+        expert_view_map[descriptor.expert_id] = name
         if name == "LOWRANK":
             adapter = PcaProjectionAdapter(
                 n_components=views.train[name].shape[1],
@@ -152,6 +178,8 @@ def build_benchmark_expert_plan(
         dataset_key=split.dataset_key,
         descriptors=descriptor_set.descriptors,
         specs=tuple(specs),
+        full_expert_id="ANCHOR",
+        expert_view_map=expert_view_map,
     )
 
 

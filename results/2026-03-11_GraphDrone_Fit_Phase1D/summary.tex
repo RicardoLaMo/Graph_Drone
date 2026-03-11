@@ -1,0 +1,45 @@
+\section{GraphDrone.fit() Phase I-D: Contextual Router and Benchmark Cleanup}
+
+Phase I-D closes the transition from a bootstrap package scaffold to a usable package-level benchmark path. The important result of this phase is not just that a new router was added; it is that the public benchmark surface and the internal GraphDrone mechanism surface were cleanly separated.
+
+The public benchmark now reports only
+\[
+\texttt{GraphDrone},
+\]
+while internal experts are demoted to diagnostics-only artifacts. This corrects a structural problem in the earlier benchmark loop, where internal expert labels such as \texttt{FULL}, \texttt{GEO}, \texttt{DOMAIN}, and \texttt{LOWRANK} risked becoming accidental optimization targets rather than implementation details.
+
+Inside the package, the new routing surface is a contextual sparse router trained through
+\[
+\texttt{GraphDrone.fit\_router()}.
+\]
+For row \(i\) and expert \(v\), the router consumes a token \(t_{i,v}\) built from prediction fields, quality fields, support summaries, and descriptor features. The current learned router compares each expert token against both the anchor token and the pooled token context, then predicts:
+\begin{itemize}
+\item sparse specialist weights \(\alpha_{i,v}\),
+\item a defer-to-anchor probability \(\delta_i\).
+\end{itemize}
+The resulting prediction remains
+\[
+\hat y_i = (1-\delta_i)\hat y_{i,\mathrm{anchor}} + \delta_i \sum_v \alpha_{i,v}\hat y_{i,v},
+\]
+but the weights are now produced by a learned contextual function over expert tokens rather than by a bootstrap placeholder.
+
+Another non-trivial engineering result in this phase is worktree-safe runtime resolution. The benchmark suite now resolves the shared H200 Python environment by walking the worktree parent chain, and the TabR / TabM baseline runners resolve their upstream \texttt{.external/} roots from the repository root or sibling worktrees. This matters because otherwise the benchmark is only valid from one checkout layout, which would undercut reproducibility.
+
+Validation for Phase I-D included:
+\begin{itemize}
+\item 26 targeted tests over the GraphDrone package, benchmark adapter, suite helper, and runtime support,
+\item a standalone \texttt{houses} smoke run through \texttt{run\_graphdrone\_fit\_openml.py},
+\item a full benchmark smoke on \texttt{houses} through \texttt{run\_openml\_suite.py} with public models \texttt{GraphDrone}, \texttt{TabPFN}, \texttt{TabR}, and \texttt{TabM},
+\item external Gemini review of the file-backed Phase I-D evidence bundle.
+\end{itemize}
+
+On the smoke suite, the public summary recorded
+\[
+\texttt{GraphDrone}=0.2290,\quad
+\texttt{TabPFN}=0.2391,\quad
+\texttt{TabR}=0.3630,\quad
+\texttt{TabM}=0.4157.
+\]
+These numbers are only smoke-level evidence, but they are enough to confirm that the new public benchmark path is functioning and that internal expert rows are no longer leaking into the leaderboard.
+
+The phase should still be interpreted conservatively. It establishes a correct package and benchmark boundary for GraphDrone, but it does not yet establish that the current \texttt{contextual\_sparse\_mlp} is the final routing architecture. That question belongs to the next phase of portfolio evaluation and mechanism learning, now that the implementation surface is clean enough to support it.
