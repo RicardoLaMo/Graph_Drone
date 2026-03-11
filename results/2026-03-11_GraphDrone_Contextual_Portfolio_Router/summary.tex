@@ -1,0 +1,73 @@
+% Paper-oriented summary for GraphDrone contextual portfolio routing.
+\section{From Scalar View Routing to Contextual Portfolio Routing}
+
+\textit{Generated: 2026-03-11\_17-40-00} \\
+This note summarizes why GraphDrone should generalize from scalar quality routing on a few named views to a portfolio-level contextual router over typed view tokens.
+
+\subsection{Problem Statement}
+
+The current GraphDrone router is already row-conditional, but it only receives a scalar prior vector composed of per-view uncertainty and overlap statistics. In the current implementation this is effectively
+\[
+\alpha_i = \mathrm{softmax}(\mathrm{MLP}(q_i)),
+\]
+where \(q_i\) contains row-level summaries such as per-view \(\sigma^2\), pairwise kNN-overlap scores, and \(\mathrm{mean}\_J\).
+
+This design is useful, but it is not yet a contextual model over a set of view experts. It cannot directly represent richer per-view support summaries, view identity descriptors, or structured row-level interactions among experts.
+
+\subsection{Portfolio Evidence}
+
+\input{./2026-03-11_GraphDrone_Contextual_Portfolio_Router/tables/portfolio_signal_noise_counts}
+
+The registered-portfolio readout shows three important facts:
+
+\begin{enumerate}
+\item Dense multi-view routing has a real competition-noise problem.
+\item GEO is the strongest current specialist, but not the only one.
+\item Some datasets still prefer FULL even after competition is reduced, which means routing alone does not solve weak-expert regimes.
+\end{enumerate}
+
+This means the next step should not be a California-specific or GEO-specific branch. It should be a portfolio-level integration design.
+
+\subsection{Generalized Architecture}
+
+Let \(\mathcal{V}_d\) denote the expert set instantiated for dataset \(d\). For row \(i\) and expert \(v \in \mathcal{V}_d\), construct a token
+\[
+t_{i,v} = [\hat y_{i,v}, u_{i,v}, s_{i,v}, d_v],
+\]
+where:
+\begin{itemize}
+\item \(\hat y_{i,v}\): expert prediction features
+\item \(u_{i,v}\): prior-quality features such as uncertainty, density, and overlap
+\item \(s_{i,v}\): support-summary embedding for the local neighborhood
+\item \(d_v\): view descriptor encoding the expert type and construction metadata
+\end{itemize}
+
+Then use a contextual set-router over the token set plus a FULL anchor token:
+\[
+h_i^{\mathrm{ctx}} = \mathrm{SetRouter}(\{t_{i,v}\}_{v \in \mathcal{V}_d}, t_{i,\mathrm{FULL}}),
+\]
+\[
+\alpha_{i,v} = \mathrm{sparsemax}(W_\alpha h_i^{\mathrm{ctx}}), \qquad
+\delta_i = \sigma(W_\delta h_i^{\mathrm{ctx}}),
+\]
+\[
+\hat y_i = (1-\delta_i)\hat y_{i,\mathrm{FULL}} + \delta_i \sum_{v \in \mathcal{V}_d} \alpha_{i,v}\hat y_{i,v}.
+\]
+
+This design is row-level, dataset-general, and sparse around FULL. It avoids fixed global weights while still allowing each dataset to expose a different expert set.
+
+\subsection{Why This Is Better Than A GEO-Specific Branch}
+
+The current portfolio does not justify a permanent \texttt{FULL+GEO} architecture. GEO is simply the strongest current specialist type. LOWRANK and DOMAIN also survive on subsets of the portfolio. Therefore the architecture should generalize over an expert ontology rather than collapse into one named specialist.
+
+\subsection{Implementation Priority}
+
+The recommended order is:
+\begin{enumerate}
+\item define a shared expert ontology across datasets
+\item build per-row per-view tokens
+\item add a lightweight contextual set-router
+\item evaluate on the full portfolio before any per-dataset tuning
+\end{enumerate}
+
+This keeps GraphDrone aligned with its actual objective: row-level contextual integration across a portfolio, not hardcoded dataset-specific blending.

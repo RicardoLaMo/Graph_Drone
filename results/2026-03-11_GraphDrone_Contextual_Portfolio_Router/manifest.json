@@ -1,0 +1,20 @@
+{
+  "topic": "GraphDrone_Contextual_Portfolio_Router",
+  "description": "Paper-oriented note on generalizing GraphDrone from scalar quality routing to portfolio-level contextual view routing.",
+  "timestamp": "2026-03-11_17-40-00",
+  "command": "-",
+  "artifacts": [
+    {
+      "type": "table",
+      "filename": "portfolio_signal_noise_counts.tex",
+      "path": "tables/portfolio_signal_noise_counts.tex",
+      "caption": "Registered-portfolio signal-vs-noise readout for GraphDrone routing."
+    },
+    {
+      "type": "latex_summary",
+      "filename": "summary.tex",
+      "path": "summary.tex",
+      "caption": "Paper-oriented GraphDrone contextual portfolio routing note."
+    }
+  ]
+}
