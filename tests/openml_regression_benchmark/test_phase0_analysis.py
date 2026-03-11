@@ -9,10 +9,16 @@ from experiments.openml_regression_benchmark.scripts.analyze_router_full_regret 
     analyze_run as analyze_full_regret_run,
 )
 from experiments.openml_regression_benchmark.scripts.analyze_router_mechanism import analyze_run
+from experiments.openml_regression_benchmark.scripts.analyze_view_home_quality import (
+    analyze_run as analyze_view_home_run,
+)
 from experiments.openml_regression_benchmark.scripts.summarize_full_regret_suite import (
     summarize as summarize_full_regret_suite,
 )
 from experiments.openml_regression_benchmark.scripts.summarize_houses_seed_sweep import summarize
+from experiments.openml_regression_benchmark.scripts.summarize_view_home_suite import (
+    summarize as summarize_view_home_suite,
+)
 
 
 def test_analyze_run_reports_adaptive_vs_fixed_delta(tmp_path) -> None:
@@ -168,3 +174,86 @@ def test_summarize_full_regret_suite_aggregates_run_summaries(tmp_path) -> None:
     assert summary["n_runs"] == 2
     assert summary["adaptive_capture_minus_fixed"]["positive_fraction"] == 1.0
     assert summary["full_oracle_fraction"]["mean"] == pytest.approx(0.45)
+
+
+def test_analyze_view_home_quality_reports_per_view_capture(tmp_path) -> None:
+    run_dir = tmp_path / "houses__r0f0"
+    artifacts = run_dir / "artifacts"
+    artifacts.mkdir(parents=True)
+
+    payload = {
+        "rows": [
+            {"model": "GraphDrone_FULL", "test_rmse": 0.21},
+            {"model": "GraphDrone_router", "test_rmse": 0.20},
+            {"model": "GraphDrone_router_fixed", "test_rmse": 0.205},
+        ]
+    }
+    (run_dir / "graphdrone_results.json").write_text(json.dumps(payload) + "\n")
+
+    np.savez_compressed(
+        artifacts / "graphdrone_predictions.npz",
+        view_names=np.array(["FULL", "GEO"]),
+        y_test=np.zeros(4, dtype=np.float32),
+        pred_test=np.array(
+            [
+                [0.0, 1.0],
+                [1.0, 0.0],
+                [1.0, 0.0],
+                [0.0, 0.2],
+            ],
+            dtype=np.float32,
+        ),
+        router_pred_test=np.array([0.2, 0.2, 0.8, 0.02], dtype=np.float32),
+        router_fixed_pred_test=np.array([0.1, 0.7, 0.7, 0.04], dtype=np.float32),
+        router_weights_test=np.array(
+            [
+                [0.8, 0.2],
+                [0.2, 0.8],
+                [0.8, 0.2],
+                [0.9, 0.1],
+            ],
+            dtype=np.float32,
+        ),
+        router_fixed_weights_test=np.array(
+            [
+                [0.9, 0.1],
+                [0.7, 0.3],
+                [0.7, 0.3],
+                [0.8, 0.2],
+            ],
+            dtype=np.float32,
+        ),
+    )
+
+    summary = analyze_view_home_run(run_dir, adaptive_prefix="router", label="GraphDrone")
+    assert summary["per_view_home_subset"]["FULL"]["n_rows"] == 2
+    assert summary["per_view_home_subset"]["GEO"]["n_rows"] == 2
+    assert summary["per_view_home_subset"]["GEO"]["capture_gap_vs_fixed"] > 0.0
+
+
+def test_summarize_view_home_suite_aggregates_per_view_metrics(tmp_path) -> None:
+    root = tmp_path / "suite"
+    for idx, gap in enumerate([0.02, -0.01]):
+        artifacts = root / f"seed{idx}" / "artifacts"
+        artifacts.mkdir(parents=True)
+        payload = {
+            "per_view_home_subset": {
+                "FULL": {
+                    "capture_gap_vs_fixed": 0.0,
+                    "mean_potential_gain_vs_full": 0.0,
+                    "adaptive_capture_ratio_total": 0.0,
+                    "mean_adaptive_full_weight": 0.8,
+                },
+                "GEO": {
+                    "capture_gap_vs_fixed": gap,
+                    "mean_potential_gain_vs_full": 0.1 + idx,
+                    "adaptive_capture_ratio_total": 0.2 + idx,
+                    "mean_adaptive_full_weight": 0.7 - 0.1 * idx,
+                },
+            }
+        }
+        (artifacts / "router_view_home_summary.json").write_text(json.dumps(payload) + "\n")
+
+    summary = summarize_view_home_suite(root, adaptive_prefix="router")
+    assert summary["n_runs"] == 2
+    assert summary["per_view"]["GEO"]["capture_gap_vs_fixed"]["mean"] == pytest.approx(0.005)
