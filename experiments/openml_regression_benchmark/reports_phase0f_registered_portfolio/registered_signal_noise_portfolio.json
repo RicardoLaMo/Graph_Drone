@@ -1,0 +1,407 @@
+{
+  "portfolio_id": "graphdrone_registered_signal_noise_2026_03_11",
+  "adaptive_prefix": "router",
+  "n_datasets": 9,
+  "dataset_summaries": [
+    {
+      "dataset": "california_housing_openml",
+      "n_runs": 3,
+      "best_view": "GEO",
+      "verdict": "useful_signal_obscured_by_competition",
+      "signal_noise": {
+        "root": "california_housing_openml",
+        "adaptive_prefix": "router",
+        "n_runs": 3,
+        "competition_noise_gain_vs_full_router": {
+          "mean": 0.001059519300758464,
+          "std": 0.0008108300623516685
+        },
+        "best_pair_gain_vs_full_expert": {
+          "mean": 0.010995158522386602,
+          "std": 0.005288116180837406,
+          "positive_fraction": 1.0
+        },
+        "best_view_capture_gap_vs_fixed": {
+          "mean": -0.020058072425283967,
+          "std": 0.0013181364851434481
+        },
+        "classification_counts": {
+          "useful_signal_obscured_by_competition": 3
+        },
+        "best_view_counts": {
+          "GEO": 3
+        }
+      },
+      "provenance": {
+        "fixed_modes": {
+          "derived_from_val_mean_weights": 3
+        },
+        "quality_modes": {
+          "derived_sigma2_plus_mean_j": 3
+        }
+      }
+    },
+    {
+      "dataset": "houses",
+      "n_runs": 3,
+      "best_view": "GEO",
+      "verdict": "useful_signal_obscured_by_competition",
+      "signal_noise": {
+        "root": "houses",
+        "adaptive_prefix": "router",
+        "n_runs": 3,
+        "competition_noise_gain_vs_full_router": {
+          "mean": 0.0001681164208610734,
+          "std": 9.715630758507817e-05
+        },
+        "best_pair_gain_vs_full_expert": {
+          "mean": 0.004684749229596635,
+          "std": 0.0011231883205399815,
+          "positive_fraction": 1.0
+        },
+        "best_view_capture_gap_vs_fixed": {
+          "mean": 0.0077582570335088625,
+          "std": 0.006037358685429802
+        },
+        "classification_counts": {
+          "useful_signal_obscured_by_competition": 3
+        },
+        "best_view_counts": {
+          "GEO": 3
+        }
+      },
+      "provenance": {
+        "fixed_modes": {
+          "derived_from_val_mean_weights": 3
+        },
+        "quality_modes": {
+          "derived_sigma2_plus_mean_j": 3
+        }
+      },
+      "stability_probe": {
+        "root": "/home/wliu23/projects/Graph_Drone/.worktrees/phase0-router-mechanism-proof/experiments/openml_regression_benchmark/reports_phase0_houses_seed_sweep",
+        "adaptive_prefix": "router",
+        "n_runs": 10,
+        "competition_noise_gain_vs_full_router": {
+          "mean": 8.33746647622563e-05,
+          "std": 0.00033026010148242525
+        },
+        "best_pair_gain_vs_full_expert": {
+          "mean": 0.003600894244477337,
+          "std": 0.0008107424503056913,
+          "positive_fraction": 1.0
+        },
+        "best_view_capture_gap_vs_fixed": {
+          "mean": 0.009150623652858833,
+          "std": 0.009256408302517893
+        },
+        "classification_counts": {
+          "weak_competition_effect": 3,
+          "useful_signal_obscured_by_competition": 7
+        },
+        "best_view_counts": {
+          "GEO": 10
+        }
+      }
+    },
+    {
+      "dataset": "miami_housing",
+      "n_runs": 3,
+      "best_view": "GEO",
+      "verdict": "competition_noise_plus_weak_expert",
+      "signal_noise": {
+        "root": "miami_housing",
+        "adaptive_prefix": "router",
+        "n_runs": 3,
+        "competition_noise_gain_vs_full_router": {
+          "mean": 633.833702711015,
+          "std": 334.6362301998156
+        },
+        "best_pair_gain_vs_full_expert": {
+          "mean": -12.659859745253925,
+          "std": 165.2097558535926,
+          "positive_fraction": 0.3333333333333333
+        },
+        "best_view_capture_gap_vs_fixed": {
+          "mean": -0.05687008161109669,
+          "std": 0.039506841906619135
+        },
+        "classification_counts": {
+          "useful_signal_obscured_by_competition": 1,
+          "competition_noise_plus_weak_expert": 2
+        },
+        "best_view_counts": {
+          "GEO": 2,
+          "DOMAIN": 1
+        }
+      },
+      "provenance": {
+        "fixed_modes": {
+          "derived_from_val_mean_weights": 3
+        },
+        "quality_modes": {
+          "derived_sigma2_plus_mean_j": 3
+        }
+      }
+    },
+    {
+      "dataset": "diamonds",
+      "n_runs": 3,
+      "best_view": "LOWRANK",
+      "verdict": "competition_noise_plus_weak_expert",
+      "signal_noise": {
+        "root": "diamonds",
+        "adaptive_prefix": "router",
+        "n_runs": 3,
+        "competition_noise_gain_vs_full_router": {
+          "mean": 8.76726842204558,
+          "std": 1.0532859410206667
+        },
+        "best_pair_gain_vs_full_expert": {
+          "mean": -0.9587485757665112,
+          "std": 0.9380739863855249,
+          "positive_fraction": 0.3333333333333333
+        },
+        "best_view_capture_gap_vs_fixed": {
+          "mean": -0.046598413798212286,
+          "std": 0.026020920809631014
+        },
+        "classification_counts": {
+          "competition_noise_plus_weak_expert": 2,
+          "useful_signal_obscured_by_competition": 1
+        },
+        "best_view_counts": {
+          "LOWRANK": 3
+        }
+      },
+      "provenance": {
+        "fixed_modes": {
+          "derived_from_val_mean_weights": 3
+        },
+        "quality_modes": {
+          "derived_sigma2_plus_mean_j": 3
+        }
+      }
+    },
+    {
+      "dataset": "healthcare_insurance_expenses",
+      "n_runs": 3,
+      "best_view": "GEO",
+      "verdict": "useful_signal_obscured_by_competition",
+      "signal_noise": {
+        "root": "healthcare_insurance_expenses",
+        "adaptive_prefix": "router",
+        "n_runs": 3,
+        "competition_noise_gain_vs_full_router": {
+          "mean": 1.042700175313712,
+          "std": 14.474463059161998
+        },
+        "best_pair_gain_vs_full_expert": {
+          "mean": 28.907982977642252,
+          "std": 14.292104012254718,
+          "positive_fraction": 1.0
+        },
+        "best_view_capture_gap_vs_fixed": {
+          "mean": 0.12828154269866923,
+          "std": 0.12270780695020533
+        },
+        "classification_counts": {
+          "weak_competition_effect": 2,
+          "useful_signal_obscured_by_competition": 1
+        },
+        "best_view_counts": {
+          "GEO": 2,
+          "DOMAIN": 1
+        }
+      },
+      "provenance": {
+        "fixed_modes": {
+          "derived_from_val_mean_weights": 3
+        },
+        "quality_modes": {
+          "derived_sigma2_plus_mean_j": 3
+        }
+      }
+    },
+    {
+      "dataset": "concrete_compressive_strength",
+      "n_runs": 3,
+      "best_view": "GEO",
+      "verdict": "useful_signal_obscured_by_competition",
+      "signal_noise": {
+        "root": "concrete_compressive_strength",
+        "adaptive_prefix": "router",
+        "n_runs": 3,
+        "competition_noise_gain_vs_full_router": {
+          "mean": 0.1673889695577667,
+          "std": 0.09870869786442474
+        },
+        "best_pair_gain_vs_full_expert": {
+          "mean": 0.005093397218651911,
+          "std": 0.03789610178419541,
+          "positive_fraction": 0.3333333333333333
+        },
+        "best_view_capture_gap_vs_fixed": {
+          "mean": -0.013032813049251725,
+          "std": 0.019752985020666733
+        },
+        "classification_counts": {
+          "competition_noise_plus_weak_expert": 2,
+          "useful_signal_obscured_by_competition": 1
+        },
+        "best_view_counts": {
+          "GEO": 1,
+          "LOWRANK": 1,
+          "DOMAIN": 1
+        }
+      },
+      "provenance": {
+        "fixed_modes": {
+          "derived_from_val_mean_weights": 3
+        },
+        "quality_modes": {
+          "derived_sigma2_plus_mean_j": 3
+        }
+      }
+    },
+    {
+      "dataset": "airfoil_self_noise",
+      "n_runs": 3,
+      "best_view": "LOWRANK",
+      "verdict": "useful_signal_obscured_by_competition",
+      "signal_noise": {
+        "root": "airfoil_self_noise",
+        "adaptive_prefix": "router",
+        "n_runs": 3,
+        "competition_noise_gain_vs_full_router": {
+          "mean": 0.048649141982874435,
+          "std": 0.03098637276806308
+        },
+        "best_pair_gain_vs_full_expert": {
+          "mean": 0.024167595731772778,
+          "std": 0.041447043384055735,
+          "positive_fraction": 0.6666666666666666
+        },
+        "best_view_capture_gap_vs_fixed": {
+          "mean": 0.0055599231085115275,
+          "std": 0.012240032524832495
+        },
+        "classification_counts": {
+          "useful_signal_obscured_by_competition": 2,
+          "competition_noise_plus_weak_expert": 1
+        },
+        "best_view_counts": {
+          "LOWRANK": 3
+        }
+      },
+      "provenance": {
+        "fixed_modes": {
+          "derived_from_val_mean_weights": 3
+        },
+        "quality_modes": {
+          "derived_sigma2_plus_mean_j": 3
+        }
+      }
+    },
+    {
+      "dataset": "wine_quality",
+      "n_runs": 3,
+      "best_view": "DOMAIN",
+      "verdict": "competition_noise_plus_weak_expert",
+      "signal_noise": {
+        "root": "wine_quality",
+        "adaptive_prefix": "router",
+        "n_runs": 3,
+        "competition_noise_gain_vs_full_router": {
+          "mean": 0.001012804633409618,
+          "std": 0.0008473985654930912
+        },
+        "best_pair_gain_vs_full_expert": {
+          "mean": -0.00047361969763903833,
+          "std": 0.0013016688151298323,
+          "positive_fraction": 0.3333333333333333
+        },
+        "best_view_capture_gap_vs_fixed": {
+          "mean": -0.0011836410503832586,
+          "std": 0.008239985457891572
+        },
+        "classification_counts": {
+          "weak_competition_effect": 1,
+          "competition_noise_plus_weak_expert": 2
+        },
+        "best_view_counts": {
+          "GEO": 1,
+          "DOMAIN": 2
+        }
+      },
+      "provenance": {
+        "fixed_modes": {
+          "derived_from_val_mean_weights": 3
+        },
+        "quality_modes": {
+          "derived_sigma2_plus_mean_j": 3
+        }
+      }
+    },
+    {
+      "dataset": "used_fiat_500",
+      "n_runs": 3,
+      "best_view": "GEO",
+      "verdict": "useful_signal_obscured_by_competition",
+      "signal_noise": {
+        "root": "used_fiat_500",
+        "adaptive_prefix": "router",
+        "n_runs": 3,
+        "competition_noise_gain_vs_full_router": {
+          "mean": 21.149959510406195,
+          "std": 11.417333058688996
+        },
+        "best_pair_gain_vs_full_expert": {
+          "mean": 2.1889651127629954,
+          "std": 1.5818737703362564,
+          "positive_fraction": 1.0
+        },
+        "best_view_capture_gap_vs_fixed": {
+          "mean": 0.027920809434329712,
+          "std": 0.007481656217936326
+        },
+        "classification_counts": {
+          "useful_signal_obscured_by_competition": 3
+        },
+        "best_view_counts": {
+          "GEO": 2,
+          "LOWRANK": 1
+        }
+      },
+      "provenance": {
+        "fixed_modes": {
+          "derived_from_val_mean_weights": 3
+        },
+        "quality_modes": {
+          "derived_sigma2_plus_mean_j": 3
+        }
+      }
+    }
+  ],
+  "portfolio_rollup": {
+    "best_view_counts": {
+      "GEO": 6,
+      "LOWRANK": 2,
+      "DOMAIN": 1
+    },
+    "verdict_counts": {
+      "useful_signal_obscured_by_competition": 6,
+      "competition_noise_plus_weak_expert": 3
+    },
+    "datasets_with_positive_best_pair_gain_fraction": 0.6666666666666666,
+    "datasets_with_positive_competition_gain_fraction": 1.0,
+    "competition_gain_dataset_mean": {
+      "mean": 73.89021215229735,
+      "std": 198.08320222115034
+    },
+    "best_pair_gain_dataset_mean": {
+      "mean": 1.946978561154398,
+      "std": 10.368427069839955
+    }
+  }
+}

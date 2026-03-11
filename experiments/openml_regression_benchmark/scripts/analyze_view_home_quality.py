@@ -29,7 +29,11 @@ def _rmse(errors: np.ndarray) -> float:
 
 
 def analyze_run(run_dir: Path, *, adaptive_prefix: str = "router", label: str | None = None) -> dict[str, object]:
-    _, rows, arrays, run_label = _load_run_arrays(run_dir, adaptive_prefix=adaptive_prefix, label=label)
+    _, rows, arrays, run_label, provenance = _load_run_arrays(
+        run_dir,
+        adaptive_prefix=adaptive_prefix,
+        label=label,
+    )
 
     view_names = [str(v) for v in arrays["view_names"].tolist()]
     if "FULL" not in view_names:
@@ -108,6 +112,7 @@ def analyze_run(run_dir: Path, *, adaptive_prefix: str = "router", label: str | 
         "adaptive_model": adaptive_model,
         "fixed_model": fixed_model,
         "full_model": full_model,
+        "provenance": provenance,
         "global": {
             "test_rmse_full": float(rows[full_model]["test_rmse"]),
             "test_rmse_adaptive": float(rows[adaptive_model]["test_rmse"]),
@@ -131,6 +136,8 @@ def write_summary(path: Path, summary: dict[str, object]) -> None:
         "",
         f"- run_dir: `{summary['run_dir']}`",
         f"- adaptive model: `{summary['adaptive_model']}`",
+        f"- fixed comparator mode: `{summary['provenance']['fixed_mode']}`",
+        f"- quality feature mode: `{summary['provenance']['quality_mode']}`",
         f"- adaptive minus FULL test RMSE: `{summary['global']['adaptive_minus_full_test_rmse']:.4f}`",
         f"- adaptive minus fixed test RMSE: `{summary['global']['adaptive_minus_fixed_test_rmse']:.4f}`",
         "",

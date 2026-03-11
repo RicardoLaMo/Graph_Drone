@@ -57,7 +57,104 @@ def _extract_rows(payload: dict[str, object]) -> tuple[dict[str, dict[str, objec
     return {row["model"]: row for row in payload[rows_key]}, rows_key
 
 
-def _load_run_arrays(run_dir: Path, *, adaptive_prefix: str, label: str | None = None) -> tuple[dict[str, object], dict[str, dict[str, object]], dict[str, np.ndarray], str]:
+def _fixed_weight_mix(preds: np.ndarray, mean_weights: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    weights = np.asarray(mean_weights, dtype=np.float32).reshape(-1)
+    clipped = np.clip(weights, 0.0, None)
+    total = float(clipped.sum())
+    if total <= 0.0:
+        raise ValueError("Expected positive fixed-weight mass")
+    normalized = (clipped / total).astype(np.float32)
+    tiled = np.broadcast_to(normalized[None, :], preds.shape).copy().astype(np.float32)
+    pred = (tiled * preds).sum(axis=1)
+    return pred.astype(np.float32), tiled
+
+
+def _score_regression(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
+    y_true = np.asarray(y_true, dtype=np.float32)
+    y_pred = np.asarray(y_pred, dtype=np.float32)
+    diff = y_true - y_pred
+    mse = float(np.mean(diff**2)) if diff.size else 0.0
+    mae = float(np.mean(np.abs(diff))) if diff.size else 0.0
+    denom = float(np.sum((y_true - y_true.mean()) ** 2)) if y_true.size else 0.0
+    r2 = 0.0 if denom <= 0.0 else float(1.0 - np.sum(diff**2) / denom)
+    return {
+        "rmse": float(np.sqrt(mse)),
+        "mae": mae,
+        "r2": r2,
+    }
+
+
+def _maybe_derive_quality(arrays: dict[str, np.ndarray]) -> str:
+    if "quality_val" in arrays and "quality_test" in arrays:
+        return "explicit"
+    if not {"sigma2_val", "sigma2_test", "mean_j_val", "mean_j_test"}.issubset(arrays):
+        raise KeyError("Missing both explicit quality tensors and sigma2/mean_J fallback arrays")
+    arrays["quality_val"] = np.concatenate(
+        [
+            arrays["sigma2_val"].astype(np.float32),
+            arrays["mean_j_val"].astype(np.float32).reshape(-1, 1),
+        ],
+        axis=1,
+    ).astype(np.float32)
+    arrays["quality_test"] = np.concatenate(
+        [
+            arrays["sigma2_test"].astype(np.float32),
+            arrays["mean_j_test"].astype(np.float32).reshape(-1, 1),
+        ],
+        axis=1,
+    ).astype(np.float32)
+    return "derived_sigma2_plus_mean_j"
+
+
+def _maybe_derive_fixed(
+    *,
+    rows: dict[str, dict[str, object]],
+    arrays: dict[str, np.ndarray],
+    adaptive_prefix: str,
+    run_label: str,
+) -> str:
+    fixed_pred_key = f"{adaptive_prefix}_fixed_pred_test"
+    fixed_weight_key = f"{adaptive_prefix}_fixed_weights_test"
+    if fixed_pred_key in arrays and fixed_weight_key in arrays:
+        return "explicit"
+
+    pred_val = arrays["pred_val"].astype(np.float32)
+    pred_test = arrays["pred_test"].astype(np.float32)
+    y_val = arrays["y_val"].astype(np.float32)
+    y_test = arrays["y_test"].astype(np.float32)
+    val_weights = arrays[f"{adaptive_prefix}_weights_val"].astype(np.float32)
+    mean_weights = val_weights.mean(axis=0)
+
+    fixed_pred_val, fixed_weights_val = _fixed_weight_mix(pred_val, mean_weights)
+    fixed_pred_test, fixed_weights_test = _fixed_weight_mix(pred_test, mean_weights)
+    arrays[f"{adaptive_prefix}_fixed_pred_val"] = fixed_pred_val
+    arrays[f"{adaptive_prefix}_fixed_weights_val"] = fixed_weights_val
+    arrays[f"{adaptive_prefix}_fixed_pred_test"] = fixed_pred_test
+    arrays[f"{adaptive_prefix}_fixed_weights_test"] = fixed_weights_test
+
+    fixed_model = f"{run_label}_{adaptive_prefix}_fixed"
+    if fixed_model not in rows:
+        val_metrics = _score_regression(y_val, fixed_pred_val)
+        test_metrics = _score_regression(y_test, fixed_pred_test)
+        rows[fixed_model] = {
+            "model": fixed_model,
+            "val_rmse": val_metrics["rmse"],
+            "test_rmse": test_metrics["rmse"],
+            "val_mae": val_metrics["mae"],
+            "test_mae": test_metrics["mae"],
+            "val_r2": val_metrics["r2"],
+            "test_r2": test_metrics["r2"],
+            "notes": "derived fixed hedge from mean validation router weights",
+        }
+    return "derived_from_val_mean_weights"
+
+
+def _load_run_arrays(
+    run_dir: Path,
+    *,
+    adaptive_prefix: str,
+    label: str | None = None,
+) -> tuple[dict[str, object], dict[str, dict[str, object]], dict[str, np.ndarray], str, dict[str, str]]:
     result_candidates = [run_dir / "graphdrone_results.json", run_dir / "p0_results.json"]
     result_path = next((path for path in result_candidates if path.exists()), None)
     if result_path is None:
@@ -73,9 +170,21 @@ def _load_run_arrays(run_dir: Path, *, adaptive_prefix: str, label: str | None =
 
     payload = json.loads(result_path.read_text())
     rows, _ = _extract_rows(payload)
-    arrays = np.load(artifact_path)
+    arrays = np.load(artifact_path, allow_pickle=True)
     run_label = label or ("P0" if result_path.name == "p0_results.json" else "GraphDrone")
-    return payload, rows, {name: arrays[name] for name in arrays.files}, run_label
+    array_dict = {name: arrays[name] for name in arrays.files}
+    fixed_mode = _maybe_derive_fixed(
+        rows=rows,
+        arrays=array_dict,
+        adaptive_prefix=adaptive_prefix,
+        run_label=run_label,
+    )
+    quality_mode = _maybe_derive_quality(array_dict)
+    provenance = {
+        "fixed_mode": fixed_mode,
+        "quality_mode": quality_mode,
+    }
+    return payload, rows, array_dict, run_label, provenance
 
 
 def _safe_mean(x: np.ndarray) -> float:
@@ -111,7 +220,11 @@ def _bucket_metric(values: np.ndarray, metric: np.ndarray, mask: np.ndarray) -> 
 
 
 def analyze_run(run_dir: Path, *, adaptive_prefix: str = "router", label: str | None = None) -> dict[str, object]:
-    _, rows, arrays, run_label = _load_run_arrays(run_dir, adaptive_prefix=adaptive_prefix, label=label)
+    _, rows, arrays, run_label, provenance = _load_run_arrays(
+        run_dir,
+        adaptive_prefix=adaptive_prefix,
+        label=label,
+    )
 
     view_names = [str(v) for v in arrays["view_names"].tolist()]
     if "FULL" not in view_names:
@@ -165,6 +278,7 @@ def analyze_run(run_dir: Path, *, adaptive_prefix: str = "router", label: str | 
         "adaptive_model": adaptive_model,
         "fixed_model": fixed_model,
         "full_model": full_model,
+        "provenance": provenance,
         "n_rows": int(len(y_test)),
         "view_names": view_names,
         "global": {
@@ -247,6 +361,8 @@ def write_summary(path: Path, summary: dict[str, object]) -> None:
         f"- run_dir: `{summary['run_dir']}`",
         f"- adaptive model: `{summary['adaptive_model']}`",
         f"- fixed model: `{summary['fixed_model']}`",
+        f"- fixed comparator mode: `{summary['provenance']['fixed_mode']}`",
+        f"- quality feature mode: `{summary['provenance']['quality_mode']}`",
         f"- FULL test RMSE: `{global_stats['test_rmse_full']:.4f}`",
         f"- adaptive test RMSE: `{global_stats['test_rmse_adaptive']:.4f}`",
         f"- fixed test RMSE: `{global_stats['test_rmse_fixed']:.4f}`",

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
 
 from experiments.openml_regression_benchmark.scripts.analyze_router_full_regret import (
     analyze_run as analyze_full_regret_run,
+    _load_run_arrays,
 )
 from experiments.openml_regression_benchmark.scripts.analyze_router_mechanism import analyze_run
 from experiments.openml_regression_benchmark.scripts.analyze_view_home_quality import (
@@ -30,6 +32,9 @@ from experiments.openml_regression_benchmark.scripts.summarize_signal_noise_suit
 )
 from experiments.openml_regression_benchmark.scripts.summarize_view_home_suite import (
     summarize as summarize_view_home_suite,
+)
+from experiments.openml_regression_benchmark.scripts.build_registered_signal_noise_portfolio import (
+    build_portfolio,
 )
 
 
@@ -109,6 +114,15 @@ def test_analyze_full_regret_separates_false_diversion_and_missed_opportunity(tm
     np.savez_compressed(
         artifacts / "graphdrone_predictions.npz",
         view_names=np.array(["FULL", "GEO"]),
+        quality_val=np.array(
+            [
+                [0.1, 0.2, 0.3, 0.4],
+                [0.2, 0.1, 0.3, 0.4],
+                [0.4, 0.1, 0.3, 0.5],
+                [0.3, 0.1, 0.2, 0.6],
+            ],
+            dtype=np.float32,
+        ),
         y_test=np.zeros(4, dtype=np.float32),
         pred_test=np.array(
             [
@@ -205,6 +219,8 @@ def test_analyze_view_home_quality_reports_per_view_capture(tmp_path) -> None:
     np.savez_compressed(
         artifacts / "graphdrone_predictions.npz",
         view_names=np.array(["FULL", "GEO"]),
+        quality_val=np.array([[0.1, 0.2], [0.2, 0.1], [0.3, 0.2], [0.4, 0.1]], dtype=np.float32),
+        quality_test=np.array([[0.1, 0.2], [0.2, 0.1], [0.3, 0.2], [0.4, 0.1]], dtype=np.float32),
         y_test=np.zeros(4, dtype=np.float32),
         pred_test=np.array(
             [
@@ -300,18 +316,36 @@ def test_analyze_two_expert_competition_reports_best_candidate(tmp_path) -> None
             ],
             dtype=np.float32,
         ),
-        pred_test=np.array(
-            [
-                [0.0, 0.25, 0.2],
-                [0.1, 0.15, 0.3],
-                [0.8, 0.9, 0.2],
-                [0.9, 0.85, 0.25],
-            ],
-            dtype=np.float32,
-        ),
-        quality_val=np.array([[0.1] * 11, [0.2] * 11, [0.3] * 11, [0.4] * 11], dtype=np.float32),
-        quality_test=np.array([[0.1] * 11, [0.2] * 11, [0.3] * 11, [0.4] * 11], dtype=np.float32),
-    )
+            pred_test=np.array(
+                [
+                    [0.0, 0.25, 0.2],
+                    [0.1, 0.15, 0.3],
+                    [0.8, 0.9, 0.2],
+                    [0.9, 0.85, 0.25],
+                ],
+                dtype=np.float32,
+            ),
+            router_weights_val=np.array(
+                [
+                    [0.8, 0.15, 0.05],
+                    [0.8, 0.15, 0.05],
+                    [0.7, 0.25, 0.05],
+                    [0.75, 0.20, 0.05],
+                ],
+                dtype=np.float32,
+            ),
+            router_weights_test=np.array(
+                [
+                    [0.8, 0.15, 0.05],
+                    [0.8, 0.15, 0.05],
+                    [0.7, 0.25, 0.05],
+                    [0.75, 0.20, 0.05],
+                ],
+                dtype=np.float32,
+            ),
+            quality_val=np.array([[0.1] * 11, [0.2] * 11, [0.3] * 11, [0.4] * 11], dtype=np.float32),
+            quality_test=np.array([[0.1] * 11, [0.2] * 11, [0.3] * 11, [0.4] * 11], dtype=np.float32),
+        )
 
     summary = analyze_two_expert_run(run_dir, adaptive_prefix="router", label="GraphDrone", seed=7)
     assert summary["best_candidate_view"] in {"GEO", "DOMAIN"}
@@ -423,3 +457,126 @@ def test_summarize_signal_noise_suite_aggregates_classifications(tmp_path) -> No
     assert summary["n_runs"] == 2
     assert summary["classification_counts"]["useful_signal_obscured_by_competition"] == 1
     assert summary["best_view_counts"]["LOWRANK"] == 1
+
+
+def test_load_run_arrays_derives_fixed_and_quality_when_missing(tmp_path) -> None:
+    run_dir = tmp_path / "airfoil_self_noise__r0f0"
+    artifacts = run_dir / "artifacts"
+    artifacts.mkdir(parents=True)
+
+    payload = {
+        "rows": [
+            {"model": "GraphDrone_FULL", "test_rmse": 0.40, "val_rmse": 0.41},
+            {"model": "GraphDrone_router", "test_rmse": 0.39, "val_rmse": 0.40},
+        ]
+    }
+    (run_dir / "graphdrone_results.json").write_text(json.dumps(payload) + "\n")
+
+    np.savez_compressed(
+        artifacts / "graphdrone_predictions.npz",
+        view_names=np.array(["FULL", "GEO"]),
+        y_val=np.array([0.0, 1.0], dtype=np.float32),
+        y_test=np.array([0.0, 1.0], dtype=np.float32),
+        pred_val=np.array([[0.1, 0.2], [0.8, 0.7]], dtype=np.float32),
+        pred_test=np.array([[0.05, 0.25], [0.85, 0.65]], dtype=np.float32),
+        router_pred_test=np.array([0.08, 0.82], dtype=np.float32),
+        router_weights_val=np.array([[0.9, 0.1], [0.7, 0.3]], dtype=np.float32),
+        router_weights_test=np.array([[0.8, 0.2], [0.75, 0.25]], dtype=np.float32),
+        sigma2_val=np.array([[0.1, 0.2], [0.3, 0.4]], dtype=np.float32),
+        sigma2_test=np.array([[0.2, 0.1], [0.4, 0.3]], dtype=np.float32),
+        mean_j_val=np.array([0.5, 0.6], dtype=np.float32),
+        mean_j_test=np.array([0.55, 0.65], dtype=np.float32),
+    )
+
+    _, rows, arrays, _, provenance = _load_run_arrays(run_dir, adaptive_prefix="router", label="GraphDrone")
+    assert provenance["fixed_mode"] == "derived_from_val_mean_weights"
+    assert provenance["quality_mode"] == "derived_sigma2_plus_mean_j"
+    assert "GraphDrone_router_fixed" in rows
+    assert arrays["router_fixed_pred_test"].shape == (2,)
+    assert arrays["quality_test"].shape == (2, 3)
+
+
+def test_build_portfolio_aggregates_dataset_and_stability_payloads(tmp_path) -> None:
+    def make_run(run_dir: Path, *, full_rmse: float, router_rmse: float, best_view: str, gain_vs_full: float) -> None:
+        artifacts = run_dir / "artifacts"
+        artifacts.mkdir(parents=True)
+        payload = {
+            "rows": [
+                {"model": "GraphDrone_FULL", "test_rmse": full_rmse, "val_rmse": full_rmse + 0.01},
+                {"model": "GraphDrone_router", "test_rmse": router_rmse, "val_rmse": router_rmse + 0.01},
+            ]
+        }
+        (run_dir / "graphdrone_results.json").write_text(json.dumps(payload) + "\n")
+        pred_val = np.array(
+            [
+                [0.1, 0.2, 0.3],
+                [0.8, 0.7, 0.9],
+                [0.2, 0.1, 0.4],
+                [0.9, 0.8, 0.7],
+            ],
+            dtype=np.float32,
+        )
+        pred_test = pred_val.copy()
+        weights_val = np.array(
+            [
+                [0.85, 0.10, 0.05],
+                [0.75, 0.20, 0.05],
+                [0.80, 0.15, 0.05],
+                [0.70, 0.25, 0.05],
+            ],
+            dtype=np.float32,
+        )
+        if best_view == "LOWRANK":
+            weights_val[:, 1:] = np.array([[0.05, 0.10], [0.05, 0.20], [0.05, 0.15], [0.05, 0.25]], dtype=np.float32)
+        np.savez_compressed(
+            artifacts / "graphdrone_predictions.npz",
+            view_names=np.array(["FULL", "GEO", "LOWRANK"]),
+            y_val=np.array([0.0, 1.0, 0.0, 1.0], dtype=np.float32),
+            y_test=np.array([0.0, 1.0, 0.0, 1.0], dtype=np.float32),
+            pred_val=pred_val,
+            pred_test=pred_test,
+            router_pred_test=np.array([0.15, 0.8, 0.12, 0.82], dtype=np.float32),
+            router_pred_val=np.array([0.16, 0.81, 0.13, 0.83], dtype=np.float32),
+            router_weights_val=weights_val,
+            router_weights_test=weights_val,
+            sigma2_val=np.array([[0.1, 0.2, 0.3]] * 4, dtype=np.float32),
+            sigma2_test=np.array([[0.1, 0.2, 0.3]] * 4, dtype=np.float32),
+            mean_j_val=np.array([0.5, 0.5, 0.5, 0.5], dtype=np.float32),
+            mean_j_test=np.array([0.5, 0.5, 0.5, 0.5], dtype=np.float32),
+        )
+
+    ds1_r0 = tmp_path / "california_housing_openml__r0f0"
+    ds1_r1 = tmp_path / "california_housing_openml__r0f1"
+    make_run(ds1_r0, full_rmse=0.40, router_rmse=0.39, best_view="GEO", gain_vs_full=0.01)
+    make_run(ds1_r1, full_rmse=0.41, router_rmse=0.40, best_view="GEO", gain_vs_full=0.01)
+
+    ds2_r0 = tmp_path / "diamonds__r0f0"
+    ds2_r1 = tmp_path / "diamonds__r0f1"
+    make_run(ds2_r0, full_rmse=0.30, router_rmse=0.32, best_view="LOWRANK", gain_vs_full=-0.01)
+    make_run(ds2_r1, full_rmse=0.31, router_rmse=0.33, best_view="LOWRANK", gain_vs_full=-0.01)
+
+    stability_root = tmp_path / "houses_sweep"
+    for seed in (41, 42):
+        make_run(stability_root / f"seed{seed}" / "houses__r0f0", full_rmse=0.20, router_rmse=0.199, best_view="GEO", gain_vs_full=0.001)
+
+    catalog = {
+        "portfolio_id": "unit-test-portfolio",
+        "datasets": [
+            {
+                "key": "california_housing_openml",
+                "source_runs": [str(ds1_r0), str(ds1_r1)],
+            },
+            {
+                "key": "houses",
+                "source_runs": [str(ds2_r0), str(ds2_r1)],
+                "stability_root": str(stability_root),
+            },
+        ],
+    }
+
+    portfolio = build_portfolio(catalog, adaptive_prefix="router")
+    assert portfolio["n_datasets"] == 2
+    assert sum(portfolio["portfolio_rollup"]["best_view_counts"].values()) == 2
+    houses = next(item for item in portfolio["dataset_summaries"] if item["dataset"] == "houses")
+    assert "stability_probe" in houses
+    assert houses["provenance"]["fixed_modes"]["derived_from_val_mean_weights"] == 2

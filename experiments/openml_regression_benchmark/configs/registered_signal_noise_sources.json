@@ -1,0 +1,79 @@
+{
+  "portfolio_id": "graphdrone_registered_signal_noise_2026_03_11",
+  "adaptive_prefix": "router",
+  "datasets": [
+    {
+      "key": "california_housing_openml",
+      "source_runs": [
+        "/home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-phase2-sparse-defer/experiments/openml_regression_benchmark/reports_phase2_sparse_defer_full/california_housing_openml__r0f0",
+        "/home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-phase2-sparse-defer/experiments/openml_regression_benchmark/reports_phase2_sparse_defer_full/california_housing_openml__r0f1",
+        "/home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-phase2-sparse-defer/experiments/openml_regression_benchmark/reports_phase2_sparse_defer_full/california_housing_openml__r0f2"
+      ]
+    },
+    {
+      "key": "houses",
+      "source_runs": [
+        "/home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-phase2-sparse-defer/experiments/openml_regression_benchmark/reports_phase2_sparse_defer_full/houses__r0f0",
+        "/home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-phase2-sparse-defer/experiments/openml_regression_benchmark/reports_phase2_sparse_defer_full/houses__r0f1",
+        "/home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-phase2-sparse-defer/experiments/openml_regression_benchmark/reports_phase2_sparse_defer_full/houses__r0f2"
+      ],
+      "stability_root": "/home/wliu23/projects/Graph_Drone/.worktrees/phase0-router-mechanism-proof/experiments/openml_regression_benchmark/reports_phase0_houses_seed_sweep"
+    },
+    {
+      "key": "miami_housing",
+      "source_runs": [
+        "/home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-phase2-sparse-defer/experiments/openml_regression_benchmark/reports_phase2_sparse_defer_full/miami_housing__r0f0",
+        "/home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-phase2-sparse-defer/experiments/openml_regression_benchmark/reports_phase2_sparse_defer_full/miami_housing__r0f1",
+        "/home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-phase2-sparse-defer/experiments/openml_regression_benchmark/reports_phase2_sparse_defer_full/miami_housing__r0f2"
+      ]
+    },
+    {
+      "key": "diamonds",
+      "source_runs": [
+        "/home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-openml-regression/experiments/openml_regression_benchmark/reports_by_dataset/diamonds/diamonds__r0f0",
+        "/home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-openml-regression/experiments/openml_regression_benchmark/reports_by_dataset/diamonds/diamonds__r0f1",
+        "/home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-openml-regression/experiments/openml_regression_benchmark/reports_by_dataset/diamonds/diamonds__r0f2"
+      ]
+    },
+    {
+      "key": "healthcare_insurance_expenses",
+      "source_runs": [
+        "/home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-openml-regression/experiments/openml_regression_benchmark/reports_by_dataset/healthcare_insurance_expenses/healthcare_insurance_expenses__r0f0",
+        "/home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-openml-regression/experiments/openml_regression_benchmark/reports_by_dataset/healthcare_insurance_expenses/healthcare_insurance_expenses__r0f1",
+        "/home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-openml-regression/experiments/openml_regression_benchmark/reports_by_dataset/healthcare_insurance_expenses/healthcare_insurance_expenses__r0f2"
+      ]
+    },
+    {
+      "key": "concrete_compressive_strength",
+      "source_runs": [
+        "/home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-openml-regression/experiments/openml_regression_benchmark/reports_by_dataset/concrete_compressive_strength/concrete_compressive_strength__r0f0",
+        "/home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-openml-regression/experiments/openml_regression_benchmark/reports_by_dataset/concrete_compressive_strength/concrete_compressive_strength__r0f1",
+        "/home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-openml-regression/experiments/openml_regression_benchmark/reports_by_dataset/concrete_compressive_strength/concrete_compressive_strength__r0f2"
+      ]
+    },
+    {
+      "key": "airfoil_self_noise",
+      "source_runs": [
+        "/home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-openml-regression/experiments/openml_regression_benchmark/reports_by_dataset/airfoil_self_noise/airfoil_self_noise__r0f0",
+        "/home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-openml-regression/experiments/openml_regression_benchmark/reports_by_dataset/airfoil_self_noise/airfoil_self_noise__r0f1",
+        "/home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-openml-regression/experiments/openml_regression_benchmark/reports_by_dataset/airfoil_self_noise/airfoil_self_noise__r0f2"
+      ]
+    },
+    {
+      "key": "wine_quality",
+      "source_runs": [
+        "/home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-openml-regression/experiments/openml_regression_benchmark/reports_by_dataset/wine_quality/wine_quality__r0f0",
+        "/home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-openml-regression/experiments/openml_regression_benchmark/reports_by_dataset/wine_quality/wine_quality__r0f1",
+        "/home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-openml-regression/experiments/openml_regression_benchmark/reports_by_dataset/wine_quality/wine_quality__r0f2"
+      ]
+    },
+    {
+      "key": "used_fiat_500",
+      "source_runs": [
+        "/home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-openml-regression/experiments/openml_regression_benchmark/reports_by_dataset/used_fiat_500/used_fiat_500__r0f0",
+        "/home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-openml-regression/experiments/openml_regression_benchmark/reports_by_dataset/used_fiat_500/used_fiat_500__r0f1",
+        "/home/wliu23/projects/Graph_Drone/.worktrees/graphdrone-openml-regression/experiments/openml_regression_benchmark/reports_by_dataset/used_fiat_500/used_fiat_500__r0f2"
+      ]
+    }
+  ]
+}

@@ -30,7 +30,11 @@ def analyze_run(
     label: str | None = None,
     seed: int = 42,
 ) -> dict[str, object]:
-    payload, rows, arrays, run_label = _load_run_arrays(run_dir, adaptive_prefix=adaptive_prefix, label=label)
+    payload, rows, arrays, run_label, provenance = _load_run_arrays(
+        run_dir,
+        adaptive_prefix=adaptive_prefix,
+        label=label,
+    )
 
     view_names = [str(v) for v in arrays["view_names"].tolist()]
     if "FULL" not in view_names:
@@ -103,6 +107,7 @@ def analyze_run(
         "adaptive_model": adaptive_model,
         "fixed_model": fixed_model,
         "full_model": full_model,
+        "provenance": provenance,
         "global_reference": {
             "full_expert_test_rmse": full_expert_rmse,
             "full_router_test_rmse": full_router_rmse,
@@ -125,6 +130,8 @@ def write_summary(path: Path, summary: dict[str, object]) -> None:
         "",
         f"- run_dir: `{summary['run_dir']}`",
         f"- adaptive model: `{summary['adaptive_model']}`",
+        f"- fixed comparator mode: `{summary['provenance']['fixed_mode']}`",
+        f"- quality feature mode: `{summary['provenance']['quality_mode']}`",
         f"- full expert test RMSE: `{summary['global_reference']['full_expert_test_rmse']:.4f}`",
         f"- full router test RMSE: `{summary['global_reference']['full_router_test_rmse']:.4f}`",
         f"- full fixed test RMSE: `{summary['global_reference']['full_fixed_test_rmse']:.4f}`",

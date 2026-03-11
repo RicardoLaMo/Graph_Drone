@@ -15,12 +15,9 @@ def _mean_std(values: list[float]) -> dict[str, float]:
     }
 
 
-def summarize(root: Path, *, adaptive_prefix: str = "router") -> dict[str, object]:
-    paths = sorted(root.glob(f"**/artifacts/{adaptive_prefix}_signal_noise_tradeoff.json"))
-    if not paths:
-        raise FileNotFoundError(f"No {adaptive_prefix}_signal_noise_tradeoff.json files found under {root}")
-
-    payloads = [json.loads(path.read_text()) for path in paths]
+def summarize_payloads(payloads: list[dict[str, object]], *, root_label: str, adaptive_prefix: str) -> dict[str, object]:
+    if not payloads:
+        raise ValueError("Expected at least one payload")
     classifications: dict[str, int] = {}
     best_views: dict[str, int] = {}
     for payload in payloads:
@@ -28,7 +25,7 @@ def summarize(root: Path, *, adaptive_prefix: str = "router") -> dict[str, objec
         best_views[payload["best_view"]] = best_views.get(payload["best_view"], 0) + 1
 
     return {
-        "root": str(root),
+        "root": root_label,
         "adaptive_prefix": adaptive_prefix,
         "n_runs": len(payloads),
         "competition_noise_gain_vs_full_router": _mean_std(
@@ -49,6 +46,15 @@ def summarize(root: Path, *, adaptive_prefix: str = "router") -> dict[str, objec
         "classification_counts": classifications,
         "best_view_counts": best_views,
     }
+
+
+def summarize(root: Path, *, adaptive_prefix: str = "router") -> dict[str, object]:
+    paths = sorted(root.glob(f"**/artifacts/{adaptive_prefix}_signal_noise_tradeoff.json"))
+    if not paths:
+        raise FileNotFoundError(f"No {adaptive_prefix}_signal_noise_tradeoff.json files found under {root}")
+
+    payloads = [json.loads(path.read_text()) for path in paths]
+    return summarize_payloads(payloads, root_label=str(root), adaptive_prefix=adaptive_prefix)
 
 
 def write_markdown(path: Path, summary: dict[str, object]) -> None:

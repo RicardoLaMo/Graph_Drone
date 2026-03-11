@@ -21,12 +21,13 @@ def _classify(best_pair_gain_vs_full: float, competition_noise_gain: float) -> s
     return "weak_competition_effect"
 
 
-def analyze_run(run_dir: Path, *, adaptive_prefix: str = "router") -> dict[str, object]:
-    artifacts = run_dir / "artifacts"
-    full_regret = _load_json(artifacts / f"{adaptive_prefix}_full_regret_summary.json")
-    view_home = _load_json(artifacts / f"{adaptive_prefix}_view_home_summary.json")
-    two_expert = _load_json(artifacts / f"{adaptive_prefix}_two_expert_summary.json")
-
+def summarize_components(
+    *,
+    run_dir: Path,
+    full_regret: dict[str, object],
+    view_home: dict[str, object],
+    two_expert: dict[str, object],
+) -> dict[str, object]:
     best_view = str(two_expert["best_candidate_view"])
     best_pair = two_expert["best_two_expert"]
     best_home = view_home["per_view_home_subset"][best_view]
@@ -69,6 +70,19 @@ def analyze_run(run_dir: Path, *, adaptive_prefix: str = "router") -> dict[str, 
             "fixed_capture_ratio_total": float(full_regret["non_full_oracle_case"]["fixed_capture_ratio_total"]),
         },
     }
+
+
+def analyze_run(run_dir: Path, *, adaptive_prefix: str = "router") -> dict[str, object]:
+    artifacts = run_dir / "artifacts"
+    full_regret = _load_json(artifacts / f"{adaptive_prefix}_full_regret_summary.json")
+    view_home = _load_json(artifacts / f"{adaptive_prefix}_view_home_summary.json")
+    two_expert = _load_json(artifacts / f"{adaptive_prefix}_two_expert_summary.json")
+    return summarize_components(
+        run_dir=run_dir,
+        full_regret=full_regret,
+        view_home=view_home,
+        two_expert=two_expert,
+    )
 
 
 def write_markdown(path: Path, summary: dict[str, object]) -> None:
