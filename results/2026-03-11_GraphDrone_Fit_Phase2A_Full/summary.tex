@@ -1,0 +1,41 @@
+\section{GraphDrone Fit Phase II-A Full Portfolio}
+
+\paragraph{Benchmark contract.}
+Phase II-A evaluates the package-level \texttt{GraphDrone.fit()} architecture on the registered OpenML regression portfolio with public benchmark rows restricted to
+\texttt{GraphDrone}, \texttt{TabPFN}, \texttt{TabR}, and \texttt{TabM}.
+
+\paragraph{Portfolio result.}
+On the 9-dataset, 3-fold benchmark, GraphDrone wins 4 datasets and TabPFN wins 5:
+\[
+\texttt{GraphDrone}: 4/9,
+\qquad
+\texttt{TabPFN}: 5/9.
+\]
+GraphDrone remains stronger than both TabR and TabM on all nine datasets.
+
+\paragraph{GraphDrone wins.}
+GraphDrone is best on:
+\begin{itemize}
+\item California Housing OpenML
+\item Houses
+\item Healthcare Insurance Expenses
+\item Concrete Compressive Strength
+\end{itemize}
+
+\paragraph{Internal geometry signal.}
+The best geometry expert beats the anchor in
+\[
+14 / 27
+\]
+folds overall, including all folds on:
+\begin{itemize}
+\item Concrete Compressive Strength
+\item Healthcare Insurance Expenses
+\item Miami Housing
+\end{itemize}
+This confirms that geometry specialists are real contributors, but not yet harvested consistently enough to dominate the public GraphDrone result.
+
+\paragraph{Conclusion.}
+Phase II-A is a successful architecture checkpoint, not an endpoint.
+The remaining gap is an integration problem:
+specialist quality exists, but the routing/integration layer still leaves part of that gain on the table.

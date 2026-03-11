@@ -1,0 +1,14 @@
+{
+  "phase": "phase2a_full_portfolio",
+  "branch": "codex/graphdrone-fit-phase2a-portfolio",
+  "artifact": "GraphDrone Fit Phase II-A Full Portfolio",
+  "closeout_note": "docs/plans/2026-03-11-phase2a-full-portfolio-closeout.md",
+  "latex_summary": "results/2026-03-11_GraphDrone_Fit_Phase2A_Full/summary.tex",
+  "report_root": "experiments/openml_regression_benchmark/reports_phase2a_full_portfolio",
+  "public_models": [
+    "GraphDrone",
+    "TabPFN",
+    "TabR",
+    "TabM"
+  ]
+}
