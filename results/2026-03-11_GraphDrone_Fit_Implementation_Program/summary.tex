@@ -1,0 +1,41 @@
+\section{GraphDrone.fit() Implementation Program}
+
+The implementation target is a portfolio-general GraphDrone object with four integrated layers:
+\begin{enumerate}
+\item a portfolio-level expert factory,
+\item a per-row, per-view token builder,
+\item a contextual set-router over variable expert sets,
+\item a sparse defer-to-FULL integrator.
+\end{enumerate}
+
+This program is explicitly not a continuation of California-only or GEO-only tuning. The design is anchored in the registered signal-vs-noise portfolio, where specialist signal exists across multiple datasets but dense routing adds measurable competition noise.
+
+For row $i$ and expert $v$, the target token is
+\[
+t_{i,v} = [p_{i,v}, q_{i,v}, s_{i,v}, d_v],
+\]
+where $p_{i,v}$ contains prediction-side information, $q_{i,v}$ contains prior-quality and competition-noise fields, $s_{i,v}$ contains support summaries, and $d_v$ is a learned or embedded descriptor for the expert family.
+
+The contextual router produces sparse specialist scores $\alpha_{i,v}$ and a defer scalar $\delta_i$:
+\[
+\alpha_{i,v} = \mathrm{sparsemax}(W_\alpha h_i), \quad
+\delta_i = \sigma(W_\delta h_i),
+\]
+with final prediction
+\[
+\hat y_i = (1 - \delta_i)\hat y_{i,\mathrm{FULL}} + \delta_i \sum_v \alpha_{i,v}\hat y_{i,v}.
+\]
+
+The implementation program is phase-gated. Phase I-A creates the package skeleton, portfolio loader, and public API. Phase I-B builds the expert factory. Phase I-C replaces scalar-only routing inputs with token and support-encoder tensors. Phase I-D implements the first lightweight contextual set-router. Phase I-E benchmarks the new object on the registered portfolio.
+
+External review tightened the anti-drift constraints:
+\begin{itemize}
+\item no scalar-only routing surrogate,
+\item no fixed-weight averaging used as a stand-in for contextual routing,
+\item no benchmark scripts owning model internals,
+\item no benchmark-path coupling inside the model package,
+\item no silent collapse to FULL,
+\item no dataset-specific assumptions such as mandatory GEO experts.
+\end{itemize}
+
+\input{tables/implementation_phases.tex}

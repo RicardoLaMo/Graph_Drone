@@ -1,0 +1,15 @@
+\begin{table}[h]
+\centering
+\begin{tabular}{p{0.12\linewidth} p{0.29\linewidth} p{0.22\linewidth} p{0.23\linewidth}}
+\hline
+Phase & Goal & Core Deliverables & Gate \\
+\hline
+I-A & Create the package skeleton, portfolio loader, and public API & \texttt{src/graphdrone\_fit/}, \texttt{portfolio\_loader.py}, \texttt{GraphDrone.fit()}, typed config objects & Model package exists without benchmark logic or benchmark-path coupling \\
+I-B & Build the portfolio expert factory & expert ontology, descriptor validation, registry bridge & Variable expert sets instantiate without router hardcoding \\
+I-C & Replace scalar routing inputs with tokens and support tensors & token schema, support encoder, descriptor embeddings & Every routing decision is traceable to row-level tokens \\
+I-D & Implement the first contextual set-router & sparse router, defer gate, diagnostics & Beats fixed hedge on the registered portfolio without collapsing to dense averaging \\
+I-E & Benchmark and log the new object & portfolio runner, leaderboard integration, milestone artifacts & Full comparison against registered runners and saved diagnostics \\
+\hline
+\end{tabular}
+\caption{Phase-gated implementation program for the portfolio-general GraphDrone.fit() architecture.}
+\end{table}
