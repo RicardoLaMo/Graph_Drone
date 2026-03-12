@@ -161,10 +161,23 @@ def _fit_predictor(
         coef, *_ = np.linalg.lstsq(X_view, y_train, rcond=None)
         return LinearPredictor(coefficients=np.asarray(coef, dtype=np.float32), bias=0.0)
 
-    if model_kind == "tabpfn_regressor":
+    if model_kind in ("foundation_regressor", "tabpfn_regressor"):
         from tabpfn import TabPFNRegressor
 
         model = TabPFNRegressor(
+            n_estimators=int(model_params.get("n_estimators", 1)),
+            random_state=int(model_params.get("random_state", 42)),
+            device=model_params.get("device", "auto"),
+            ignore_pretraining_limits=bool(model_params.get("ignore_pretraining_limits", len(X_view) > 1000)),
+            n_preprocessing_jobs=int(model_params.get("n_preprocessing_jobs", 1)),
+        )
+        model.fit(X_view, y_train)
+        return model
+
+    if model_kind == "foundation_classifier":
+        from tabpfn import TabPFNClassifier
+
+        model = TabPFNClassifier(
             n_estimators=int(model_params.get("n_estimators", 1)),
             random_state=int(model_params.get("random_state", 42)),
             device=model_params.get("device", "auto"),

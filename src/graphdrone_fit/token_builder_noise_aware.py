@@ -12,7 +12,8 @@ class NoiseAwareTokenBuilder(EnhancedTokenBuilder):
         predictions: [B, E]
         support_moments: [B, E, 4] (idx 0 is mean, idx 1 is variance)
         """
-        pred_t = torch.as_tensor(predictions, dtype=torch.float32)
+        device = support_moments.device
+        pred_t = torch.as_tensor(predictions, dtype=torch.float32).to(device)
         mean_neighbors = support_moments[:, :, 0]
         var_neighbors = support_moments[:, :, 1]
         
@@ -45,7 +46,8 @@ class NoiseAwareTokenBuilder(EnhancedTokenBuilder):
         if support_encoding is not None:
             snr_tokens = self.build_snr_tokens(predictions, support_encoding.tensor)
             
-            # Concatenate to the end of the existing tokens
+            # Ensure device parity for concatenation
+            snr_tokens = snr_tokens.to(base_batch.tokens.device)
             new_tokens = torch.cat([base_batch.tokens, snr_tokens], dim=-1)
             
             # Update field names and slices

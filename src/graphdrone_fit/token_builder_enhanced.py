@@ -52,10 +52,14 @@ class EnhancedTokenBuilder:
             support_tensor = torch.zeros((pred_tensor.shape[0], pred_tensor.shape[1], 0), dtype=torch.float32)
             support_names = ()
 
+        # 4. Descriptor Fields
         descriptor_tensor, descriptor_names = _build_descriptor_tensor(descriptors)
         descriptor_tensor = descriptor_tensor.unsqueeze(0).expand(pred_tensor.shape[0], -1, -1)
 
+        # Combine - Ensure device parity
         parts = [prediction_fields, quality_tensor, support_tensor, descriptor_tensor]
+        device = prediction_fields.device
+        parts = [p.to(device) for p in parts]
         tokens = torch.cat(parts, dim=-1)
         
         field_slices = {}
@@ -84,7 +88,7 @@ class EnhancedTokenBuilder:
             field_names=field_names
         )
 
-def compute_real_support_encoding(X_train_views, X_test_views, y_train, k=15):
+def compute_real_support_encoding(X_train_views, X_test_views, y_train, ks=None):
     """
     Computes real kNN moments for each view.
     X_train_views: list of [N_tr, F_v]
@@ -93,9 +97,13 @@ def compute_real_support_encoding(X_train_views, X_test_views, y_train, k=15):
     """
     n_test = X_test_views[0].shape[0]
     n_experts = len(X_train_views)
+    if ks is None:
+        ks = [15] * n_experts
+        
     all_moments = []
 
     for v_idx in range(n_experts):
+        k = ks[v_idx]
         knn = NearestNeighbors(n_neighbors=k, n_jobs=-1)
         knn.fit(X_train_views[v_idx])
         indices = knn.kneighbors(X_test_views[v_idx], return_distance=False)
