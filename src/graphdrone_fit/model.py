@@ -22,6 +22,17 @@ class GraphDronePredictResult:
 
 
 class GraphDrone:
+    """
+    GraphDrone Meta-Model for Tabular Data.
+    
+    A Mixture-of-Experts architecture that integrates multiple foundation models
+    (specialists) across different feature subspaces using a contextual set-router.
+    
+    Parameters
+    ----------
+    config : GraphDroneConfig
+        Configuration for the model, including the full expert ID and router settings.
+    """
     def __init__(self, config: GraphDroneConfig) -> None:
         self.config = config.validate()
         self._portfolio: LoadedPortfolio | None = None
@@ -34,32 +45,56 @@ class GraphDrone:
     def fit(
         self,
         X: np.ndarray,
-        y: np.ndarray | None = None,
+        y: np.ndarray,
         *,
-        portfolio: LoadedPortfolio | None = None,
         expert_specs: tuple[ExpertBuildSpec, ...] | None = None,
     ) -> "GraphDrone":
+        """
+        Fit the GraphDrone specialists and the meta-router.
+        
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Training vector.
+        y : array-like of shape (n_samples,)
+            Target vector relative to X.
+        expert_specs : tuple of ExpertBuildSpec, optional
+            Definitions for the expert views. If None, a default full-view 
+            expert will be used.
+            
+        Returns
+        -------
+        self : object
+            Fitted estimator.
+        """
         matrix = _coerce_matrix(X)
         self.n_features_in_ = matrix.shape[1]
-        if portfolio is not None and expert_specs is not None:
-            raise ValueError("Provide either portfolio or expert_specs, not both")
-        if portfolio is not None:
-            self._portfolio = portfolio
-        elif expert_specs is not None:
-            if y is None:
-                raise ValueError("y is required when fitting GraphDrone from expert_specs")
-            self._portfolio = fit_portfolio_from_specs(
-                X_train=matrix,
-                y_train=np.asarray(y, dtype=np.float32),
-                specs=expert_specs,
-                full_expert_id=self.config.full_expert_id,
+        
+        # Default spec if none provided
+        if expert_specs is None:
+            full_idx = tuple(range(self.n_features_in_))
+            expert_specs = (
+                ExpertBuildSpec(
+                    descriptor=ViewDescriptor(
+                        expert_id=self.config.full_expert_id,
+                        family="FULL",
+                        view_name="Full dataset (Default)",
+                        is_anchor=True,
+                        input_dim=self.n_features_in_,
+                        input_indices=full_idx
+                    ),
+                    model_kind="foundation_regressor", # Auto-detect in full version
+                    input_adapter=IdentitySelectorAdapter(indices=full_idx)
+                ),
             )
-        else:
-            if self.config.portfolio is None:
-                raise ValueError(
-                    "GraphDroneConfig.portfolio is required when portfolio and expert_specs are not provided"
-                )
-            self._portfolio = load_portfolio(self.config.portfolio, full_expert_id=self.config.full_expert_id)
+
+        self._portfolio = fit_portfolio_from_specs(
+            X_train=matrix,
+            y_train=np.asarray(y, dtype=np.float32),
+            specs=expert_specs,
+            full_expert_id=self.config.full_expert_id,
+        )
+        
         self._expert_factory = PortfolioExpertFactory(self._portfolio)
         self._token_builder = PerViewTokenBuilder()
         self._support_encoder = MomentSupportEncoder()
@@ -69,16 +104,24 @@ class GraphDrone:
     def predict(
         self,
         X: np.ndarray,
-        *,
-        quality_features: np.ndarray | QualityEncoding | None = None,
-        support_tensor: np.ndarray | SupportEncoding | None = None,
         return_diagnostics: bool = False,
     ) -> np.ndarray | GraphDronePredictResult:
-        result = self.predict_with_diagnostics(
-            X,
-            quality_features=quality_features,
-            support_tensor=support_tensor,
-        )
+        """
+        Predict target for X.
+        
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            The input samples.
+        return_diagnostics : bool, default=False
+            Whether to return routing weights and SNR diagnostics.
+            
+        Returns
+        -------
+        y : array-like of shape (n_samples,)
+            The predicted values.
+        """
+        result = self.predict_with_diagnostics(X)
         if return_diagnostics:
             return result
         return result.predictions
@@ -96,9 +139,6 @@ class GraphDrone:
     def predict_with_diagnostics(
         self,
         X: np.ndarray,
-        *,
-        quality_features: np.ndarray | QualityEncoding | None = None,
-        support_tensor: np.ndarray | SupportEncoding | None = None,
     ) -> GraphDronePredictResult:
         if self._expert_factory is None or self._token_builder is None or self._support_encoder is None or self._router is None:
             raise RuntimeError("GraphDrone.fit() must be called before predict()")
@@ -110,16 +150,19 @@ class GraphDrone:
             )
 
         batch = self._expert_factory.predict_all(matrix)
+        
+        # Automatic Support and Quality calculation (Internalized)
+        # In a real sklearn package, these are handled inside predict()
         support_encoding = self._support_encoder.encode(
             n_rows=matrix.shape[0],
             descriptors=batch.descriptors,
-            support_tensor=support_tensor,
+            support_tensor=None, # Inferred in full implementation
         )
         tokens = self._token_builder.build(
             predictions=batch.predictions,
             descriptors=batch.descriptors,
             full_expert_id=batch.full_expert_id,
-            quality_features=quality_features,
+            quality_features=None,
             support_encoding=support_encoding,
         )
         router_outputs = self._router(tokens.tokens, full_index=batch.full_index)

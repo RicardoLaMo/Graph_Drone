@@ -35,6 +35,7 @@ class ViewDescriptor:
     is_anchor: bool = False
     source_name: str = ""
     tags: tuple[str, ...] = ()
+    preferred_k: int = 15
 
     def validate(self) -> "ViewDescriptor":
         if not self.expert_id.strip():
@@ -75,6 +76,7 @@ class ViewDescriptor:
             "is_anchor": self.is_anchor,
             "source_name": self.source_name,
             "tags": list(self.tags),
+            "preferred_k": self.preferred_k,
         }
 
     @classmethod
@@ -90,6 +92,7 @@ class ViewDescriptor:
             is_anchor=bool(payload.get("is_anchor", False)),
             source_name=str(payload.get("source_name", "")),
             tags=tuple(str(v) for v in payload.get("tags", [])),
+            preferred_k=int(payload.get("preferred_k", 15)),
         ).validate()
 
 
