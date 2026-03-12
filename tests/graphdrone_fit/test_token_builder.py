@@ -89,8 +89,22 @@ def test_support_encoder_summarizes_neighbor_tensors() -> None:
         descriptors=_descriptors(),
         support_tensor=support,
     )
-    assert encoding.tensor.shape == (1, 3, 7)
-    assert encoding.feature_names[-1] == "support_count"
+    assert encoding.tensor.shape == (1, 3, 22)
+    assert encoding.feature_names[-5:] == (
+        "support_weighted_anchor_l2",
+        "support_weighted_anchor_cosine",
+        "support_radius_mean",
+        "support_effective_fraction",
+        "support_count",
+    )
+    anchor_slice = encoding.tensor[0, 0]
+    assert float(anchor_slice[6]) == 0.0
+    assert float(anchor_slice[10]) == 0.0
+    assert float(anchor_slice[11]) == 0.0
+    assert np.isclose(float(anchor_slice[12]), 1.0)
+    assert float(anchor_slice[-5]) == 0.0
+    assert np.isclose(float(anchor_slice[-4]), 1.0)
+    assert 0.0 < float(anchor_slice[-2]) <= 1.0
 
 
 def test_token_builder_records_field_names_for_quality_support_and_descriptor() -> None:
@@ -122,7 +136,12 @@ def test_token_builder_records_field_names_for_quality_support_and_descriptor() 
     )
     assert batch.tokens.shape[0] == 1
     assert batch.field_names["quality"][0] == "quality_sigma2_self"
-    assert batch.field_names["support"][-1] == "support_count"
+    assert "quality_sigma2_self_minus_anchor" in batch.field_names["quality"]
+    assert "quality_sigma2_self_minus_row_mean" in batch.field_names["quality"]
+    assert batch.field_names["support"][-1] == "support_count_minus_row_mean"
+    assert "support_anchor_mean_l2" in batch.field_names["support"]
+    assert "support_weighted_anchor_cosine" in batch.field_names["support"]
+    assert "support_weighted_anchor_cosine_minus_row_mean" in batch.field_names["support"]
     assert batch.field_names["descriptor"][0] == "descriptor_is_anchor"
     descriptor_index = batch.field_names["descriptor"].index("descriptor_family_domain_semantic")
     descriptor_slice = batch.field_slices["descriptor"]

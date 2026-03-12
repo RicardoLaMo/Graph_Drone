@@ -156,7 +156,7 @@ def test_token_builder_emits_tensor_fields() -> None:
     assert batch.tokens.shape[0] == 2
     assert batch.tokens.shape[1] == 2
     assert batch.field_slices["prediction"] == (0, 3)
-    assert batch.field_slices["quality"] == (3, 5)
+    assert batch.field_slices["quality"] == (3, 9)
 
 
 def test_graphdrone_fit_accepts_real_expert_specs_without_manifest() -> None:
@@ -302,6 +302,7 @@ def test_graphdrone_predict_exposes_active_specialist_ids_after_router_fit() -> 
     summary = result.diagnostics["router_fit_summary"]
     assert "active_specialist_ids" in summary
     assert isinstance(summary["active_specialist_ids"], list)
+    assert summary["token_encoder_kind"] == "field_aware"
     if summary["active_specialist_ids"]:
         assert summary["active_specialist_ids"] == ["SPECIALIST"]
 
@@ -336,9 +337,20 @@ def test_graphdrone_predict_records_support_summary_fields_from_4d_support_tenso
         "support_mean_0",
         "support_std_0",
         "support_absmax_0",
+        "support_mean_minus_anchor_0",
+        "support_std_minus_anchor_0",
+        "support_anchor_mean_l2",
+        "support_anchor_std_l2",
+        "support_anchor_mean_cosine",
+        "support_weighted_mean_0",
+        "support_weighted_mean_minus_anchor_0",
+        "support_weighted_anchor_l2",
+        "support_weighted_anchor_cosine",
+        "support_radius_mean",
+        "support_effective_fraction",
         "support_count",
     ]
-    assert result.diagnostics["token_field_slices"]["support"] == [3, 7]
+    assert result.diagnostics["token_field_slices"]["support"] == [3, 33]
 
 
 def test_graphdrone_fit_router_records_summary_on_contextual_router() -> None:
@@ -400,6 +412,7 @@ def test_graphdrone_fit_router_records_summary_on_contextual_router() -> None:
 
     assert summary["fit_status"] == "fitted"
     assert result.diagnostics["router_fit_summary"]["fit_status"] == "fitted"
+    assert result.diagnostics["router_fit_summary"]["token_encoder_kind"] == "field_aware"
     assert result.diagnostics["router_kind"] == "contextual_sparse_mlp"
 
 

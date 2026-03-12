@@ -21,6 +21,7 @@ class PortfolioLoadConfig:
 @dataclass(frozen=True)
 class SetRouterConfig:
     kind: Literal["bootstrap_full_only", "contextual_sparse_mlp"] = "bootstrap_full_only"
+    field_aware_tokens: bool = True
     sparse_top_k: int = 1
     hidden_dim: int = 32
     learning_rate: float = 1e-2

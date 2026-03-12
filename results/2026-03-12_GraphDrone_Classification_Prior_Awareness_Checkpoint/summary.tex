@@ -1,0 +1,26 @@
+\section{GraphDrone Classification Prior-Awareness Checkpoint}
+
+\paragraph{Objective.}
+Port the regression-side prior-awareness pipeline into the classification
+\texttt{GraphDrone.fit()} path while keeping the public benchmark surface fixed
+to \texttt{GraphDrone}, \texttt{TabPFN}, and \texttt{TabM}.
+
+\paragraph{Implementation scope.}
+The checkpoint adds anchor-aware support encoding, weighted support summaries,
+contextual token augmentation, and a router-token ingestion ablation with
+\texttt{field\_aware} and \texttt{flat} modes. The changes are isolated to the
+classification \texttt{graphdrone\_fit} package and its benchmark runner/tests.
+
+\paragraph{Validation.}
+Focused classification tests passed (\texttt{22 passed}). Gemini review found no
+concrete blockers. End-to-end smoke runs on \texttt{diabetes} completed with
+both router token encoders:
+\begin{itemize}
+\item \texttt{field\_aware}: accuracy $0.7734$, macro-F1 $0.7398$, ROC-AUC $0.8477$, PR-AUC $0.7489$, log-loss $0.45520$
+\item \texttt{flat}: accuracy $0.7734$, macro-F1 $0.7398$, ROC-AUC $0.8477$, PR-AUC $0.7488$, log-loss $0.45521$
+\end{itemize}
+
+\paragraph{Decision.}
+The port is implementation-valid. No default router decision is made yet. The
+next gate is a full 9-dataset classification portfolio ablation comparing
+\texttt{field\_aware} versus \texttt{flat}.

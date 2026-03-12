@@ -44,6 +44,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-train-samples", type=int, default=0)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--n-preprocessing-jobs", type=int, default=1)
+    parser.add_argument("--router-token-encoder", choices=("field_aware", "flat"), default="field_aware")
     parser.add_argument("--smoke", action="store_true")
     parser.add_argument(
         "--output-root",
@@ -89,7 +90,11 @@ def main() -> None:
             full_expert_id=expert_plan.full_expert_id,
             task_type="classification",
             class_labels=split.class_labels,
-            router=SetRouterConfig(kind="contextual_sparse_mlp", sparse_top_k=2),
+            router=SetRouterConfig(
+                kind="contextual_sparse_mlp",
+                sparse_top_k=2,
+                field_aware_tokens=args.router_token_encoder == "field_aware",
+            ),
         )
     )
     model.fit(split.X_train, split.y_train, expert_specs=expert_plan.specs)
@@ -176,7 +181,7 @@ def main() -> None:
             "test_pr_auc": test_metrics["pr_auc"],
             "val_log_loss": val_metrics["log_loss"],
             "test_log_loss": test_metrics["log_loss"],
-            "notes": "contextual_sparse_mlp over generic internal experts",
+            "notes": f"contextual_sparse_mlp over generic internal experts; token_encoder={args.router_token_encoder}",
         }
     ]
 
@@ -196,6 +201,7 @@ def main() -> None:
         "dataset": split_summary(split),
         "runtime": {
             "requested_device": args.device,
+            "router_token_encoder": args.router_token_encoder,
         },
         "rows": rows,
         "quality_feature_names": list(quality_encodings["val"].feature_names),

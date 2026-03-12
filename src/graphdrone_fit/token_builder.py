@@ -43,6 +43,10 @@ class PerViewTokenBuilder:
 
         The row-wise mean is used as a neutral within-row baseline for Phase I-A tokenization.
         It is not yet a learned family baseline or a final routing objective.
+
+        Support fields are expected to already be anchor-aware summaries produced by
+        `support_encoder.py`. This keeps the token builder focused on assembling
+        semantically named token groups rather than inventing support semantics ad hoc.
         """
         pred_tensor = torch.as_tensor(predictions, dtype=torch.float32)
         if pred_tensor.ndim not in {2, 3}:
@@ -63,13 +67,19 @@ class PerViewTokenBuilder:
             n_rows=pred_tensor.shape[0],
             n_experts=pred_tensor.shape[1],
         )
-        quality_tensor = quality_encoding.tensor
+        quality_tensor, quality_feature_names = _augment_quality_tensor(
+            quality_encoding.tensor,
+            feature_names=quality_encoding.feature_names,
+            full_index=full_index,
+        )
         if support_encoding is None:
             support_tensor = torch.zeros((pred_tensor.shape[0], pred_tensor.shape[1], 0), dtype=torch.float32)
             support_feature_names: tuple[str, ...] = ()
         else:
-            support_tensor = support_encoding.tensor
-            support_feature_names = tuple(support_encoding.feature_names)
+            support_tensor, support_feature_names = _augment_support_tensor(
+                support_encoding.tensor,
+                feature_names=tuple(support_encoding.feature_names),
+            )
         descriptor_tensor, descriptor_feature_names = _build_descriptor_tensor(descriptors)
         descriptor_tensor = descriptor_tensor.unsqueeze(0).expand(pred_tensor.shape[0], -1, -1)
 
@@ -84,7 +94,7 @@ class PerViewTokenBuilder:
             if name == "prediction":
                 field_names[name] = prediction_feature_names
             elif name == "quality":
-                field_names[name] = tuple(quality_encoding.feature_names)
+                field_names[name] = quality_feature_names
             elif name == "support":
                 field_names[name] = support_feature_names
             else:
@@ -240,6 +250,56 @@ def _build_descriptor_tensor(descriptors: tuple[ViewDescriptor, ...]) -> tuple[t
         *(f"descriptor_projection_{kind}" for kind in projection_kinds),
     )
     return torch.as_tensor(np.stack(rows, axis=0), dtype=torch.float32), tuple(feature_names)
+
+
+def _augment_quality_tensor(
+    tensor: torch.Tensor,
+    *,
+    feature_names: tuple[str, ...],
+    full_index: int,
+) -> tuple[torch.Tensor, tuple[str, ...]]:
+    if tensor.shape[-1] == 0:
+        return tensor, feature_names
+    # `full_index` is the anchor expert index inside the current expert set.
+    # These residuals are expert-relative, not row-index based.
+    anchor = tensor[:, full_index : full_index + 1, :]
+    row_mean = tensor.mean(dim=1, keepdim=True)
+    augmented = torch.cat(
+        [
+            tensor,
+            tensor - anchor,
+            tensor - row_mean,
+        ],
+        dim=-1,
+    )
+    names = (
+        *feature_names,
+        *(f"{name}_minus_anchor" for name in feature_names),
+        *(f"{name}_minus_row_mean" for name in feature_names),
+    )
+    return augmented, tuple(names)
+
+
+def _augment_support_tensor(
+    tensor: torch.Tensor,
+    *,
+    feature_names: tuple[str, ...],
+) -> tuple[torch.Tensor, tuple[str, ...]]:
+    if tensor.shape[-1] == 0:
+        return tensor, feature_names
+    row_mean = tensor.mean(dim=1, keepdim=True)
+    augmented = torch.cat(
+        [
+            tensor,
+            tensor - row_mean,
+        ],
+        dim=-1,
+    )
+    names = (
+        *feature_names,
+        *(f"{name}_minus_row_mean" for name in feature_names),
+    )
+    return augmented, tuple(names)
 
 
 def build_legacy_quality_encoding(

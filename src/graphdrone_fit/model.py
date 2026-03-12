@@ -117,6 +117,7 @@ class GraphDrone:
             np.asarray(batch.predictions, dtype=np.float32),
             target,
             full_index=batch.full_index,
+            field_slices=tokens.field_slices,
         )
         self._router_fit_summary = dict(summary)
         return dict(self._router_fit_summary)
@@ -195,7 +196,11 @@ class GraphDrone:
             quality_features=quality_features,
             support_encoding=support_encoding,
         )
-        router_outputs = self._router(tokens.tokens, full_index=batch.full_index)
+        router_outputs = self._router(
+            tokens.tokens,
+            full_index=batch.full_index,
+            field_slices=tokens.field_slices,
+        )
         integration = integrate_predictions(
             expert_predictions=batch.predictions,
             router_outputs=router_outputs,
