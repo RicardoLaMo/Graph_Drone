@@ -1,0 +1,28 @@
+\section{GraphDrone Classification Reconciled Portfolio}
+
+\paragraph{Objective.}
+Reconcile the baseline classification \texttt{GraphDrone} branch with the
+prior-aware classification branch and compare both against \texttt{TabPFN} and
+\texttt{TabM} on the 9-dataset OpenML classification portfolio.
+
+\paragraph{Result.}
+The prior-aware \texttt{GraphDrone} branch with default \texttt{flat}
+router-token ingestion improves the baseline \texttt{GraphDrone} on most public
+metrics:
+\begin{itemize}
+\item ROC-AUC: $6/9$
+\item PR-AUC: $5/9$
+\item macro-F1: $6/9$
+\item accuracy: $6/9$
+\item log-loss: $6/9$
+\end{itemize}
+
+\paragraph{Benchmark position.}
+The improved \texttt{GraphDrone} remains clearly stronger than \texttt{TabM},
+but \texttt{TabPFN} is still the strongest overall public baseline on the
+current classification portfolio.
+
+\paragraph{Decision.}
+Use the prior-aware classification branch as the current \texttt{GraphDrone}
+classification mainline, with \texttt{flat} as the default router-token
+encoder. Do not claim overall classification dominance over \texttt{TabPFN}.
