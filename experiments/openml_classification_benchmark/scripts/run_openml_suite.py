@@ -43,7 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--split-seed", type=int, default=42)
     parser.add_argument("--graphdrone-max-train-samples", type=int, default=0)
     parser.add_argument("--tabpfn-max-train-samples", type=int, default=0)
-    parser.add_argument("--graphdrone-router-token-encoder", choices=("field_aware", "flat"), default="field_aware")
+    parser.add_argument("--graphdrone-router-token-encoder", choices=("field_aware", "flat"), default="flat")
     parser.add_argument("--gpus", default="auto")
     parser.add_argument("--gpu-order", choices=["high-first", "low-first"], default=os.environ.get("GRAPH_DRONE_GPU_ORDER", "high-first"))
     parser.add_argument("--gpu-memory-free-threshold-mib", type=int, default=int(os.environ.get("GRAPHDRONE_OPENML_GPU_MEMORY_FREE_THRESHOLD_MIB", "4096")))

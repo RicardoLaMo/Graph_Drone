@@ -44,7 +44,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-train-samples", type=int, default=0)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--n-preprocessing-jobs", type=int, default=1)
-    parser.add_argument("--router-token-encoder", choices=("field_aware", "flat"), default="field_aware")
+    parser.add_argument("--router-token-encoder", choices=("field_aware", "flat"), default="flat")
     parser.add_argument("--smoke", action="store_true")
     parser.add_argument(
         "--output-root",

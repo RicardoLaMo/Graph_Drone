@@ -1,0 +1,31 @@
+\section{GraphDrone Classification Prior-Awareness Ablation}
+
+\paragraph{Objective.}
+Compare two internal router-token ingestion paths for the classification
+\texttt{GraphDrone.fit()} model on the 9-dataset registered OpenML portfolio:
+\texttt{field\_aware} versus \texttt{flat}.
+
+\paragraph{Setup.}
+Both variants use the same prior-aware support/token pipeline, expert factory,
+and public evaluation surface. The only ablated change is the internal token
+encoder used by the contextual sparse router.
+
+\paragraph{Result.}
+The richer prior-aware token/support pipeline is retained, but the current
+\texttt{field\_aware} router should not become the default. The \texttt{flat}
+encoder outperforms \texttt{field\_aware} on most datasets and most public
+classification metrics.
+
+\paragraph{Win counts for \texttt{flat} over \texttt{field\_aware}.}
+\begin{itemize}
+\item ROC-AUC: $6/9$
+\item PR-AUC: $5/9$
+\item macro-F1: $5/9$
+\item accuracy: $7/9$
+\item log-loss: $6/9$
+\end{itemize}
+
+\paragraph{Decision.}
+Keep the prior-aware support and token semantics, but default classification
+\texttt{GraphDrone} to the \texttt{flat} router-token encoder until a stronger
+field-aware encoder beats it cleanly across the registered portfolio.
