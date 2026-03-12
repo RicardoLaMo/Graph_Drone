@@ -10,15 +10,19 @@ import pandas as pd
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Summarize OpenML classification benchmark runs")
     parser.add_argument("--input-root", type=Path, required=True)
+    parser.add_argument("--models", nargs="+", default=["GraphDrone", "TabPFN", "TabM"])
     return parser.parse_args()
 
 
-def _load_rows(input_root: Path) -> list[dict[str, object]]:
+def _load_rows(input_root: Path, *, allowed_models: set[str]) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for result_path in sorted(input_root.rglob("*_results.json")):
         if result_path.name == "graphdrone_fit_results.json":
             continue
         payload = json.loads(result_path.read_text())
+        payload_model = payload.get("model")
+        if payload_model is not None and str(payload_model) not in allowed_models:
+            continue
         dataset = payload["dataset"]
         payload_rows = payload.get("rows", [])
         if not payload_rows and "metrics" in payload and "model" in payload:
@@ -34,13 +38,16 @@ def _load_rows(input_root: Path) -> list[dict[str, object]]:
                 }
             ]
         for row in payload_rows:
+            row_model = str(row.get("model", payload_model))
+            if row_model not in allowed_models:
+                continue
             rows.append(
                 {
                     "dataset_key": dataset["dataset_key"],
                     "dataset_name": dataset["dataset_name"],
                     "repeat": dataset["repeat"],
                     "fold": dataset["fold"],
-                    **row,
+                    **{**row, "model": row_model},
                 }
             )
     return rows
@@ -55,7 +62,7 @@ def _mean_or_nan(series: pd.Series) -> float | None:
 
 def main() -> None:
     args = parse_args()
-    rows = _load_rows(args.input_root)
+    rows = _load_rows(args.input_root, allowed_models=set(args.models))
     if not rows:
         raise SystemExit(f"No benchmark result json files found under {args.input_root}")
 

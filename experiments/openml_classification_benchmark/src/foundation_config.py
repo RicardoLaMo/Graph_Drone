@@ -3,9 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from experiments.openml_classification_benchmark.src.openml_tasks import PreparedOpenMLClassificationSplit
-from experiments.openml_regression_benchmark.src.foundation_config import (
-    prepare_foundation_config as prepare_foundation_config_regression_style,
-)
+
+_KEEP_POLICY = "__keep__"
 
 
 def prepare_foundation_config(
@@ -16,22 +15,14 @@ def prepare_foundation_config(
     seed: int,
     smoke: bool = False,
     amp: bool | None = None,
-    cat_policy: str | None = None,
+    num_policy: str | None = _KEEP_POLICY,
+    cat_policy: str | None = _KEEP_POLICY,
     null_toml_token: str | None = None,
 ) -> Path:
-    if cat_policy is not None:
-        return prepare_foundation_config_regression_style(
-            source_config=source_config,
-            output_config=output_config,
-            data_path=data_path,
-            seed=seed,
-            smoke=smoke,
-            amp=amp,
-            cat_policy=cat_policy,
-        )
-
     lines: list[str] = []
     in_data = False
+    num_policy_written = False
+    cat_policy_written = False
     for line in source_config.read_text().splitlines():
         stripped = line.strip()
         if stripped.startswith("["):
@@ -42,10 +33,30 @@ def prepare_foundation_config(
             lines.append(f"seed = {seed}")
         elif in_data and stripped.startswith("path = "):
             lines.append(f'path = "{data_path}"')
+        elif in_data and stripped.startswith("num_policy = "):
+            if num_policy == _KEEP_POLICY:
+                lines.append(line)
+                num_policy_written = True
+                continue
+            if num_policy is None:
+                if null_toml_token is not None:
+                    lines.append(f'num_policy = "{null_toml_token}"')
+                    num_policy_written = True
+                continue
+            lines.append(f'num_policy = "{num_policy}"')
+            num_policy_written = True
         elif in_data and stripped.startswith("cat_policy = "):
-            if null_toml_token is not None:
-                lines.append(f'cat_policy = "{null_toml_token}"')
-            continue
+            if cat_policy == _KEEP_POLICY:
+                lines.append(line)
+                cat_policy_written = True
+                continue
+            if cat_policy is None:
+                if null_toml_token is not None:
+                    lines.append(f'cat_policy = "{null_toml_token}"')
+                    cat_policy_written = True
+                continue
+            lines.append(f'cat_policy = "{cat_policy}"')
+            cat_policy_written = True
         elif amp is not None and stripped.startswith("amp = "):
             lines.append(f"amp = {'true' if amp else 'false'}")
         elif smoke and stripped.startswith("n_epochs = "):
@@ -56,25 +67,32 @@ def prepare_foundation_config(
             lines.append(line)
 
     output_config.parent.mkdir(parents=True, exist_ok=True)
-    if null_toml_token is not None and not any(line.strip().startswith("cat_policy = ") for line in lines):
-        injected: list[str] = []
-        in_data = False
-        inserted = False
-        for line in lines:
-            stripped = line.strip()
-            if stripped.startswith("["):
-                if in_data and not inserted:
-                    injected.append(f'cat_policy = "{null_toml_token}"')
-                    inserted = True
-                in_data = stripped == "[data]"
-                injected.append(line)
-            else:
-                injected.append(line)
-        if in_data and not inserted:
-            injected.append(f'cat_policy = "{null_toml_token}"')
-        lines = injected
+    if null_toml_token is not None:
+        if not num_policy_written:
+            lines = _inject_data_key(lines, key="num_policy", value=f'"{null_toml_token}"')
+        if not cat_policy_written:
+            lines = _inject_data_key(lines, key="cat_policy", value=f'"{null_toml_token}"')
     output_config.write_text("\n".join(lines) + "\n")
     return output_config
+
+
+def _inject_data_key(lines: list[str], *, key: str, value: str) -> list[str]:
+    injected: list[str] = []
+    in_data = False
+    inserted = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("["):
+            if in_data and not inserted:
+                injected.append(f"{key} = {value}")
+                inserted = True
+            in_data = stripped == "[data]"
+            injected.append(line)
+        else:
+            injected.append(line)
+    if in_data and not inserted:
+        injected.append(f"{key} = {value}")
+    return injected
 
 
 def resolve_tabr_config_name(split: PreparedOpenMLClassificationSplit) -> str:

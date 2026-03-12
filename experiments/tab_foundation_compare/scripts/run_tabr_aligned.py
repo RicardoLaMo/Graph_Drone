@@ -81,6 +81,14 @@ def _patch_tabr_for_modern_env(upstream_root: Path) -> None:
             util_text = util_text.replace(util_old, util_new)
     util_path.write_text(util_text)
 
+    data_path = upstream_root / "lib" / "data.py"
+    data_text = data_path.read_text()
+    onehot_old = "handle_unknown='ignore', sparse=False, dtype=np.float32"
+    onehot_new = "handle_unknown='ignore', sparse_output=False, dtype=np.float32"
+    if onehot_old in data_text and onehot_new not in data_text:
+        data_text = data_text.replace(onehot_old, onehot_new)
+        data_path.write_text(data_text)
+
     tabr_path = upstream_root / "bin" / "tabr.py"
     text = tabr_path.read_text()
     old_search = (

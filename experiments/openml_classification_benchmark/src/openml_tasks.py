@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
 import openml
+import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, OrdinalEncoder
 
@@ -158,14 +160,10 @@ def build_openml_classification_split(
 ) -> PreparedOpenMLClassificationSplit:
     spec = get_openml_classification_spec(dataset_key)
     task = openml.tasks.get_task(spec.task_id)
-    dataset = task.get_dataset()
-    X_df, y_series, categorical_indicator, feature_names = dataset.get_data(
-        dataset_format="dataframe",
-        target=task.target_name,
+    X_df, y_series, num_feature_names, cat_feature_names, feature_names = _load_openml_dataframe_with_retry(
+        task=task,
+        spec=spec,
     )
-
-    num_feature_names = tuple(name for name, is_cat in zip(feature_names, categorical_indicator) if not is_cat)
-    cat_feature_names = tuple(name for name, is_cat in zip(feature_names, categorical_indicator) if is_cat)
 
     label_encoder = LabelEncoder()
     y_raw = y_series.astype(str).to_numpy()
@@ -286,28 +284,69 @@ def encode_feature_parts(
 
 def write_foundation_dataset(output_dir: Path, split: PreparedOpenMLClassificationSplit) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
-    if split.X_num_train is not None:
-        np.save(output_dir / "X_num_train.npy", split.X_num_train)
-        np.save(output_dir / "X_num_val.npy", split.X_num_val)
-        np.save(output_dir / "X_num_test.npy", split.X_num_test)
-    if split.X_cat_train is not None:
-        np.save(output_dir / "X_cat_train.npy", split.X_cat_train)
-        np.save(output_dir / "X_cat_val.npy", split.X_cat_val)
-        np.save(output_dir / "X_cat_test.npy", split.X_cat_test)
-    np.save(output_dir / "Y_train.npy", split.y_train.astype(np.int64))
-    np.save(output_dir / "Y_val.npy", split.y_val.astype(np.int64))
-    np.save(output_dir / "Y_test.npy", split.y_test.astype(np.int64))
-    task_type = "binclass" if len(split.class_labels) == 2 else "multiclass"
-    score = "roc-auc" if len(split.class_labels) == 2 else "accuracy"
-    info = {
-        "task_type": task_type,
-        "score": score,
-        "name": split.dataset_name,
-        "id": f"openml-{split.dataset_id}-task-{split.task_id}-r{split.repeat}f{split.fold}",
-        "split_policy": f"openml_task_{split.task_id}_repeat{split.repeat}_fold{split.fold}_inner_val_seed{split.split_seed}",
+    _write_foundation_arrays(
+        output_dir=output_dir,
+        X_num_parts=None
+        if split.X_num_train is None
+        else {
+            "train": split.X_num_train,
+            "val": split.X_num_val,
+            "test": split.X_num_test,
+        },
+        X_cat_parts=None
+        if split.X_cat_train is None
+        else {
+            "train": split.X_cat_train,
+            "val": split.X_cat_val,
+            "test": split.X_cat_test,
+        },
+        y_parts={
+            "train": split.y_train.astype(np.int64),
+            "val": split.y_val.astype(np.int64),
+            "test": split.y_test.astype(np.int64),
+        },
+    )
+    _write_foundation_info(output_dir=output_dir, split=split)
+    return output_dir
+
+
+def write_tabr_foundation_dataset(output_dir: Path, split: PreparedOpenMLClassificationSplit) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    X_num_parts = (
+        None
+        if split.X_num_train is None
+        else {
+            "train": split.X_num_train,
+            "val": split.X_num_val,
+            "test": split.X_num_test,
+        }
+    )
+    X_cat_parts = (
+        None
+        if split.X_cat_train is None
+        else {
+            "train": split.X_cat_train,
+            "val": split.X_cat_val,
+            "test": split.X_cat_test,
+        }
+    )
+    y_parts = {
+        "train": split.y_train.astype(np.int64),
+        "val": split.y_val.astype(np.int64),
+        "test": split.y_test.astype(np.int64),
     }
-    (output_dir / "info.json").write_text(json.dumps(info, indent=2) + "\n")
-    (output_dir / "READY").write_text("")
+    encoded_cat_parts, augmented_num_parts, augmented_y_parts = _encode_tabr_categorical_parts(
+        X_cat_parts=X_cat_parts,
+        X_num_parts=X_num_parts,
+        y_parts=y_parts,
+    )
+    _write_foundation_arrays(
+        output_dir=output_dir,
+        X_num_parts=augmented_num_parts,
+        X_cat_parts=encoded_cat_parts,
+        y_parts=augmented_y_parts,
+    )
+    _write_foundation_info(output_dir=output_dir, split=split)
     return output_dir
 
 
@@ -422,3 +461,171 @@ def _encode_categorical_parts(X_cat_parts: dict[str, np.ndarray]) -> dict[str, n
         part: encoder.transform(block).astype(np.float32)
         for part, block in X_cat_parts.items()
     }
+
+
+def _write_foundation_arrays(
+    *,
+    output_dir: Path,
+    X_num_parts: dict[str, np.ndarray] | None,
+    X_cat_parts: dict[str, np.ndarray] | None,
+    y_parts: dict[str, np.ndarray],
+) -> None:
+    if X_num_parts is not None:
+        np.save(output_dir / "X_num_train.npy", X_num_parts["train"])
+        np.save(output_dir / "X_num_val.npy", X_num_parts["val"])
+        np.save(output_dir / "X_num_test.npy", X_num_parts["test"])
+    if X_cat_parts is not None:
+        np.save(output_dir / "X_cat_train.npy", X_cat_parts["train"])
+        np.save(output_dir / "X_cat_val.npy", X_cat_parts["val"])
+        np.save(output_dir / "X_cat_test.npy", X_cat_parts["test"])
+    np.save(output_dir / "Y_train.npy", y_parts["train"].astype(np.int64))
+    np.save(output_dir / "Y_val.npy", y_parts["val"].astype(np.int64))
+    np.save(output_dir / "Y_test.npy", y_parts["test"].astype(np.int64))
+
+
+def _write_foundation_info(*, output_dir: Path, split: PreparedOpenMLClassificationSplit) -> None:
+    task_type = "binclass" if len(split.class_labels) == 2 else "multiclass"
+    score = "roc-auc" if len(split.class_labels) == 2 else "accuracy"
+    info = {
+        "task_type": task_type,
+        "score": score,
+        "name": split.dataset_name,
+        "id": f"openml-{split.dataset_id}-task-{split.task_id}-r{split.repeat}f{split.fold}",
+        "split_policy": f"openml_task_{split.task_id}_repeat{split.repeat}_fold{split.fold}_inner_val_seed{split.split_seed}",
+    }
+    (output_dir / "info.json").write_text(json.dumps(info, indent=2) + "\n")
+    (output_dir / "READY").write_text("")
+
+
+def _load_openml_dataframe_with_retry(
+    *,
+    task,
+    spec: OpenMLClassificationSpec,
+) -> tuple[pd.DataFrame, pd.Series, tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    dataset = task.get_dataset()
+    last_exc: Exception | None = None
+    for attempt in range(2):
+        try:
+            X_df, y_series, categorical_indicator, feature_names = dataset.get_data(
+                dataset_format="dataframe",
+                target=task.target_name,
+            )
+            repaired_df, num_feature_names, cat_feature_names = _repair_feature_partitions(
+                X_df,
+                feature_names=tuple(feature_names),
+                categorical_indicator=tuple(bool(v) for v in categorical_indicator),
+            )
+            return repaired_df, y_series, num_feature_names, cat_feature_names, tuple(feature_names)
+        except Exception as exc:
+            last_exc = exc
+            if attempt == 0 and _looks_like_openml_cache_issue(exc):
+                _clear_openml_dataset_cache(spec.dataset_id)
+                task = openml.tasks.get_task(spec.task_id)
+                dataset = task.get_dataset()
+                continue
+            raise
+    assert last_exc is not None
+    raise last_exc
+
+
+def _looks_like_openml_cache_issue(exc: Exception) -> bool:
+    message = str(exc)
+    cache_markers = (
+        "Parquet magic bytes",
+        "Bad @DATA instance format",
+        "Could not download file",
+        "dataset_",
+        ".pq",
+        ".arff",
+        ".part.minio",
+        "No such file or directory",
+    )
+    return any(marker in message for marker in cache_markers)
+
+
+def _clear_openml_dataset_cache(dataset_id: int) -> None:
+    cache_root = Path(openml.config.get_cache_directory())
+    dataset_cache_dir = cache_root / "org" / "openml" / "www" / "datasets" / str(dataset_id)
+    if dataset_cache_dir.exists():
+        shutil.rmtree(dataset_cache_dir)
+
+
+def _repair_feature_partitions(
+    X_df: pd.DataFrame,
+    *,
+    feature_names: tuple[str, ...],
+    categorical_indicator: tuple[bool, ...],
+) -> tuple[pd.DataFrame, tuple[str, ...], tuple[str, ...]]:
+    repaired = X_df.copy()
+    num_feature_names: list[str] = []
+    cat_feature_names: list[str] = []
+
+    for name, is_cat in zip(feature_names, categorical_indicator):
+        column = repaired[name]
+        if is_cat:
+            cat_feature_names.append(name)
+            continue
+        if pd.api.types.is_numeric_dtype(column):
+            num_feature_names.append(name)
+            continue
+        coerced = pd.to_numeric(column, errors="coerce")
+        non_missing = ~column.isna()
+        failed = coerced.isna() & non_missing
+        if failed.any():
+            cat_feature_names.append(name)
+            continue
+        repaired[name] = coerced
+        num_feature_names.append(name)
+
+    return repaired, tuple(num_feature_names), tuple(cat_feature_names)
+
+
+def _encode_tabr_categorical_parts(
+    *,
+    X_cat_parts: dict[str, np.ndarray] | None,
+    X_num_parts: dict[str, np.ndarray] | None,
+    y_parts: dict[str, np.ndarray],
+) -> tuple[dict[str, np.ndarray] | None, dict[str, np.ndarray] | None, dict[str, np.ndarray]]:
+    if X_cat_parts is None:
+        return None, X_num_parts, y_parts
+
+    train = X_cat_parts["train"].astype(str, copy=False)
+    val = X_cat_parts["val"].astype(str, copy=False)
+    test = X_cat_parts["test"].astype(str, copy=False)
+    n_train, n_cat = train.shape
+    encoded_train = np.zeros((n_train + 1, n_cat), dtype=np.int64)
+    encoded_val = np.zeros((len(val), n_cat), dtype=np.int64)
+    encoded_test = np.zeros((len(test), n_cat), dtype=np.int64)
+
+    for column_idx in range(n_cat):
+        vocab: dict[str, int] = {}
+        next_code = 1
+        for value in train[:, column_idx]:
+            if value not in vocab:
+                vocab[value] = next_code
+                next_code += 1
+        encoded_train[1:, column_idx] = np.asarray([vocab[value] for value in train[:, column_idx]], dtype=np.int64)
+        encoded_val[:, column_idx] = np.asarray([vocab.get(value, 0) for value in val[:, column_idx]], dtype=np.int64)
+        encoded_test[:, column_idx] = np.asarray([vocab.get(value, 0) for value in test[:, column_idx]], dtype=np.int64)
+
+    augmented_y_parts = {
+        "train": np.concatenate([y_parts["train"][:1], y_parts["train"]], axis=0),
+        "val": y_parts["val"],
+        "test": y_parts["test"],
+    }
+    if X_num_parts is None:
+        augmented_num_parts = None
+    else:
+        anchor_row = X_num_parts["train"][:1].astype(np.float32, copy=True)
+        augmented_num_parts = {
+            "train": np.concatenate([anchor_row, X_num_parts["train"]], axis=0),
+            "val": X_num_parts["val"],
+            "test": X_num_parts["test"],
+        }
+
+    encoded_cat_parts = {
+        "train": encoded_train,
+        "val": encoded_val,
+        "test": encoded_test,
+    }
+    return encoded_cat_parts, augmented_num_parts, augmented_y_parts

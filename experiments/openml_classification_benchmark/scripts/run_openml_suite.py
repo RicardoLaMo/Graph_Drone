@@ -38,7 +38,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--datasets", nargs="+", default=available_dataset_keys())
     parser.add_argument("--repeat", type=int, default=0)
     parser.add_argument("--folds", nargs="+", type=int, default=[0, 1, 2])
-    parser.add_argument("--models", nargs="+", default=["GraphDrone", "TabPFN", "TabR", "TabM"])
+    parser.add_argument("--models", nargs="+", default=["GraphDrone", "TabPFN", "TabM"])
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--split-seed", type=int, default=42)
     parser.add_argument("--graphdrone-max-train-samples", type=int, default=0)
@@ -221,6 +221,11 @@ def main() -> None:
 
             env = os.environ.copy()
             env["CUDA_VISIBLE_DEVICES"] = str(gpu_index)
+            env.setdefault("OMP_NUM_THREADS", "1")
+            env.setdefault("MKL_NUM_THREADS", "1")
+            env.setdefault("OPENBLAS_NUM_THREADS", "1")
+            env.setdefault("NUMEXPR_NUM_THREADS", "1")
+            env.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
             log_path = args.output_root / f"queue__{task['dataset']}__{task['model']}__fold{task['fold']}.log"
             log_handle = log_path.open("w")
             proc = subprocess.Popen(

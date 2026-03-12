@@ -8,6 +8,11 @@ import sys
 import time
 from pathlib import Path
 
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+
 import numpy as np
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -24,7 +29,7 @@ from experiments.openml_classification_benchmark.src.openml_tasks import (
     build_openml_classification_split,
     dataset_run_tag,
     split_summary,
-    write_foundation_dataset,
+    write_tabr_foundation_dataset,
 )
 from experiments.openml_classification_benchmark.src.prediction_metrics import (
     classification_metrics_from_raw_prediction,
@@ -70,21 +75,25 @@ def main() -> None:
     output_dir = (args.output_root / run_name).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     local_data_dir = output_dir / f"tabr_dataset__{run_name}"
-    write_foundation_dataset(local_data_dir, split)
+    write_tabr_foundation_dataset(local_data_dir, split)
 
     resolved_config = resolve_tabr_config_name(split) if args.config == "auto" else args.config
     source_config = args.upstream_root / "exp" / "tabr" / f"{resolved_config}.toml"
     if not source_config.exists():
         raise FileNotFoundError(source_config)
     local_config = output_dir / "tabr_config.toml"
+    tabr_cat_policy = None
+    if split.X_cat_train is not None:
+        tabr_cat_policy = "one-hot" if split.X_num_train is None else "ordinal"
     prepare_foundation_config(
         source_config=source_config,
         output_config=local_config,
         data_path=str(local_data_dir),
         seed=args.seed,
         smoke=args.smoke,
-        cat_policy="ordinal" if split.X_cat_train is not None else None,
-        null_toml_token="__null__" if split.X_cat_train is None else None,
+        num_policy="quantile" if split.X_num_train is not None else None,
+        cat_policy=tabr_cat_policy,
+        null_toml_token="__null__" if split.X_cat_train is None or split.X_num_train is None else None,
     )
 
     _patch_tabr_for_modern_env(args.upstream_root)
@@ -98,6 +107,8 @@ def main() -> None:
     env.setdefault("PYTHONFAULTHANDLER", "1")
     env.setdefault("OMP_NUM_THREADS", "1")
     env.setdefault("MKL_NUM_THREADS", "1")
+    env.setdefault("OPENBLAS_NUM_THREADS", "1")
+    env.setdefault("NUMEXPR_NUM_THREADS", "1")
     env.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
     env.setdefault("TQDM_DISABLE", "1")
 

@@ -8,6 +8,11 @@ import sys
 import time
 from pathlib import Path
 
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+
 import numpy as np
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -93,6 +98,8 @@ def main() -> None:
         env["CUDA_VISIBLE_DEVICES"] = ""
     env.setdefault("OMP_NUM_THREADS", "1")
     env.setdefault("MKL_NUM_THREADS", "1")
+    env.setdefault("OPENBLAS_NUM_THREADS", "1")
+    env.setdefault("NUMEXPR_NUM_THREADS", "1")
     env.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
     env.setdefault("PYTHONFAULTHANDLER", "1")
 

@@ -56,3 +56,23 @@ def test_prepare_foundation_config_drops_cat_policy_when_not_needed(tmp_path) ->
     assert 'path = "/tmp/new-data"' in text
     assert "seed = 42" in text
     assert "cat_policy" not in text
+
+
+def test_prepare_foundation_config_writes_null_num_policy_for_categorical_only_tabr(tmp_path) -> None:
+    source = tmp_path / "source.toml"
+    target = tmp_path / "target.toml"
+    source.write_text(SAMPLE_CONFIG + "\n")
+
+    prepare_foundation_config(
+        source_config=source,
+        output_config=target,
+        data_path="/tmp/new-data",
+        seed=42,
+        num_policy=None,
+        cat_policy="ordinal",
+        null_toml_token="__null__",
+    )
+
+    text = target.read_text()
+    assert 'num_policy = "__null__"' in text
+    assert 'cat_policy = "ordinal"' in text

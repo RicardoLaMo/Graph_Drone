@@ -1,0 +1,48 @@
+\section{GraphDrone.fit Classification Portfolio}
+
+\subsection{Public Benchmark Surface}
+
+The public classification benchmark surface was finalized as:
+\begin{itemize}
+\item \texttt{GraphDrone}
+\item \texttt{TabPFN}
+\item \texttt{TabM}
+\end{itemize}
+
+\texttt{TabR} was removed from the default classification comparison because the remaining issues were benchmark-wrapper compatibility problems on categorical datasets, not the current GraphDrone classification objective.
+
+\subsection{Portfolio}
+
+The OpenML classification portfolio contained nine datasets:
+\begin{itemize}
+\item \texttt{diabetes}
+\item \texttt{anneal}
+\item \texttt{maternal\_health\_risk}
+\item \texttt{website\_phishing}
+\item \texttt{bioresponse}
+\item \texttt{students\_dropout\_and\_academic\_success}
+\item \texttt{bank\_customer\_churn}
+\item \texttt{bank\_marketing}
+\item \texttt{apsfailure}
+\end{itemize}
+
+Each public model was evaluated on folds $0/1/2$.
+
+\subsection{Engineering Closeout}
+
+The classification recovery pass closed three benchmark-layer issues:
+\begin{itemize}
+\item mixed-type OpenML repair for \texttt{bank\_marketing}
+\item OpenML cache recovery for \texttt{apsfailure}
+\item classification benchmark-surface cleanup removing \texttt{TabR} from the public summary
+\end{itemize}
+
+\subsection{Outcome}
+
+The final public leaderboard was written to:
+\begin{itemize}
+\item \texttt{experiments/openml\_classification\_benchmark/reports\_phase2b\_full\_portfolio/openml\_benchmark\_summary.md}
+\item \texttt{experiments/openml\_classification\_benchmark/reports\_phase2b\_full\_portfolio/openml\_benchmark\_summary.csv}
+\end{itemize}
+
+The resulting classification lane is now modular, portfolio-based, and aligned with the public benchmark surface used for future GraphDrone classification iterations.
