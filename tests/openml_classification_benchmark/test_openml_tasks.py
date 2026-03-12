@@ -10,6 +10,7 @@ from experiments.openml_classification_benchmark.src.openml_tasks import (
     dataset_run_tag,
     encode_feature_parts,
     normalize_dataset_key,
+    registered_dataset_keys,
 )
 
 
@@ -23,6 +24,12 @@ def test_available_dataset_keys_include_portfolio_shortlist() -> None:
 def test_normalize_dataset_key_maps_aliases() -> None:
     assert normalize_dataset_key("APSFailure") == "apsfailure"
     assert normalize_dataset_key("Bank_Customer_Churn") == "bank_customer_churn"
+
+
+def test_registered_dataset_keys_exclude_alias_duplicates() -> None:
+    keys = registered_dataset_keys()
+    assert "apsfailure" in keys
+    assert "APSFailure" not in keys
 
 
 def test_encode_feature_parts_merges_numeric_and_categorical_blocks() -> None:

@@ -14,7 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from experiments.openml_classification_benchmark.src.openml_tasks import available_dataset_keys
+from experiments.openml_classification_benchmark.src.openml_tasks import normalize_dataset_key, registered_dataset_keys
 
 
 MODEL_SCRIPTS = {
@@ -35,7 +35,7 @@ def resolve_shared_python() -> Path:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Queue OpenML classification runs onto all currently free H200 GPUs")
-    parser.add_argument("--datasets", nargs="+", default=available_dataset_keys())
+    parser.add_argument("--datasets", nargs="+", default=registered_dataset_keys())
     parser.add_argument("--repeat", type=int, default=0)
     parser.add_argument("--folds", nargs="+", type=int, default=[0, 1, 2])
     parser.add_argument("--models", nargs="+", default=["GraphDrone", "TabPFN", "TabM"])
@@ -141,6 +141,7 @@ def main() -> None:
     args = parse_args()
     args.output_root.mkdir(parents=True, exist_ok=True)
     shared_python = resolve_shared_python()
+    normalized_datasets = list(dict.fromkeys(normalize_dataset_key(dataset) for dataset in args.datasets))
 
     gpu_status = query_gpu_status()
     gpu_pool = resolve_gpu_pool(
@@ -153,7 +154,7 @@ def main() -> None:
         raise SystemExit("No GPUs resolved for the requested pool")
 
     tasks = deque()
-    for dataset in args.datasets:
+    for dataset in normalized_datasets:
         for fold in args.folds:
             for model in args.models:
                 tasks.append({"dataset": dataset, "fold": fold, "model": model})

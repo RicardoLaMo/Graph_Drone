@@ -140,6 +140,10 @@ def available_dataset_keys() -> list[str]:
     return sorted(set(OPENML_CLASSIFICATION_SPECS) | set(OPENML_CLASSIFICATION_ALIASES))
 
 
+def registered_dataset_keys() -> list[str]:
+    return sorted(OPENML_CLASSIFICATION_SPECS)
+
+
 def get_openml_classification_spec(dataset_key: str) -> OpenMLClassificationSpec:
     dataset_key = normalize_dataset_key(dataset_key)
     try:
