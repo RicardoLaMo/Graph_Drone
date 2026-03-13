@@ -27,8 +27,8 @@ def _coerce_matrix(X: np.ndarray) -> np.ndarray:
 
 class GraphDrone:
     """
-    High-Performance GraphDrone Meta-Model.
-    Optimized for data-retention, H200 parallelization, and GORA Geometric Awareness.
+    Consolidated GraphDrone Meta-Model (PURE_BASE Default).
+    High-performance Cross-Attention Ensemble of Foundation Specialists.
     """
     def __init__(self, config: GraphDroneConfig) -> None:
         self.config = config.validate()
@@ -36,25 +36,27 @@ class GraphDrone:
         self._token_builder = UniversalTokenBuilder()
         self._support_encoder = MomentSupportEncoder()
         self._router: Optional[torch.nn.Module] = None
-        self._train_views: dict[str, np.ndarray] = {}
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
     def fit(self, X: np.ndarray, y: np.ndarray, expert_specs: Optional[tuple[ExpertBuildSpec, ...]] = None) -> "GraphDrone":
         X = np.asarray(X, dtype=np.float32)
         y = np.asarray(y, dtype=np.float32)
         
-        # 1. Expert Fitting (100% DATA UTILIZATION)
-        matrix = _coerce_matrix(X)
+        # Internal validation split for router optimization
+        from sklearn.model_selection import train_test_split
+        X_tr, X_va, y_tr, y_va = train_test_split(X, y, test_size=0.1, random_state=42)
+        
+        matrix = _coerce_matrix(X_tr)
         self.n_features_in_ = matrix.shape[1]
         
         if expert_specs is None:
-            full_idx = tuple(range(self.n_features_in_))
+            full_idx = tuple(range(matrix.shape[1]))
             params = {"n_estimators": 8, "device": self.device}
             expert_specs = (
                 ExpertBuildSpec(
                     descriptor=ViewDescriptor(
                         expert_id=self.config.full_expert_id, family="FULL", 
-                        view_name="Full dataset", is_anchor=True, input_dim=self.n_features_in_, input_indices=full_idx
+                        view_name="Full dataset", is_anchor=True, input_dim=matrix.shape[1], input_indices=full_idx
                     ),
                     model_kind="foundation_regressor", 
                     input_adapter=IdentitySelectorAdapter(indices=full_idx),
@@ -62,31 +64,17 @@ class GraphDrone:
                 ),
             )
 
-        print(f"  -> Fitting specialists on {len(X)} samples...")
         self._portfolio = fit_portfolio_from_specs(
-            X_train=matrix, y_train=y, specs=expert_specs, full_expert_id=self.config.full_expert_id
+            X_train=matrix, y_train=y_tr, specs=expert_specs, full_expert_id=self.config.full_expert_id
         )
         self._expert_factory = PortfolioExpertFactory(self._portfolio)
         
-        # Store training views for GORA observers
-        for spec in expert_specs:
-            fitted_adapter = spec.input_adapter.fit(matrix)
-            self._train_views[spec.descriptor.expert_id] = fitted_adapter.transform(matrix)
-
-        # 2. Router Optimization (Internal 10% Split)
-        from sklearn.model_selection import train_test_split
-        _, X_va, _, y_va = train_test_split(X, y, test_size=0.1, random_state=42)
-        
+        # Router Training
         va_batch = self._expert_factory.predict_all(X_va)
         va_enc = self._support_encoder.encode(n_rows=len(X_va), descriptors=va_batch.descriptors)
-        
-        # Compute GORA observers for VAL
-        va_gora = self._compute_gora_obs(X_va, va_batch.descriptors)
-        
         va_tokens = self._token_builder.build(
             predictions=va_batch.predictions, descriptors=va_batch.descriptors,
-            full_expert_id=va_batch.full_expert_id, support_encoding=va_enc,
-            geometric_obs=va_gora
+            full_expert_id=va_batch.full_expert_id, support_encoding=va_enc
         )
         
         token_dim = va_tokens.tokens.shape[-1]
@@ -120,40 +108,17 @@ class GraphDrone:
                     break
         return self
 
-    def _compute_gora_obs(self, X: np.ndarray, descriptors: tuple[ViewDescriptor, ...]) -> torch.Tensor:
-        from sklearn.neighbors import NearestNeighbors
-        from .observers import calculate_kappa, calculate_lid
-        
-        all_obs = []
-        for d in descriptors:
-            X_tr_v = self._train_views[d.expert_id]
-            # subselect logic
-            X_v = X[:, list(d.input_indices)] if d.input_indices else X
-            
-            knn = NearestNeighbors(n_neighbors=d.preferred_k).fit(X_tr_v)
-            dists, indices = knn.kneighbors(X_v)
-            # Use X_tr_v here, NOT X_v, because indices refer to X_tr_v
-            kappa = calculate_kappa(X_tr_v, indices).reshape(-1, 1)
-            lid = calculate_lid(dists).reshape(-1, 1)
-            all_obs.append(np.concatenate([kappa, lid], axis=1))
-            
-        return torch.tensor(np.stack(all_obs, axis=1), dtype=torch.float32)
-
     def predict(self, X: np.ndarray, return_diagnostics: bool = False) -> Union[np.ndarray, GraphDronePredictResult]:
         X = np.asarray(X, dtype=np.float32)
         matrix = _coerce_matrix(X)
         batch = self._expert_factory.predict_all(matrix)
         
-        # Internalized Support/Token/GORA workflow
         support_enc = self._support_encoder.encode(n_rows=matrix.shape[0], descriptors=batch.descriptors)
-        gora_obs = self._compute_gora_obs(matrix, batch.descriptors)
-        
         tokens = self._token_builder.build(
             predictions=batch.predictions,
             descriptors=batch.descriptors,
             full_expert_id=batch.full_expert_id,
-            support_encoding=support_enc,
-            geometric_obs=gora_obs
+            support_encoding=support_enc
         )
         
         self._router.eval()
