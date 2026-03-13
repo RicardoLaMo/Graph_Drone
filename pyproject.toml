@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "graph-drone"
-version = "2026.03.12"
+version = "1.0.0-gora"
 description = "A Multi-View Mixture-of-Experts Meta-Model for Tabular Data."
 readme = "README.md"
 requires-python = ">=3.10"
