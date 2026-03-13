@@ -30,11 +30,11 @@ if __name__ == '__main__':
     print(f"Available datasets: {len(all_names)}")
     
     # Selection of 5 from the 51
-    datasets = ["blood-transfusion-service-center", "credit-g", "diabetes", "ionosphere", "tic-tac-toe"]
+    datasets = ["airfoil_self_noise", "diamonds", "diabetes", "Bioresponse", "houses"]
     # Filter to only those present
     datasets = [d for d in datasets if d in all_names]
     
-    folds = [0, 1] # Running 2 folds per dataset for the lab verification
+    folds = [0] # Running 1 fold for verification speed
 
     methods = [
         # Baseline: Single Global TabPFN (GraphDrone with 1 expert)
