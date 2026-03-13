@@ -21,7 +21,7 @@ class TokenBatch:
 class UniversalTokenBuilder:
     """
     Consolidated Token Builder for GraphDrone.
-    Handles Prediction, Quality (Sigma2), Support Moments, and SNR.
+    Handles Prediction, Quality (Sigma2), Support Moments, SNR, and Geometric Observers.
     """
     def build(
         self,
@@ -32,32 +32,38 @@ class UniversalTokenBuilder:
         support_encoding: Optional[SupportEncoding] = None,
         neural_support: Optional[torch.Tensor] = None,
         prior_alignment: Optional[torch.Tensor] = None,
+        geometric_obs: Optional[torch.Tensor] = None,
     ) -> TokenBatch:
         pred_tensor = torch.as_tensor(predictions, dtype=torch.float32)
         device = pred_tensor.device
         expert_ids = tuple(d.expert_id for d in descriptors)
         full_index = expert_ids.index(full_expert_id)
         
-        # 1. Prediction Residuals
+        # 1. Prediction Residuals & Consensus
         full_pred = pred_tensor[:, full_index : full_index + 1]
         row_mean = pred_tensor.mean(dim=1, keepdim=True)
+        if pred_tensor.shape[1] > 1:
+            prediction_consensus = pred_tensor.std(dim=1, keepdim=True)
+        else:
+            prediction_consensus = torch.zeros((pred_tensor.shape[0], 1), device=device)
+        
         prediction_fields = torch.stack(
             (pred_tensor, pred_tensor - full_pred, pred_tensor - row_mean),
             dim=-1
         )
+        consensus_expanded = prediction_consensus.unsqueeze(1).expand(-1, len(expert_ids), 1)
+        prediction_fields = torch.cat([prediction_fields, consensus_expanded], dim=-1)
 
         # 2. Support Moments & SNR
         support_fields = []
         support_names_list = []
         if support_encoding is not None:
             moments = support_encoding.tensor.to(device)
-            # Ensure moments is [B, E, D]
             if moments.ndim == 2:
                 moments = moments.unsqueeze(-1)
             support_fields.append(moments)
             support_names_list.extend(support_encoding.feature_names)
             
-            # Integrated SNR calculation - only if we have at least mean and var
             if moments.shape[-1] >= 2:
                 mean_neighbors = moments[:, :, 0]
                 var_neighbors = moments[:, :, 1]
@@ -77,7 +83,12 @@ class UniversalTokenBuilder:
             support_fields.append(prior_alignment.to(device))
             support_names_list.append("prior_alignment")
 
-        # 5. Static Descriptors
+        # 5. Geometric Observers (GoRA Logic)
+        if geometric_obs is not None:
+            support_fields.append(geometric_obs.to(device))
+            support_names_list.extend(["kappa", "lid"])
+
+        # 6. Static Descriptors
         descriptor_tensor, descriptor_names = self._build_descriptor_tensor(descriptors)
         descriptor_tensor = descriptor_tensor.to(device).unsqueeze(0).expand(pred_tensor.shape[0], -1, -1)
 
@@ -92,7 +103,7 @@ class UniversalTokenBuilder:
         cursor = 0
         
         slices["prediction"] = (cursor, cursor + prediction_fields.shape[-1])
-        names["prediction"] = ("raw", "residual_full", "residual_mean")
+        names["prediction"] = ("raw", "residual_full", "residual_mean", "disagreement_std")
         cursor += prediction_fields.shape[-1]
         
         if support_fields:
@@ -113,7 +124,6 @@ class UniversalTokenBuilder:
                 float(d.is_anchor),
                 float(getattr(d, 'input_dim', 0)),
                 float(getattr(d, 'preferred_k', 15)),
-                # One-hot simplified family (FULL vs Subspace)
                 1.0 if d.family == "FULL" else 0.0,
                 1.0 if d.family == "structural_subspace" else 0.0,
                 1.0 if d.family == "local_support" else 0.0,
