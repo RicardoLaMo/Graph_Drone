@@ -109,19 +109,14 @@ def fit_portfolio_from_specs(
     y_train: np.ndarray,
     specs: tuple[ExpertBuildSpec, ...],
     full_expert_id: str,
+    n_jobs: int = -1,
 ) -> LoadedPortfolio:
+    from joblib import Parallel, delayed
+    
     matrix = np.asarray(X_train, dtype=np.float32)
     target = np.asarray(y_train, dtype=np.float32).reshape(-1)
-    if matrix.ndim != 2:
-        raise ValueError(f"Expected X_train to be 2D, got {matrix.shape}")
-    if target.shape[0] != matrix.shape[0]:
-        raise ValueError(
-            f"Expected y_train with {matrix.shape[0]} rows, got {target.shape[0]}"
-        )
-
-    experts: dict[str, LoadedExpert] = {}
-    expert_order: list[str] = []
-    for spec in specs:
+    
+    def _fit_single_spec(spec):
         descriptor = spec.descriptor.validate()
         fitted_adapter = spec.input_adapter.fit(matrix)
         X_view = fitted_adapter.transform(matrix)
@@ -131,13 +126,18 @@ def fit_portfolio_from_specs(
             y_train=target,
             model_params=spec.model_params,
         )
-        experts[descriptor.expert_id] = LoadedExpert(
+        return descriptor.expert_id, LoadedExpert(
             descriptor=descriptor,
             predictor=predictor,
             artifact_kind=spec.model_kind,
             input_adapter=fitted_adapter.transform,
         )
-        expert_order.append(descriptor.expert_id)
+
+    print(f"  -> Fitting {len(specs)} specialists in parallel (n_jobs={n_jobs})...")
+    results = Parallel(n_jobs=n_jobs)(delayed(_fit_single_spec)(s) for s in specs)
+    
+    experts = dict(results)
+    expert_order = [s.descriptor.expert_id for s in specs]
 
     return LoadedPortfolio(
         expert_order=tuple(expert_order),

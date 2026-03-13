@@ -1,208 +1,137 @@
 from __future__ import annotations
-
 from dataclasses import dataclass
-
 import numpy as np
+import torch
+from typing import Optional, Union
 
 from .config import GraphDroneConfig
 from .defer_integrator import IntegrationOutputs, integrate_predictions
-from .expert_factory import ExpertBuildSpec, ExpertPredictionBatch, PortfolioExpertFactory, fit_portfolio_from_specs
+from .expert_factory import ExpertBuildSpec, ExpertPredictionBatch, PortfolioExpertFactory, fit_portfolio_from_specs, IdentitySelectorAdapter
 from .portfolio_loader import LoadedPortfolio, load_portfolio
 from .set_router import build_set_router
 from .support_encoder import MomentSupportEncoder, SupportEncoding
-from .token_builder import PerViewTokenBuilder, QualityEncoding, TokenBatch
-
+from .token_builder import UniversalTokenBuilder, TokenBatch
+from .view_descriptor import ViewDescriptor
 
 @dataclass(frozen=True)
 class GraphDronePredictResult:
     predictions: np.ndarray
     diagnostics: dict[str, object]
     expert_ids: tuple[str, ...]
-    token_shape: tuple[int, int, int]
-
-
-class GraphDrone:
-    """
-    GraphDrone Meta-Model for Tabular Data.
-    
-    A Mixture-of-Experts architecture that integrates multiple foundation models
-    (specialists) across different feature subspaces using a contextual set-router.
-    
-    Parameters
-    ----------
-    config : GraphDroneConfig
-        Configuration for the model, including the full expert ID and router settings.
-    """
-    def __init__(self, config: GraphDroneConfig) -> None:
-        self.config = config.validate()
-        self._portfolio: LoadedPortfolio | None = None
-        self._expert_factory: PortfolioExpertFactory | None = None
-        self._token_builder: PerViewTokenBuilder | None = None
-        self._support_encoder: MomentSupportEncoder | None = None
-        self._router = None
-        self.n_features_in_: int | None = None
-
-    def fit(
-        self,
-        X: np.ndarray,
-        y: np.ndarray,
-        *,
-        expert_specs: tuple[ExpertBuildSpec, ...] | None = None,
-    ) -> "GraphDrone":
-        """
-        Fit the GraphDrone specialists and the meta-router.
-        
-        Parameters
-        ----------
-        X : array-like of shape (n_samples, n_features)
-            Training vector.
-        y : array-like of shape (n_samples,)
-            Target vector relative to X.
-        expert_specs : tuple of ExpertBuildSpec, optional
-            Definitions for the expert views. If None, a default full-view 
-            expert will be used.
-            
-        Returns
-        -------
-        self : object
-            Fitted estimator.
-        """
-        matrix = _coerce_matrix(X)
-        self.n_features_in_ = matrix.shape[1]
-        
-        # Default spec if none provided
-        if expert_specs is None:
-            full_idx = tuple(range(self.n_features_in_))
-            expert_specs = (
-                ExpertBuildSpec(
-                    descriptor=ViewDescriptor(
-                        expert_id=self.config.full_expert_id,
-                        family="FULL",
-                        view_name="Full dataset (Default)",
-                        is_anchor=True,
-                        input_dim=self.n_features_in_,
-                        input_indices=full_idx
-                    ),
-                    model_kind="foundation_regressor", # Auto-detect in full version
-                    input_adapter=IdentitySelectorAdapter(indices=full_idx)
-                ),
-            )
-
-        self._portfolio = fit_portfolio_from_specs(
-            X_train=matrix,
-            y_train=np.asarray(y, dtype=np.float32),
-            specs=expert_specs,
-            full_expert_id=self.config.full_expert_id,
-        )
-        
-        self._expert_factory = PortfolioExpertFactory(self._portfolio)
-        self._token_builder = PerViewTokenBuilder()
-        self._support_encoder = MomentSupportEncoder()
-        self._router = build_set_router(self.config.router)
-        return self
-
-    def predict(
-        self,
-        X: np.ndarray,
-        return_diagnostics: bool = False,
-    ) -> np.ndarray | GraphDronePredictResult:
-        """
-        Predict target for X.
-        
-        Parameters
-        ----------
-        X : array-like of shape (n_samples, n_features)
-            The input samples.
-        return_diagnostics : bool, default=False
-            Whether to return routing weights and SNR diagnostics.
-            
-        Returns
-        -------
-        y : array-like of shape (n_samples,)
-            The predicted values.
-        """
-        result = self.predict_with_diagnostics(X)
-        if return_diagnostics:
-            return result
-        return result.predictions
-
-    def predict_experts(self, X: np.ndarray) -> ExpertPredictionBatch:
-        if self._expert_factory is None:
-            raise RuntimeError("GraphDrone.fit() must be called before predict_experts()")
-        matrix = _coerce_matrix(X)
-        if self.n_features_in_ is not None and matrix.shape[1] != self.n_features_in_:
-            raise ValueError(
-                f"Expected {self.n_features_in_} features after fit(), got {matrix.shape[1]}"
-            )
-        return self._expert_factory.predict_all(matrix)
-
-    def predict_with_diagnostics(
-        self,
-        X: np.ndarray,
-    ) -> GraphDronePredictResult:
-        if self._expert_factory is None or self._token_builder is None or self._support_encoder is None or self._router is None:
-            raise RuntimeError("GraphDrone.fit() must be called before predict()")
-
-        matrix = _coerce_matrix(X)
-        if self.n_features_in_ is not None and matrix.shape[1] != self.n_features_in_:
-            raise ValueError(
-                f"Expected {self.n_features_in_} features after fit(), got {matrix.shape[1]}"
-            )
-
-        batch = self._expert_factory.predict_all(matrix)
-        
-        # Automatic Support and Quality calculation (Internalized)
-        # In a real sklearn package, these are handled inside predict()
-        support_encoding = self._support_encoder.encode(
-            n_rows=matrix.shape[0],
-            descriptors=batch.descriptors,
-            support_tensor=None, # Inferred in full implementation
-        )
-        tokens = self._token_builder.build(
-            predictions=batch.predictions,
-            descriptors=batch.descriptors,
-            full_expert_id=batch.full_expert_id,
-            quality_features=None,
-            support_encoding=support_encoding,
-        )
-        router_outputs = self._router(tokens.tokens, full_index=batch.full_index)
-        integration = integrate_predictions(
-            expert_predictions=batch.predictions,
-            router_outputs=router_outputs,
-        )
-        return GraphDronePredictResult(
-            predictions=integration.predictions,
-            diagnostics=_build_diagnostics(
-                batch=batch,
-                tokens=tokens,
-                support_encoding=support_encoding,
-                integration=integration,
-            ),
-            expert_ids=batch.expert_ids,
-            token_shape=tuple(int(v) for v in tokens.tokens.shape),
-        )
-
-
-def _build_diagnostics(
-    *,
-    batch,
-    tokens: TokenBatch,
-    support_encoding: SupportEncoding,
-    integration: IntegrationOutputs,
-) -> dict[str, object]:
-    return {
-        "full_expert_id": batch.full_expert_id,
-        "expert_ids": list(batch.expert_ids),
-        "token_field_slices": {key: list(value) for key, value in tokens.field_slices.items()},
-        "token_field_names": {key: list(value) for key, value in tokens.field_names.items()},
-        "quality_feature_names": list(tokens.field_names.get("quality", ())),
-        "support_feature_names": list(support_encoding.feature_names),
-        **integration.diagnostics,
-    }
-
 
 def _coerce_matrix(X: np.ndarray) -> np.ndarray:
     matrix = np.asarray(X, dtype=np.float32)
     if matrix.ndim != 2:
         raise ValueError(f"Expected 2D feature matrix, got shape {matrix.shape}")
     return matrix
+
+class GraphDrone:
+    """
+    High-Performance GraphDrone Meta-Model.
+    Optimized for data-retention and H200 parallelization.
+    """
+    def __init__(self, config: GraphDroneConfig) -> None:
+        self.config = config.validate()
+        self._expert_factory: Optional[PortfolioExpertFactory] = None
+        self._token_builder = UniversalTokenBuilder()
+        self._support_encoder = MomentSupportEncoder()
+        self._router: Optional[torch.nn.Module] = None
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    def fit(self, X: np.ndarray, y: np.ndarray, expert_specs: Optional[tuple[ExpertBuildSpec, ...]] = None) -> "GraphDrone":
+        X = np.asarray(X, dtype=np.float32)
+        y = np.asarray(y, dtype=np.float32)
+        matrix = _coerce_matrix(X)
+        
+        # 1. Expert Fitting (100% DATA UTILIZATION)
+        # We fit experts on the full set to ensure base power matches/exceeds baselines.
+        if expert_specs is None:
+            full_idx = tuple(range(matrix.shape[1]))
+            params = {"n_estimators": 8, "device": self.device} # Higher fidelity default
+            expert_specs = (
+                ExpertBuildSpec(
+                    descriptor=ViewDescriptor(
+                        expert_id=self.config.full_expert_id, family="FULL", 
+                        view_name="Full dataset", is_anchor=True, input_dim=matrix.shape[1], input_indices=full_idx
+                    ),
+                    model_kind="foundation_regressor", 
+                    input_adapter=IdentitySelectorAdapter(indices=full_idx),
+                    model_params=params
+                ),
+            )
+
+        print(f"  -> Fitting specialists on {len(X)} samples...")
+        self._portfolio = fit_portfolio_from_specs(
+            X_train=matrix, y_train=y, specs=expert_specs, full_expert_id=self.config.full_expert_id
+        )
+        self._expert_factory = PortfolioExpertFactory(self._portfolio)
+        
+        # 2. Router Optimization (Internal 90/10 Split)
+        # We use a smaller split here because the experts are already strong.
+        from sklearn.model_selection import train_test_split
+        _, X_va, _, y_va = train_test_split(X, y, test_size=0.1, random_state=42)
+        
+        va_batch = self._expert_factory.predict_all(X_va)
+        va_enc = self._support_encoder.encode(n_rows=len(X_va), descriptors=va_batch.descriptors)
+        va_tokens = self._token_builder.build(
+            predictions=va_batch.predictions, descriptors=va_batch.descriptors,
+            full_expert_id=va_batch.full_expert_id, support_encoding=va_enc
+        )
+        
+        token_dim = va_tokens.tokens.shape[-1]
+        self._router = build_set_router(self.config.router, token_dim=token_dim).to(self.device)
+        optimizer = torch.optim.Adam(self._router.parameters(), lr=1e-3)
+        
+        best_loss = float('inf')
+        patience = 25 # Increased patience for better convergence
+        wait = 0
+        
+        print(f"  -> Optimizing Router on {self.device} (Patience={patience})...")
+        y_va_t = torch.tensor(y_va).float().to(self.device)
+        v_preds_t = torch.tensor(va_batch.predictions).float().to(self.device)
+        v_tokens_t = va_tokens.tokens.to(self.device)
+
+        for epoch in range(500):
+            self._router.train()
+            optimizer.zero_grad()
+            out = self._router(v_tokens_t, full_index=va_batch.full_index)
+            integ = (1 - out.defer_prob) * v_preds_t[:, va_batch.full_index:va_batch.full_index+1] + \
+                    out.defer_prob * (out.specialist_weights * v_preds_t).sum(dim=1, keepdim=True)
+            loss = torch.nn.functional.mse_loss(integ.squeeze(), y_va_t)
+            loss.backward(); optimizer.step()
+            
+            if loss.item() < best_loss:
+                best_loss = loss.item()
+                wait = 0
+            else:
+                wait += 1
+                if wait >= patience:
+                    break
+        return self
+
+    def predict(self, X: np.ndarray, return_diagnostics: bool = False) -> Union[np.ndarray, GraphDronePredictResult]:
+        X = np.asarray(X, dtype=np.float32)
+        matrix = _coerce_matrix(X)
+        batch = self._expert_factory.predict_all(matrix)
+        
+        support_enc = self._support_encoder.encode(n_rows=matrix.shape[0], descriptors=batch.descriptors)
+        tokens = self._token_builder.build(
+            predictions=batch.predictions,
+            descriptors=batch.descriptors,
+            full_expert_id=batch.full_expert_id,
+            support_encoding=support_enc
+        )
+        
+        self._router.eval()
+        with torch.no_grad():
+            token_tensor = tokens.tokens.to(self.device)
+            router_out = self._router(token_tensor, full_index=batch.full_index)
+            integration = integrate_predictions(expert_predictions=batch.predictions, router_outputs=router_out)
+            
+        if return_diagnostics:
+            return GraphDronePredictResult(
+                predictions=integration.predictions,
+                expert_ids=batch.expert_ids,
+                diagnostics=integration.diagnostics
+            )
+        return integration.predictions
