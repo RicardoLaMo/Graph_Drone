@@ -1,4 +1,5 @@
 from __future__ import annotations
+import math
 import torch
 import numpy as np
 from dataclasses import dataclass, field
@@ -122,8 +123,8 @@ class UniversalTokenBuilder:
         for d in descriptors:
             rows.append([
                 float(d.is_anchor),
-                float(getattr(d, 'input_dim', 0)),
-                float(getattr(d, 'preferred_k', 15)),
+                math.log1p(float(getattr(d, 'input_dim', 0))),
+                math.log1p(float(getattr(d, 'preferred_k', 15))),
                 1.0 if d.family == "FULL" else 0.0,
                 1.0 if d.family == "structural_subspace" else 0.0,
                 1.0 if d.family == "local_support" else 0.0,
