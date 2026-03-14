@@ -26,7 +26,7 @@ Each row is one experiment. "Sprint ELO" = 8-dataset × fold-0 canary.
 | P1-BC | `exp/p1-bc-combined` | P1-B + P1-C together | `model.py`, `observers.py` | **−5.1** (1450.6 abs, vs baseline 1455.7) | — | ❌ reject | Combining SNR with vec-observers is net negative |
 | P1-C | `exp/p1-kappa-vec` | Vectorise kappa SVD + LID loop → batch numpy, ~1.5–5x faster on large datasets | `observers.py` | **+6.7** (1462.4 abs, vs baseline 1455.7) | **+17.8** (1458.9, rank 17.8/58, winrate 70.5%) | ✅ keep | merged → `v1-width.2` |
 | P2-A | `exp/p2-random-views` | Random 70% feature subsets (seeds 42/43) instead of fixed half-split for V1/V2 | `adapters/tabarena.py` | **−79.4** (1383.0 abs, vs baseline 1462.4) | — | ❌ reject | Random views collapse — router has no stable spatial signal; tag `exp/rejected/p2-a` |
-| P2-B | `exp/p2-n16` | Increase n_estimators 8→16 → double TabPFN ensemble quality | `adapters/tabarena.py`, `scripts/run_sprint.py` | **+69.4** (1531.8 abs, vs baseline 1462.4) | — | 🔁 full run pending | Strong sprint win; running 43-dataset × 3-fold benchmark |
+| P2-B | `exp/p2-n16` | Increase n_estimators 8→16 → double TabPFN ensemble quality | `adapters/tabarena.py`, `scripts/run_sprint.py` | **+69.4** (1531.8 abs, vs baseline 1462.4) | **−1.7** (1457.2, rank 17.9/58, winrate 70.3%) | ❌ reject | Sprint overfit to 8 datasets; full run flat/slightly negative — sprint canary not representative for estimator count changes |
 | P2-C | `exp/p2-pca-view` | PCA 4th expert (local_support family, PcaProjectionAdapter) + _view_transforms for correct GORA space | `adapters/tabarena.py`, `model.py` | **−26.4** (1436.0 abs, vs baseline 1462.4) | — | ❌ reject | Extra expert adds noise to router; tag `exp/rejected/p2-c` |
 
 ---
