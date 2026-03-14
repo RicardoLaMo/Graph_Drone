@@ -226,6 +226,11 @@ def master(retry: bool = False):
             continue
         env = os.environ.copy()
         env["CUDA_VISIBLE_DEVICES"] = str(i)
+        # Cap OpenBLAS/OMP threads per worker to avoid hitting the 128-thread limit
+        # when 8 workers each try to use all cores simultaneously.
+        env["OPENBLAS_NUM_THREADS"] = "4"
+        env["OMP_NUM_THREADS"] = "4"
+        env["MKL_NUM_THREADS"] = "4"
         log_path = log_dir / f"worker_{i:02d}{log_suffix}.log"
         log_file = open(log_path, "w")
         cmd = [
