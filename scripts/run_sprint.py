@@ -81,7 +81,7 @@ def _worker(worker_idx: int, dataset: str, ignore_cache: bool):
     print(f"[Sprint Worker {worker_idx} | {dataset}] Done → {out}")
 
 
-def _aggregate(baseline_elo: float = 1455.7):
+def _aggregate(baseline_elo: float = 1462.4):  # v1-width.2 sprint ELO
     import pandas as pd
     from tabarena.nips2025_utils.end_to_end import EndToEnd
     from tabarena.nips2025_utils.tabarena_context import TabArenaContext

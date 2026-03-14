@@ -9,7 +9,8 @@ Each row is one experiment. "Sprint ELO" = 8-dataset × fold-0 canary.
 | Label | Branch/Tag | Sprint ELO | Full ELO | Full Rank | Notes |
 |-------|-----------|-----------|---------|-----------|-------|
 | **v1.0.0-gora** | `tag:v1.0.0-gora` | — | **1420.3** | **19 / 58** | 43 datasets × 3 folds, 129 tasks |
-| **v1-width.1** | `tag:v1-width.1` | **1455.7** | **1441.1** | **18.8 / 58** | P0-AB: attn_weights + BCE + NaN guard; current integration baseline |
+| **v1-width.1** | `tag:v1-width.1` | **1455.7** | **1441.1** | **18.8 / 58** | P0-AB: attn_weights + BCE + NaN guard |
+| **v1-width.2** | `tag:v1-width.2` | **1462.4** | **1458.9** | **17.8 / 58** | P1-C: vectorised kappa/LID; **current integration baseline** |
 
 ---
 
@@ -23,7 +24,7 @@ Each row is one experiment. "Sprint ELO" = 8-dataset × fold-0 canary.
 | P1-A | `exp/p1-descriptor-norm` | Normalise input_dim/preferred_k in descriptor token (raw int → fraction) | `token_builder.py` | **−31.1** (1424.6 abs, vs baseline 1455.7) | — | ❌ reject | Hurts on top of P0-AB; tag `exp/rejected/p1-a` |
 | P1-B | `exp/p1-snr-wire` | Wire SNR via k-NN label statistics (mean_y, var_y) → router gets reliability signal | `model.py` | **−0.7** (1455.0 abs, vs baseline 1455.7) | — | ❌ reject | Neutral alone, hurts in combo (P1-BC: −5.1); SNR adds latency without gain |
 | P1-BC | `exp/p1-bc-combined` | P1-B + P1-C together | `model.py`, `observers.py` | **−5.1** (1450.6 abs, vs baseline 1455.7) | — | ❌ reject | Combining SNR with vec-observers is net negative |
-| P1-C | `exp/p1-kappa-vec` | Vectorise kappa SVD + LID loop → batch numpy, ~1.5–5x faster on large datasets | `observers.py` | **+6.7** (1462.4 abs, vs baseline 1455.7) | — | 🔄 full run pending | Sprint positive + latency gain; clean math-equiv refactor |
+| P1-C | `exp/p1-kappa-vec` | Vectorise kappa SVD + LID loop → batch numpy, ~1.5–5x faster on large datasets | `observers.py` | **+6.7** (1462.4 abs, vs baseline 1455.7) | **+17.8** (1458.9, rank 17.8/58, winrate 70.5%) | ✅ keep | merged → `v1-width.2` |
 
 ---
 
