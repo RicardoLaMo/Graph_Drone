@@ -62,7 +62,7 @@ def _worker(worker_idx: int, dataset: str, ignore_cache: bool):
         Experiment(
             name="GraphDrone_v1w_Sprint",
             method_cls=GraphDroneTabArenaAdapter,
-            method_kwargs={"n_estimators": 8, "router_kind": "noise_gate_router"},
+            method_kwargs={"n_estimators": 16, "router_kind": "noise_gate_router"},
         )
     ]
 
