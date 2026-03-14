@@ -109,13 +109,14 @@ class GraphDrone:
         v_preds_t = torch.tensor(va_batch.predictions).float().to(self.device)
         v_tokens_t = va_tokens.tokens.to(self.device)
 
+        BCE_WARMUP = 50  # epochs of MSE warm-up before switching to BCE for binary tasks
         for epoch in range(500):
             self._router.train()
             optimizer.zero_grad()
             out = self._router(v_tokens_t, full_index=va_batch.full_index)
             integ = (1 - out.defer_prob) * v_preds_t[:, va_batch.full_index:va_batch.full_index+1] + \
                     out.defer_prob * (out.specialist_weights * v_preds_t).sum(dim=1, keepdim=True)
-            if is_binary:
+            if is_binary and epoch >= BCE_WARMUP:
                 loss = torch.nn.functional.binary_cross_entropy(
                     integ.squeeze().nan_to_num(nan=0.5, posinf=1.0, neginf=0.0).clamp(1e-6, 1 - 1e-6), y_va_t
                 )
