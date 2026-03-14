@@ -117,7 +117,7 @@ class GraphDrone:
                     out.defer_prob * (out.specialist_weights * v_preds_t).sum(dim=1, keepdim=True)
             if is_binary:
                 loss = torch.nn.functional.binary_cross_entropy(
-                    integ.squeeze().clamp(1e-6, 1 - 1e-6), y_va_t
+                    integ.squeeze().nan_to_num(nan=0.5, posinf=1.0, neginf=0.0).clamp(1e-6, 1 - 1e-6), y_va_t
                 )
             else:
                 loss = torch.nn.functional.mse_loss(integ.squeeze(), y_va_t)
