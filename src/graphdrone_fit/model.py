@@ -46,17 +46,19 @@ class GraphDrone:
         # 1. Expert Fitting (100% DATA UTILIZATION)
         matrix = _coerce_matrix(X)
         self.n_features_in_ = matrix.shape[1]
-        
+        adaptive_k = int(np.clip(int(np.sqrt(len(matrix)) / 2), 5, 30))
+
         if expert_specs is None:
             full_idx = tuple(range(self.n_features_in_))
             params = {"n_estimators": 8, "device": self.device}
             expert_specs = (
                 ExpertBuildSpec(
                     descriptor=ViewDescriptor(
-                        expert_id=self.config.full_expert_id, family="FULL", 
-                        view_name="Full dataset", is_anchor=True, input_dim=self.n_features_in_, input_indices=full_idx
+                        expert_id=self.config.full_expert_id, family="FULL",
+                        view_name="Full dataset", is_anchor=True, input_dim=self.n_features_in_, input_indices=full_idx,
+                        preferred_k=adaptive_k
                     ),
-                    model_kind="foundation_regressor", 
+                    model_kind="foundation_regressor",
                     input_adapter=IdentitySelectorAdapter(indices=full_idx),
                     model_params=params
                 ),

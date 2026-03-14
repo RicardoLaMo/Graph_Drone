@@ -39,14 +39,16 @@ class GraphDroneTabArenaAdapter(AbstractExecModel):
         full_idx = tuple(range(n_features))
         v1_idx = tuple(range(mid))
         v2_idx = tuple(range(mid, n_features))
-        
+        adaptive_k = int(np.clip(int(np.sqrt(len(X)) / 2), 5, 30))
+
         params = {"n_estimators": self.n_estimators, "device": self.device}
-        
+
         specs = (
             ExpertBuildSpec(
                 descriptor=ViewDescriptor(
-                    expert_id="FULL", family="FULL", view_name="Full dataset", 
-                    is_anchor=True, input_dim=n_features, input_indices=full_idx
+                    expert_id="FULL", family="FULL", view_name="Full dataset",
+                    is_anchor=True, input_dim=n_features, input_indices=full_idx,
+                    preferred_k=adaptive_k
                 ),
                 model_kind=model_kind,
                 input_adapter=IdentitySelectorAdapter(indices=full_idx),
@@ -54,8 +56,9 @@ class GraphDroneTabArenaAdapter(AbstractExecModel):
             ),
             ExpertBuildSpec(
                 descriptor=ViewDescriptor(
-                    expert_id="V1", family="structural_subspace", view_name="First half features", 
-                    input_dim=len(v1_idx), input_indices=v1_idx
+                    expert_id="V1", family="structural_subspace", view_name="First half features",
+                    input_dim=len(v1_idx), input_indices=v1_idx,
+                    preferred_k=adaptive_k
                 ),
                 model_kind=model_kind,
                 input_adapter=IdentitySelectorAdapter(indices=v1_idx),
@@ -63,8 +66,9 @@ class GraphDroneTabArenaAdapter(AbstractExecModel):
             ),
             ExpertBuildSpec(
                 descriptor=ViewDescriptor(
-                    expert_id="V2", family="structural_subspace", view_name="Second half features", 
-                    input_dim=len(v2_idx), input_indices=v2_idx
+                    expert_id="V2", family="structural_subspace", view_name="Second half features",
+                    input_dim=len(v2_idx), input_indices=v2_idx,
+                    preferred_k=adaptive_k
                 ),
                 model_kind=model_kind,
                 input_adapter=IdentitySelectorAdapter(indices=v2_idx),
