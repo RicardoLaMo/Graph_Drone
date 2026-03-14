@@ -81,7 +81,7 @@ class GraphDrone:
 
         # 2. Router Optimization (Internal 10% Split)
         from sklearn.model_selection import train_test_split
-        _, X_va, _, y_va = train_test_split(X, y, test_size=0.1, random_state=42)
+        _, X_va, _, y_va = train_test_split(X, y, test_size=0.2, random_state=42)
         
         va_batch = self._expert_factory.predict_all(X_va)
         va_enc = self._support_encoder.encode(n_rows=len(X_va), descriptors=va_batch.descriptors)
