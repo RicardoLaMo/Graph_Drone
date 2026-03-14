@@ -41,7 +41,8 @@ SPRINT_DATASETS = [
     "APSFailure",                   # large binary, GD near-best — regression canary
 ]
 SPRINT_FOLDS = [0]
-N_GPUS = 8
+# GPUs to use for sprint workers. Exclude GPUs with heavy shared tenancy.
+SPRINT_GPUS = [0, 1, 2, 3, 4, 5]
 
 EXPNAME = str(ROOT / "experiments" / "tabarena_sprint")
 EVAL_DIR = ROOT / "eval" / "tabarena_sprint"
@@ -140,7 +141,7 @@ def _master(ignore_cache: bool):
     print(f"Sprint: {len(SPRINT_DATASETS)} datasets × fold {SPRINT_FOLDS[0]}")
     procs = []
     for i, dataset in enumerate(SPRINT_DATASETS):
-        gpu = i % N_GPUS
+        gpu = SPRINT_GPUS[i % len(SPRINT_GPUS)]
         env = os.environ.copy()
         env["CUDA_VISIBLE_DEVICES"] = str(gpu)
         env["OPENBLAS_NUM_THREADS"] = "4"
