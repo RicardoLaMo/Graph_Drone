@@ -73,6 +73,9 @@ experiments/gora_tabular/figures/**/*.png
 # TabArena benchmark artifacts (large, ephemeral)
 experiments/tabarena_benchmark/
 experiments/tabarena_full/
+experiments/tabarena_sprint/
+experiments/tabarena_p0ab/
+experiments/tabarena_p1*/
 eval/
 external/
 logs/
