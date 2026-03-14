@@ -74,7 +74,8 @@ class GraphDrone:
         )
         self._expert_factory = PortfolioExpertFactory(self._portfolio)
         
-        # Store training views for GORA observers
+        # Store training views for GORA observers and SNR support encoding
+        self._y_train = y.copy()
         for spec in expert_specs:
             fitted_adapter = spec.input_adapter.fit(matrix)
             self._train_views[spec.descriptor.expert_id] = fitted_adapter.transform(matrix)
@@ -84,8 +85,8 @@ class GraphDrone:
         _, X_va, _, y_va = train_test_split(X, y, test_size=0.1, random_state=42)
         
         va_batch = self._expert_factory.predict_all(X_va)
-        va_enc = self._support_encoder.encode(n_rows=len(X_va), descriptors=va_batch.descriptors)
-        
+        va_enc = self._compute_support_encoding(X_va, va_batch.descriptors)
+
         # Compute GORA observers for VAL
         va_gora = self._compute_gora_obs(X_va, va_batch.descriptors)
         
@@ -151,13 +152,42 @@ class GraphDrone:
             
         return torch.tensor(np.stack(all_obs, axis=1), dtype=torch.float32)
 
+    def _compute_support_encoding(self, X: np.ndarray, descriptors: tuple[ViewDescriptor, ...]) -> "SupportEncoding":
+        """
+        For each expert view, query k-NN in the training set and return
+        (mean_y, var_y) per query row.  This produces a [N, E, 2] tensor
+        which the token builder uses to compute log-SNR:
+            SNR_e = |pred_e - mean_y_neighbors| / sqrt(var_y_neighbors + eps)
+        SNR tells the router how surprising each expert's prediction is
+        relative to what label values its training neighbours have.
+        """
+        from sklearn.neighbors import NearestNeighbors
+        all_support = []
+        for d in descriptors:
+            X_tr_v = self._train_views[d.expert_id]
+            X_v = X[:, list(d.input_indices)] if d.input_indices else X
+            knn = NearestNeighbors(n_neighbors=d.preferred_k).fit(X_tr_v)
+            _, indices = knn.kneighbors(X_v)
+            # indices: [N, K] — rows of X_tr_v that are neighbors
+            y_nb = self._y_train[indices]          # [N, K]
+            mean_y = y_nb.mean(axis=1, keepdims=True)   # [N, 1]
+            var_y  = y_nb.var(axis=1, keepdims=True)    # [N, 1]
+            all_support.append(np.concatenate([mean_y, var_y], axis=1))  # [N, 2]
+        # Stack to [N, E, 2]
+        support_tensor = np.stack(all_support, axis=1).astype(np.float32)
+        return self._support_encoder.encode(
+            n_rows=X.shape[0],
+            descriptors=descriptors,
+            support_tensor=support_tensor,
+        )
+
     def predict(self, X: np.ndarray, return_diagnostics: bool = False) -> Union[np.ndarray, GraphDronePredictResult]:
         X = np.asarray(X, dtype=np.float32)
         matrix = _coerce_matrix(X)
         batch = self._expert_factory.predict_all(matrix)
         
         # Internalized Support/Token/GORA workflow
-        support_enc = self._support_encoder.encode(n_rows=matrix.shape[0], descriptors=batch.descriptors)
+        support_enc = self._compute_support_encoding(matrix, batch.descriptors)
         gora_obs = self._compute_gora_obs(matrix, batch.descriptors)
         
         tokens = self._token_builder.build(
