@@ -69,3 +69,14 @@ models/
 !models/**/.gitkeep
 experiments/gora_tabular/artifacts/*.npy
 experiments/gora_tabular/figures/**/*.png
+
+# TabArena benchmark artifacts (large, ephemeral)
+experiments/tabarena_benchmark/
+experiments/tabarena_full/
+eval/
+external/
+logs/
+
+# Stray files
+std.out
+0
