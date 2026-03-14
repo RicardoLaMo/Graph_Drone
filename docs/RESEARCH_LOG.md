@@ -21,8 +21,9 @@ Each row is one experiment. "Sprint ELO" = 8-dataset × fold-0 canary.
 | P0-B | `exp/p0-loss-fn` | BCE loss for binary tasks → router optimises correct metric | `model.py:111` | — | — | ✅ merged into P0-AB | — |
 | P0-AB | `exp/p0-combined-v2` | Both P0-A + P0-B together (+ NaN guard in BCE path) | `set_router.py`, `model.py` | **+35.4** | **+20.8** (1441.1, rank 18.8/58, winrate 68.7%) | ✅ keep | merged → `v1-width.1` |
 | P1-A | `exp/p1-descriptor-norm` | Normalise input_dim/preferred_k in descriptor token (raw int → fraction) | `token_builder.py` | **−31.1** (1424.6 abs, vs baseline 1455.7) | — | ❌ reject | Hurts on top of P0-AB; tag `exp/rejected/p1-a` |
-| P1-B | `exp/p1-snr-wire` | Wire SNR via k-NN label statistics (mean_y, var_y) → router gets reliability signal | `model.py` | **−0.7** (1455.0 abs, vs baseline 1455.7) | — | 🔁 iterate | Neutral alone; combine with P1-C → `exp/p1-bc-combined` |
-| P1-C | `exp/p1-kappa-vec` | Vectorise kappa SVD + LID loop → batch numpy, ~1.5–5x faster on large datasets | `observers.py` | **+6.7** (1462.4 abs, vs baseline 1455.7) | — | 🔄 full run pending | Sprint positive + latency gain |
+| P1-B | `exp/p1-snr-wire` | Wire SNR via k-NN label statistics (mean_y, var_y) → router gets reliability signal | `model.py` | **−0.7** (1455.0 abs, vs baseline 1455.7) | — | ❌ reject | Neutral alone, hurts in combo (P1-BC: −5.1); SNR adds latency without gain |
+| P1-BC | `exp/p1-bc-combined` | P1-B + P1-C together | `model.py`, `observers.py` | **−5.1** (1450.6 abs, vs baseline 1455.7) | — | ❌ reject | Combining SNR with vec-observers is net negative |
+| P1-C | `exp/p1-kappa-vec` | Vectorise kappa SVD + LID loop → batch numpy, ~1.5–5x faster on large datasets | `observers.py` | **+6.7** (1462.4 abs, vs baseline 1455.7) | — | 🔄 full run pending | Sprint positive + latency gain; clean math-equiv refactor |
 
 ---
 
