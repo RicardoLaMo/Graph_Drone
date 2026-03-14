@@ -23,9 +23,9 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "external" / "tabarena" / "tabarena"))
 
-EXPNAME = str(ROOT / "experiments" / "tabarena_full")
-EVAL_DIR = ROOT / "eval" / "tabarena_full"
-WORKER_RESULTS_DIR = ROOT / "experiments" / "tabarena_full" / "_worker_results"
+EXPNAME = str(ROOT / "experiments" / "tabarena_p0ab")
+EVAL_DIR = ROOT / "eval" / "tabarena_p0ab"
+WORKER_RESULTS_DIR = ROOT / "experiments" / "tabarena_p0ab" / "_worker_results"
 N_GPUS = 8
 FOLDS = [0, 1, 2]  # All 3 folds for every dataset
 
@@ -43,7 +43,7 @@ def get_eligible_datasets():
 def get_incomplete_datasets():
     """Return names of datasets that don't yet have all 3 folds completed."""
     names, tids, task_metadata = get_eligible_datasets()
-    exp_dir = Path(EXPNAME) / "data" / "GraphDrone_v2026.03_Consolidated"
+    exp_dir = Path(EXPNAME) / "data" / "GraphDrone_P0AB"
     from tabarena.nips2025_utils.tabarena_context import TabArenaContext
     ctx = TabArenaContext()
     meta = ctx.task_metadata
@@ -101,7 +101,7 @@ def run_worker(worker_idx: int, gpu_id: int, explicit_datasets: list[str] | None
 
     methods = [
         Experiment(
-            name="GraphDrone_v2026.03_Consolidated",
+            name="GraphDrone_P0AB",
             method_cls=GraphDroneTabArenaAdapter,
             method_kwargs={"n_estimators": 8, "router_kind": "noise_gate_router"},
         )

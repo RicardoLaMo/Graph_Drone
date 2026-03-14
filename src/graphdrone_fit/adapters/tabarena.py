@@ -84,7 +84,8 @@ class GraphDroneTabArenaAdapter(AbstractExecModel):
             X_arr = self.imputer.fit_transform(X_arr)
 
         self.model = GraphDrone(config)
-        self.model.fit(X_arr, y.values.astype(np.float32), expert_specs=specs)
+        self.model.fit(X_arr, y.values.astype(np.float32), expert_specs=specs,
+                       problem_type=self.problem_type)
         return self
 
     def _predict(self, X: pd.DataFrame) -> pd.Series:

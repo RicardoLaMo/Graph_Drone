@@ -15,9 +15,9 @@ Each row is one experiment. "Sprint ELO" = 8-dataset × fold-0 canary.
 
 | ID | Branch | Hypothesis | Changed Files | Sprint ELO Δ | Full ELO Δ | Status | Decision |
 |----|--------|-----------|--------------|-------------|-----------|--------|----------|
-| P0-A | `exp/p0-attn-fix` | `attn_out` (not `v`) → router has inter-expert attention | `set_router.py:59` | _pending_ | — | 🔄 running | — |
-| P0-B | `exp/p0-loss-fn` | BCE loss for binary tasks → router optimises correct metric | `model.py:111` | _pending_ | — | 🔄 running | — |
-| P0-AB | `exp/p0-combined` | Both P0-A + P0-B together | both | _pending_ | — | 🔄 running | — |
+| P0-A | `exp/p0-attn-fix` | `attn_weights` (not `v`) → router has true inter-expert attention | `set_router.py:59` | — | — | ✅ merged into P0-AB | — |
+| P0-B | `exp/p0-loss-fn` | BCE loss for binary tasks → router optimises correct metric | `model.py:111` | — | — | ✅ merged into P0-AB | — |
+| P0-AB | `exp/p0-combined-v2` | Both P0-A + P0-B together (+ NaN guard in BCE path) | `set_router.py`, `model.py` | **+35.4** | **+20.8** (1441.1, rank 18.8/58, winrate 68.7%) | ✅ keep | merge to v1-width → tag v1-width.1 |
 
 ---
 

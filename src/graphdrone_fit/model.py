@@ -39,7 +39,7 @@ class GraphDrone:
         self._train_views: dict[str, np.ndarray] = {}
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    def fit(self, X: np.ndarray, y: np.ndarray, expert_specs: Optional[tuple[ExpertBuildSpec, ...]] = None) -> "GraphDrone":
+    def fit(self, X: np.ndarray, y: np.ndarray, expert_specs: Optional[tuple[ExpertBuildSpec, ...]] = None, problem_type: Optional[str] = None) -> "GraphDrone":
         X = np.asarray(X, dtype=np.float32)
         y = np.asarray(y, dtype=np.float32)
         
@@ -61,6 +61,12 @@ class GraphDrone:
                     model_params=params
                 ),
             )
+
+        # Auto-detect problem type if not provided
+        unique_y = np.unique(y)
+        if problem_type is None:
+            problem_type = "binary" if (len(unique_y) == 2 and set(unique_y.tolist()) <= {0.0, 1.0}) else "regression"
+        self._problem_type = problem_type
 
         print(f"  -> Fitting specialists on {len(X)} samples...")
         self._portfolio = fit_portfolio_from_specs(
@@ -97,7 +103,8 @@ class GraphDrone:
         patience = 25
         wait = 0
         
-        print(f"  -> Optimizing Router on {self.device} (Patience={patience})...")
+        is_binary = (self._problem_type == "binary")
+        print(f"  -> Optimizing Router on {self.device} (Patience={patience}, loss={'BCE' if is_binary else 'MSE'})...")
         y_va_t = torch.tensor(y_va).float().to(self.device)
         v_preds_t = torch.tensor(va_batch.predictions).float().to(self.device)
         v_tokens_t = va_tokens.tokens.to(self.device)
@@ -108,7 +115,12 @@ class GraphDrone:
             out = self._router(v_tokens_t, full_index=va_batch.full_index)
             integ = (1 - out.defer_prob) * v_preds_t[:, va_batch.full_index:va_batch.full_index+1] + \
                     out.defer_prob * (out.specialist_weights * v_preds_t).sum(dim=1, keepdim=True)
-            loss = torch.nn.functional.mse_loss(integ.squeeze(), y_va_t)
+            if is_binary:
+                loss = torch.nn.functional.binary_cross_entropy(
+                    integ.squeeze().nan_to_num(nan=0.5, posinf=1.0, neginf=0.0).clamp(1e-6, 1 - 1e-6), y_va_t
+                )
+            else:
+                loss = torch.nn.functional.mse_loss(integ.squeeze(), y_va_t)
             loss.backward(); optimizer.step()
             
             if loss.item() < best_loss:
