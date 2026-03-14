@@ -40,7 +40,9 @@ class GraphDroneTabArenaAdapter(AbstractExecModel):
         v1_idx = tuple(range(mid))
         v2_idx = tuple(range(mid, n_features))
         
-        params = {"n_estimators": self.n_estimators, "device": self.device}
+        n = len(X)
+        n_est = 4 if n < 500 else 16 if n >= 5000 else self.n_estimators
+        params = {"n_estimators": n_est, "device": self.device}
         
         specs = (
             ExpertBuildSpec(
