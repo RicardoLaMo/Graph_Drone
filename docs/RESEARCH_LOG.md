@@ -17,7 +17,10 @@ Each row is one experiment. "Sprint ELO" = 8-dataset × fold-0 canary.
 |----|--------|-----------|--------------|-------------|-----------|--------|----------|
 | P0-A | `exp/p0-attn-fix` | `attn_weights` (not `v`) → router has true inter-expert attention | `set_router.py:59` | — | — | ✅ merged into P0-AB | — |
 | P0-B | `exp/p0-loss-fn` | BCE loss for binary tasks → router optimises correct metric | `model.py:111` | — | — | ✅ merged into P0-AB | — |
-| P0-AB | `exp/p0-combined-v2` | Both P0-A + P0-B together (+ NaN guard in BCE path) | `set_router.py`, `model.py` | **+35.4** | **+20.8** (1441.1, rank 18.8/58, winrate 68.7%) | ✅ keep | merge to v1-width → tag v1-width.1 |
+| P0-AB | `exp/p0-combined-v2` | Both P0-A + P0-B together (+ NaN guard in BCE path) | `set_router.py`, `model.py` | **+35.4** | **+20.8** (1441.1, rank 18.8/58, winrate 68.7%) | ✅ keep | merged → `v1-width.1` |
+| P1-A | `exp/p1-descriptor-norm` | Normalise input_dim/preferred_k in descriptor token (raw int → fraction) | `token_builder.py` | _pending_ | — | 🔄 running | — |
+| P1-B | `exp/p1-snr-wire` | Wire SNR via k-NN label statistics (mean_y, var_y) → router gets reliability signal | `model.py` | _pending_ | — | 🔄 running | — |
+| P1-C | `exp/p1-kappa-vec` | Vectorise kappa SVD + LID loop → batch numpy, ~1.5–5x faster on large datasets | `observers.py` | _pending_ | — | 🔄 running | — |
 
 ---
 
