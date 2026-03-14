@@ -35,10 +35,17 @@ class GraphDroneTabArenaAdapter(AbstractExecModel):
         else:
             model_kind = "foundation_regressor"
 
-        # Define default 3-view portfolio for TabArena
+        # Define 3-view portfolio: FULL + two random 70% subsets (seeded).
+        # Random subsets give genuine ensemble diversity independent of
+        # feature ordering, vs the fixed half-split which is arbitrary.
         full_idx = tuple(range(n_features))
-        v1_idx = tuple(range(mid))
-        v2_idx = tuple(range(mid, n_features))
+        rng = np.random.default_rng(seed=42)
+        perm = rng.permutation(n_features)
+        k = max(int(0.70 * n_features), 1)
+        v1_idx = tuple(sorted(perm[:k].tolist()))
+        # V2 uses a different random 70% (seed 43) for complementary diversity
+        perm2 = np.random.default_rng(seed=43).permutation(n_features)
+        v2_idx = tuple(sorted(perm2[:k].tolist()))
         
         params = {"n_estimators": self.n_estimators, "device": self.device}
         
@@ -54,7 +61,7 @@ class GraphDroneTabArenaAdapter(AbstractExecModel):
             ),
             ExpertBuildSpec(
                 descriptor=ViewDescriptor(
-                    expert_id="V1", family="structural_subspace", view_name="First half features", 
+                    expert_id="V1", family="structural_subspace", view_name="Random 70% subset A",
                     input_dim=len(v1_idx), input_indices=v1_idx
                 ),
                 model_kind=model_kind,
@@ -63,7 +70,7 @@ class GraphDroneTabArenaAdapter(AbstractExecModel):
             ),
             ExpertBuildSpec(
                 descriptor=ViewDescriptor(
-                    expert_id="V2", family="structural_subspace", view_name="Second half features", 
+                    expert_id="V2", family="structural_subspace", view_name="Random 70% subset B",
                     input_dim=len(v2_idx), input_indices=v2_idx
                 ),
                 model_kind=model_kind,
