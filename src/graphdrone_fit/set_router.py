@@ -56,7 +56,7 @@ class ContextualTransformerRouter(nn.Module):
         v = self.v_proj(tokens)
         
         attn_out, _ = self.attn(q, k, v)
-        specialist_weights = F.softmax(self.alpha_head(v).squeeze(-1), dim=-1)
+        specialist_weights = F.softmax(self.alpha_head(attn_out).squeeze(-1), dim=-1)
         defer_prob = torch.sigmoid(self.defer_head(anchor_token.squeeze(1)))
         
         return RouterOutputs(specialist_weights, defer_prob, full_index, "contextual_transformer_router")
