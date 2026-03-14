@@ -71,8 +71,7 @@ experiments/gora_tabular/artifacts/*.npy
 experiments/gora_tabular/figures/**/*.png
 
 # TabArena benchmark artifacts (large, ephemeral)
-experiments/tabarena_benchmark/
-experiments/tabarena_full/
+experiments/tabarena_*/
 eval/
 external/
 logs/
