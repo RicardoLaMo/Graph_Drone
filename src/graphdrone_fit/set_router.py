@@ -42,7 +42,6 @@ class ContextualTransformerRouter(nn.Module):
         self.v_proj = nn.Linear(token_dim, hidden_dim)
         self.attn = nn.MultiheadAttention(hidden_dim, n_heads, batch_first=True)
         
-        self.alpha_head = nn.Sequential(nn.Linear(hidden_dim, 32), nn.GELU(), nn.Linear(32, 1))
         self.defer_head = nn.Sequential(nn.Linear(token_dim, 32), nn.GELU(), nn.Linear(32, 1))
 
     def forward(self, tokens: torch.Tensor, *, full_index: int) -> RouterOutputs:
@@ -55,8 +54,11 @@ class ContextualTransformerRouter(nn.Module):
         k = self.k_proj(tokens)
         v = self.v_proj(tokens)
         
-        attn_out, _ = self.attn(q, k, v)
-        specialist_weights = F.softmax(self.alpha_head(attn_out).squeeze(-1), dim=-1)
+        # need_weights=True → attn_weights shape [B, 1, E] (anchor attends to all E experts)
+        # average_attn_weights averages over heads → clean [B, 1, E] distribution
+        _, attn_weights = self.attn(q, k, v, need_weights=True, average_attn_weights=True)
+        # squeeze(1) → [B, E]: cross-attention distribution = learned relevance per expert
+        specialist_weights = attn_weights.squeeze(1)
         defer_prob = torch.sigmoid(self.defer_head(anchor_token.squeeze(1)))
         
         return RouterOutputs(specialist_weights, defer_prob, full_index, "contextual_transformer_router")
