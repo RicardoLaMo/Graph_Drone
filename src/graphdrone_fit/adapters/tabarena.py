@@ -5,6 +5,7 @@ import torch
 from sklearn.impute import SimpleImputer
 from tabarena.benchmark.models.wrapper.abstract_class import AbstractExecModel
 from graphdrone_fit import GraphDrone, GraphDroneConfig, SetRouterConfig, ExpertBuildSpec, ViewDescriptor, IdentitySelectorAdapter
+from graphdrone_fit.expert_factory import PcaProjectionAdapter
 
 class GraphDroneTabArenaAdapter(AbstractExecModel):
     """
@@ -35,17 +36,18 @@ class GraphDroneTabArenaAdapter(AbstractExecModel):
         else:
             model_kind = "foundation_regressor"
 
-        # Define default 3-view portfolio for TabArena
+        # Define 4-view portfolio: FULL + V1 + V2 + PCA compressed view
         full_idx = tuple(range(n_features))
         v1_idx = tuple(range(mid))
         v2_idx = tuple(range(mid, n_features))
-        
+        n_pca = min(max(n_features // 2, 2), 10)  # 2–10 PCA components
+
         params = {"n_estimators": self.n_estimators, "device": self.device}
-        
+
         specs = (
             ExpertBuildSpec(
                 descriptor=ViewDescriptor(
-                    expert_id="FULL", family="FULL", view_name="Full dataset", 
+                    expert_id="FULL", family="FULL", view_name="Full dataset",
                     is_anchor=True, input_dim=n_features, input_indices=full_idx
                 ),
                 model_kind=model_kind,
@@ -54,7 +56,7 @@ class GraphDroneTabArenaAdapter(AbstractExecModel):
             ),
             ExpertBuildSpec(
                 descriptor=ViewDescriptor(
-                    expert_id="V1", family="structural_subspace", view_name="First half features", 
+                    expert_id="V1", family="structural_subspace", view_name="First half features",
                     input_dim=len(v1_idx), input_indices=v1_idx
                 ),
                 model_kind=model_kind,
@@ -63,13 +65,22 @@ class GraphDroneTabArenaAdapter(AbstractExecModel):
             ),
             ExpertBuildSpec(
                 descriptor=ViewDescriptor(
-                    expert_id="V2", family="structural_subspace", view_name="Second half features", 
+                    expert_id="V2", family="structural_subspace", view_name="Second half features",
                     input_dim=len(v2_idx), input_indices=v2_idx
                 ),
                 model_kind=model_kind,
                 input_adapter=IdentitySelectorAdapter(indices=v2_idx),
                 model_params=params
-            )
+            ),
+            ExpertBuildSpec(
+                descriptor=ViewDescriptor(
+                    expert_id="PCA", family="local_support", view_name="PCA compressed view",
+                    input_dim=n_features, input_indices=full_idx
+                ),
+                model_kind=model_kind,
+                input_adapter=PcaProjectionAdapter(n_components=n_pca),
+                model_params=params
+            ),
         )
 
         config = GraphDroneConfig(

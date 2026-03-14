@@ -37,6 +37,7 @@ class GraphDrone:
         self._support_encoder = MomentSupportEncoder()
         self._router: Optional[torch.nn.Module] = None
         self._train_views: dict[str, np.ndarray] = {}
+        self._view_transforms: dict[str, object] = {}  # expert_id → fitted transform callable
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
     def fit(self, X: np.ndarray, y: np.ndarray, expert_specs: Optional[tuple[ExpertBuildSpec, ...]] = None, problem_type: Optional[str] = None) -> "GraphDrone":
@@ -74,10 +75,11 @@ class GraphDrone:
         )
         self._expert_factory = PortfolioExpertFactory(self._portfolio)
         
-        # Store training views for GORA observers
+        # Store training views + fitted adapters for GORA / SNR queries
         for spec in expert_specs:
             fitted_adapter = spec.input_adapter.fit(matrix)
             self._train_views[spec.descriptor.expert_id] = fitted_adapter.transform(matrix)
+            self._view_transforms[spec.descriptor.expert_id] = fitted_adapter.transform
 
         # 2. Router Optimization (Internal 10% Split)
         from sklearn.model_selection import train_test_split
@@ -139,8 +141,10 @@ class GraphDrone:
         all_obs = []
         for d in descriptors:
             X_tr_v = self._train_views[d.expert_id]
-            # subselect logic
-            X_v = X[:, list(d.input_indices)] if d.input_indices else X
+            # Use the fitted adapter transform so non-identity projections
+            # (e.g. PCA) query kNN in the correct projected space.
+            transform = self._view_transforms.get(d.expert_id)
+            X_v = transform(X) if transform is not None else (X[:, list(d.input_indices)] if d.input_indices else X)
             
             knn = NearestNeighbors(n_neighbors=d.preferred_k).fit(X_tr_v)
             dists, indices = knn.kneighbors(X_v)
