@@ -118,15 +118,20 @@ class UniversalTokenBuilder:
         return TokenBatch(tokens, expert_ids, slices, names)
 
     def _build_descriptor_tensor(self, descriptors: tuple[ViewDescriptor, ...]) -> tuple[torch.Tensor, tuple[str, ...]]:
+        # Normalise input_dim by the anchor (full-view) expert's dim so the
+        # router sees coverage fraction [0,1] rather than a raw feature count
+        # that varies wildly across datasets (e.g. 10 vs 500 features).
+        full_dim = max((getattr(d, 'input_dim', 1) for d in descriptors if getattr(d, 'is_anchor', False)), default=1)
+        full_dim = max(full_dim, 1)
         rows = []
         for d in descriptors:
             rows.append([
                 float(d.is_anchor),
-                float(getattr(d, 'input_dim', 0)),
-                float(getattr(d, 'preferred_k', 15)),
+                float(getattr(d, 'input_dim', 0)) / full_dim,
+                float(getattr(d, 'preferred_k', 15)) / 100.0,
                 1.0 if d.family == "FULL" else 0.0,
                 1.0 if d.family == "structural_subspace" else 0.0,
                 1.0 if d.family == "local_support" else 0.0,
             ])
-        names = ("is_anchor", "input_dim", "preferred_k", "fam_full", "fam_subspace", "fam_support")
+        names = ("is_anchor", "input_dim_frac", "preferred_k_norm", "fam_full", "fam_subspace", "fam_support")
         return torch.tensor(rows, dtype=torch.float32), names
