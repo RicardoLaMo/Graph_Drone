@@ -26,7 +26,8 @@ sys.path.insert(0, str(ROOT / "external" / "tabarena" / "tabarena"))
 EXPNAME = str(ROOT / "experiments" / "tabarena_p1c")
 EVAL_DIR = ROOT / "eval" / "tabarena_p1c"
 WORKER_RESULTS_DIR = ROOT / "experiments" / "tabarena_p1c" / "_worker_results"
-N_GPUS = 8
+# GPUs to use for full benchmark workers. Exclude GPUs with heavy shared tenancy.
+BENCH_GPUS = [0, 1, 2, 3, 4, 5]
 FOLDS = [0, 1, 2]  # All 3 folds for every dataset
 
 
@@ -206,13 +207,13 @@ def master(retry: bool = False):
         log_suffix = ""
 
     print(f"Folds: {FOLDS}  →  {len(names_to_run) * len(FOLDS)} total tasks")
-    n_workers = min(N_GPUS, len(names_to_run))
-    print(f"GPUs: {n_workers}  →  ~{max(1, len(names_to_run) * len(FOLDS) // n_workers)} tasks/GPU")
+    n_workers = min(len(BENCH_GPUS), len(names_to_run))
+    print(f"GPUs: {BENCH_GPUS[:n_workers]}  →  ~{max(1, len(names_to_run) * len(FOLDS) // n_workers)} tasks/GPU")
     print()
 
     chunks = split_into_chunks(names_to_run, n_workers)
     for i, chunk in enumerate(chunks):
-        print(f"  GPU {i}: {len(chunk)} datasets → {chunk}")
+        print(f"  GPU {BENCH_GPUS[i]}: {len(chunk)} datasets → {chunk}")
 
     print("\nLaunching workers...")
     script = str(ROOT / "scripts" / "run_tabarena_parallel.py")
@@ -222,26 +223,27 @@ def master(retry: bool = False):
 
     for i in range(n_workers):
         if not chunks[i]:
-            print(f"  [GPU {i}] No datasets, skipping.")
+            print(f"  [GPU {BENCH_GPUS[i]}] No datasets, skipping.")
             continue
         env = os.environ.copy()
-        env["CUDA_VISIBLE_DEVICES"] = str(i)
+        env["CUDA_VISIBLE_DEVICES"] = str(BENCH_GPUS[i])
         # Cap OpenBLAS/OMP threads per worker to avoid hitting the 128-thread limit
         # when 8 workers each try to use all cores simultaneously.
         env["OPENBLAS_NUM_THREADS"] = "4"
         env["OMP_NUM_THREADS"] = "4"
         env["MKL_NUM_THREADS"] = "4"
+        gpu_id = BENCH_GPUS[i]
         log_path = log_dir / f"worker_{i:02d}{log_suffix}.log"
         log_file = open(log_path, "w")
         cmd = [
             sys.executable, script,
             "--worker", str(i),
-            "--gpu", str(i),
+            "--gpu", str(gpu_id),
             "--datasets", ",".join(chunks[i]),
         ]
         p = subprocess.Popen(cmd, env=env, stdout=log_file, stderr=subprocess.STDOUT)
         procs.append((i, p, log_file, log_path))
-        print(f"  [GPU {i}] PID {p.pid} | log: {log_path}")
+        print(f"  [GPU {gpu_id}] PID {p.pid} | log: {log_path}")
 
     print(f"\nAll {len(procs)} workers launched. Waiting for completion...")
     print("(Monitor with: tail -f logs/worker_XX.log)\n")
