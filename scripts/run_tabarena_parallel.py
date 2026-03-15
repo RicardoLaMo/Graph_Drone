@@ -23,9 +23,9 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "external" / "tabarena" / "tabarena"))
 
-EXPNAME = str(ROOT / "experiments" / "tabarena_p1c")
-EVAL_DIR = ROOT / "eval" / "tabarena_p1c"
-WORKER_RESULTS_DIR = ROOT / "experiments" / "tabarena_p1c" / "_worker_results"
+EXPNAME = str(ROOT / "experiments" / "tabarena_p3c")
+EVAL_DIR = ROOT / "eval" / "tabarena_p3c"
+WORKER_RESULTS_DIR = ROOT / "experiments" / "tabarena_p3c" / "_worker_results"
 # GPUs to use for full benchmark workers. Exclude GPUs with heavy shared tenancy.
 BENCH_GPUS = [0, 1, 2, 3, 4, 5]
 FOLDS = [0, 1, 2]  # All 3 folds for every dataset
@@ -44,7 +44,7 @@ def get_eligible_datasets():
 def get_incomplete_datasets():
     """Return names of datasets that don't yet have all 3 folds completed."""
     names, tids, task_metadata = get_eligible_datasets()
-    exp_dir = Path(EXPNAME) / "data" / "GraphDrone_P1C"
+    exp_dir = Path(EXPNAME) / "data" / "GraphDrone_P3C"
     from tabarena.nips2025_utils.tabarena_context import TabArenaContext
     ctx = TabArenaContext()
     meta = ctx.task_metadata
@@ -102,7 +102,7 @@ def run_worker(worker_idx: int, gpu_id: int, explicit_datasets: list[str] | None
 
     methods = [
         Experiment(
-            name="GraphDrone_P1C",
+            name="GraphDrone_P3C",
             method_cls=GraphDroneTabArenaAdapter,
             method_kwargs={"n_estimators": 8, "router_kind": "noise_gate_router"},
         )
