@@ -32,7 +32,7 @@ Each row is one experiment. "Sprint ELO" = 8-dataset × fold-0 canary.
 | P3-B | `exp/p3-log-descriptor` | Log1p-scale `input_dim`/`preferred_k` in descriptor token | `token_builder.py` | **−78.7** (1383.7 abs) | — | ❌ reject | Descriptor encoding hurts as much as P1-A normalisation; tag `exp/rejected/p3-b` |
 | P3-C | `exp/p3-loss-curriculum` | MSE warm-up (50 epochs) before BCE for binary → better router initialisation | `model.py` | **+69.8** (1532.2 abs, vs baseline 1462.4) | — | 🔁 full run pending | Strong sprint win |
 | P3-D | `exp/p3-adaptive-k` | Adaptive GORA k = clip(sqrt(N)/2, 5, 30) | `model.py`, `adapters/tabarena.py` | **+2.4** (1464.8 abs) | — | ⚠️ borderline | Marginal sprint gain; skip standalone full run, consider in combo |
-| P3-E | `exp/p3-adaptive-nest` | Adaptive n_estimators: 4/8/16 for N<500/500–5000/>5000 | `adapters/tabarena.py` | **+106.2** (1568.6 abs, vs baseline 1462.4) | — | 🔁 full run pending | Largest sprint win to date |
+| P3-E | `exp/p3-adaptive-nest` | Adaptive n_estimators: 4/8/16 for N<500/500–5000/>5000 | `adapters/tabarena.py` | **+106.2** (1568.6 abs, vs baseline 1462.4) | **−0.5** (1458.4, rank 17.9/58, winrate 70.4%) | ❌ reject | Sprint canary biased toward large datasets; n=4 on small datasets offsets n=16 gains; tag `exp/rejected/p3-e` |
 
 ---
 
