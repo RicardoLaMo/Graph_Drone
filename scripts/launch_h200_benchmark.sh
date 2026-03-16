@@ -109,13 +109,16 @@ if [ "$ENABLE_CHECKPOINT" = false ]; then
     BENCHMARK_CMD="$BENCHMARK_CMD --no-checkpoint"
 fi
 
-BENCHMARK_CMD="$BENCHMARK_CMD --checkpoint --gpus 1 2 3 4 5 --workers 5"
+# Use GPUs 0 and 1 (2-7 are busy) with 2 workers
+# GpuMemoryTracker now disabled in adapter to avoid CUDA sync errors
+BENCHMARK_CMD="$BENCHMARK_CMD --checkpoint --gpus 0 1 --workers 2"
 
 echo ""
 echo -e "${BLUE}Benchmark configuration:${NC}"
 echo "  Session name: $SESSION_NAME"
-echo "  GPUs: 1 2 3 4 5"
-echo "  Workers: 5"
+echo "  GPUs: 0, 1 (GPUs 2-7 are busy)"
+echo "  Workers: 2 (one per GPU for parallelism)"
+echo "  CUDA_LAUNCH_BLOCKING: 1 (synchronous GPU execution)"
 echo "  Checkpoint: $ENABLE_CHECKPOINT"
 echo "  Log file: $ROOT_DIR/logs/tabarena_h200_parallel.log"
 echo ""

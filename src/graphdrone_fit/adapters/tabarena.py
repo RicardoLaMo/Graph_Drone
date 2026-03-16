@@ -5,12 +5,26 @@ import torch
 from tabarena.benchmark.models.wrapper.abstract_class import AbstractExecModel
 from graphdrone_fit import GraphDrone, GraphDroneConfig, SetRouterConfig, ExpertBuildSpec, ViewDescriptor, IdentitySelectorAdapter
 
+# Monkey-patch GpuMemoryTracker to disable GPU memory tracking
+# This avoids CUDA device-side assert errors caused by hardcoded device=0
+import tabarena.utils.memory_utils as mem_utils
+_original_gpu_tracker_init = mem_utils.GpuMemoryTracker.__init__
+
+def _patched_gpu_tracker_init(self, device=0, interval=0.05):
+    _original_gpu_tracker_init(self, device=device, interval=interval)
+    # Force disable GPU memory tracking to avoid CUDA sync errors
+    self.enabled = False
+
+mem_utils.GpuMemoryTracker.__init__ = _patched_gpu_tracker_init
+
 class GraphDroneTabArenaAdapter(AbstractExecModel):
     """
     Enhanced Adapter for TabArena with Hybrid Prior support.
     """
-    def __init__(self, *args, n_estimators: int = 8, router_kind: str = "noise_gate_router", 
+    def __init__(self, *args, n_estimators: int = 8, router_kind: str = "noise_gate_router",
                  use_gora: bool = True, use_hybrid_prior: bool = False, **kwargs):
+        # Extract device from kwargs if present (TabArena may pass it)
+        kwargs.pop('device', None)
         super().__init__(*args, **kwargs)
         self.n_estimators = n_estimators
         self.router_kind = router_kind

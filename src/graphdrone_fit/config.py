@@ -16,7 +16,7 @@ class PortfolioLoadConfig:
 
 @dataclass(frozen=True)
 class SetRouterConfig:
-    kind: Literal["bootstrap_full_only", "contextual_transformer_router", "noise_gate_router"] = "contextual_transformer_router"
+    kind: Literal["bootstrap_full_only", "contextual_transformer_router", "noise_gate_router", "hyper_set_router"] = "contextual_transformer_router"
     sparse_top_k: int = 1
 
     def validate(self) -> "SetRouterConfig":

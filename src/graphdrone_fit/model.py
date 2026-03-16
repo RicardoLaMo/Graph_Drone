@@ -89,7 +89,7 @@ class GraphDrone:
         
         # Router Training
         va_batch = self._expert_factory.predict_all(X_va)
-        va_enc = self._support_encoder.encode(n_rows=len(X_va), descriptors=va_batch.descriptors)
+        va_enc = self._support_encoder.encode(n_rows=len(X_va), descriptors=va_batch.descriptors, full_matrix=X_tr)
         va_tokens = self._token_builder.build(
             predictions=va_batch.predictions, descriptors=va_batch.descriptors,
             full_expert_id=va_batch.full_expert_id, support_encoding=va_enc
@@ -111,7 +111,7 @@ class GraphDrone:
         for epoch in range(500):
             self._router.train()
             optimizer.zero_grad()
-            out = self._router(v_tokens_t, full_index=va_batch.full_index)
+            out = self._router(v_tokens_t, full_index=va_batch.full_index, task_token=va_tokens.task_token)
             
             # Integration in training loop
             full_pred = v_preds_t[:, va_batch.full_index : va_batch.full_index + 1, :]
@@ -146,7 +146,7 @@ class GraphDrone:
         matrix = _coerce_matrix(X)
         batch = self._expert_factory.predict_all(matrix)
         
-        support_enc = self._support_encoder.encode(n_rows=matrix.shape[0], descriptors=batch.descriptors)
+        support_enc = self._support_encoder.encode(n_rows=matrix.shape[0], descriptors=batch.descriptors, full_matrix=matrix)
         tokens = self._token_builder.build(
             predictions=batch.predictions,
             descriptors=batch.descriptors,
@@ -157,7 +157,7 @@ class GraphDrone:
         self._router.eval()
         with torch.no_grad():
             token_tensor = tokens.tokens.to(self.device)
-            router_out = self._router(token_tensor, full_index=batch.full_index)
+            router_out = self._router(token_tensor, full_index=batch.full_index, task_token=tokens.task_token)
             integration = integrate_predictions(expert_predictions=batch.predictions, router_outputs=router_out)
             
         if return_diagnostics:
