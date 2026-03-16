@@ -34,25 +34,41 @@ class UniversalTokenBuilder:
         prior_alignment: Optional[torch.Tensor] = None,
         geometric_obs: Optional[torch.Tensor] = None,
     ) -> TokenBatch:
-        pred_tensor = torch.as_tensor(predictions, dtype=torch.float32)
+        pred_tensor = torch.as_tensor(predictions, dtype=torch.float32) # [N, E, C]
+        if pred_tensor.ndim == 2:
+            pred_tensor = pred_tensor.unsqueeze(-1) # Ensure [N, E, 1]
+            
         device = pred_tensor.device
         expert_ids = tuple(d.expert_id for d in descriptors)
         full_index = expert_ids.index(full_expert_id)
         
         # 1. Prediction Residuals & Consensus
-        full_pred = pred_tensor[:, full_index : full_index + 1]
-        row_mean = pred_tensor.mean(dim=1, keepdim=True)
-        if pred_tensor.shape[1] > 1:
-            prediction_consensus = pred_tensor.std(dim=1, keepdim=True)
-        else:
-            prediction_consensus = torch.zeros((pred_tensor.shape[0], 1), device=device)
+        # For multi-class, we focus on the anchor (Full) and the class distributions
+        full_pred = pred_tensor[:, full_index : full_index + 1, :] # [N, 1, C]
+        row_mean = pred_tensor.mean(dim=1, keepdim=True)           # [N, 1, C]
         
-        prediction_fields = torch.stack(
-            (pred_tensor, pred_tensor - full_pred, pred_tensor - row_mean),
+        # Disagreement is the mean variation across experts for each class
+        if pred_tensor.shape[1] > 1:
+            prediction_consensus = pred_tensor.std(dim=1, keepdim=True).mean(dim=-1, keepdim=True) # [N, 1, 1]
+        else:
+            prediction_consensus = torch.zeros((pred_tensor.shape[0], 1, 1), device=device)
+        
+        # We build features: [N, E, D]
+        # For simplicity in the first pass of tokenization, we use the average/full class probability
+        # plus the residuals. To keep token dim manageable, we might use max prob or entropy here.
+        # But let's try raw class diffs if C is small, or just mean diffs.
+        
+        res_full = (pred_tensor - full_pred).mean(dim=-1, keepdim=True)
+        res_mean = (pred_tensor - row_mean).mean(dim=-1, keepdim=True)
+        
+        # If C=1 (regression), these are exact. If C>1, these are "distribution drift" indicators.
+        # We also include the max probability of the specialist to indicate confidence.
+        max_prob, _ = pred_tensor.max(dim=-1, keepdim=True)
+
+        prediction_fields = torch.cat(
+            [max_prob, res_full, res_mean, prediction_consensus.expand(-1, len(expert_ids), -1)],
             dim=-1
         )
-        consensus_expanded = prediction_consensus.unsqueeze(1).expand(-1, len(expert_ids), 1)
-        prediction_fields = torch.cat([prediction_fields, consensus_expanded], dim=-1)
 
         # 2. Support Moments & SNR
         support_fields = []
@@ -103,7 +119,7 @@ class UniversalTokenBuilder:
         cursor = 0
         
         slices["prediction"] = (cursor, cursor + prediction_fields.shape[-1])
-        names["prediction"] = ("raw", "residual_full", "residual_mean", "disagreement_std")
+        names["prediction"] = ("max_val", "residual_full", "residual_mean", "disagreement_std")
         cursor += prediction_fields.shape[-1]
         
         if support_fields:

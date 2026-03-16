@@ -14,7 +14,7 @@ from .view_descriptor import ViewDescriptor
 class ExpertPredictionBatch:
     expert_ids: tuple[str, ...]
     descriptors: tuple[ViewDescriptor, ...]
-    predictions: np.ndarray
+    predictions: np.ndarray  # [N, E] or [N, E, C]
     full_expert_id: str
     full_index: int
 
@@ -93,7 +93,8 @@ class PortfolioExpertFactory:
             self.portfolio.experts[expert_id].predict(X)
             for expert_id in self.expert_ids
         ]
-        stacked = np.column_stack(preds).astype(np.float32)
+        # preds is list of [N, C_i]. For consistent engine, C_i must match across experts.
+        stacked = np.stack(preds, axis=1).astype(np.float32)
         return ExpertPredictionBatch(
             expert_ids=self.expert_ids,
             descriptors=self.descriptors,

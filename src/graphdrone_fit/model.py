@@ -40,8 +40,26 @@ class GraphDrone:
 
     def fit(self, X: np.ndarray, y: np.ndarray, expert_specs: Optional[tuple[ExpertBuildSpec, ...]] = None) -> "GraphDrone":
         X = np.asarray(X, dtype=np.float32)
-        y = np.asarray(y, dtype=np.float32)
         
+        # Detect problem type if not fixed in config
+        unique_y = np.unique(y)
+        is_float_target = np.issubdtype(y.dtype, np.floating) and not np.all(np.mod(y, 1) == 0)
+        
+        if self.config.problem_type == "classification" or (not is_float_target and len(unique_y) < 50):
+            problem_type = "classification"
+            n_classes = int(unique_y.max() + 1)
+            y = np.asarray(y, dtype=np.int64)
+            criterion = torch.nn.CrossEntropyLoss()
+            base_model_kind = "foundation_classifier"
+        else:
+            problem_type = "regression"
+            n_classes = 1
+            y = np.asarray(y, dtype=np.float32)
+            criterion = torch.nn.MSELoss()
+            base_model_kind = "foundation_regressor"
+
+        print(f"  -> Fitting GraphDrone for {problem_type} (n_classes={n_classes})...")
+
         # Internal validation split for router optimization
         from sklearn.model_selection import train_test_split
         X_tr, X_va, y_tr, y_va = train_test_split(X, y, test_size=0.1, random_state=42)
@@ -58,7 +76,7 @@ class GraphDrone:
                         expert_id=self.config.full_expert_id, family="FULL", 
                         view_name="Full dataset", is_anchor=True, input_dim=matrix.shape[1], input_indices=full_idx
                     ),
-                    model_kind="foundation_regressor", 
+                    model_kind=base_model_kind, 
                     input_adapter=IdentitySelectorAdapter(indices=full_idx),
                     model_params=params
                 ),
@@ -85,18 +103,33 @@ class GraphDrone:
         patience = 25
         wait = 0
         
-        print(f"  -> Optimizing Router on {self.device} (Patience={patience})...")
-        y_va_t = torch.tensor(y_va).float().to(self.device)
-        v_preds_t = torch.tensor(va_batch.predictions).float().to(self.device)
+        print(f"  -> Optimizing Router for {problem_type} on {self.device} (Patience={patience})...")
+        y_va_t = torch.tensor(y_va).to(self.device)
+        v_preds_t = torch.tensor(va_batch.predictions).float().to(self.device) # [N, E, C]
         v_tokens_t = va_tokens.tokens.to(self.device)
 
         for epoch in range(500):
             self._router.train()
             optimizer.zero_grad()
             out = self._router(v_tokens_t, full_index=va_batch.full_index)
-            integ = (1 - out.defer_prob) * v_preds_t[:, va_batch.full_index:va_batch.full_index+1] + \
-                    out.defer_prob * (out.specialist_weights * v_preds_t).sum(dim=1, keepdim=True)
-            loss = torch.nn.functional.mse_loss(integ.squeeze(), y_va_t)
+            
+            # Integration in training loop
+            full_pred = v_preds_t[:, va_batch.full_index : va_batch.full_index + 1, :]
+            spec_pred = (out.specialist_weights.unsqueeze(-1) * v_preds_t).sum(dim=1, keepdim=True)
+            integ = (1 - out.defer_prob.unsqueeze(-1)) * full_pred + out.defer_prob.unsqueeze(-1) * spec_pred
+            
+            # Loss computation
+            # integ is [N, 1, C], squeeze to [N, C]
+            integ = integ.squeeze(1)
+            if problem_type == "classification":
+                # For classification, integ contains probabilities. 
+                # CrossEntropyLoss expects logits usually, but we can use probabilities with log.
+                # Or just ensure specialists output logits? 
+                # TabPFN predict_proba returns probs. We'll use log-probs.
+                loss = torch.nn.functional.nll_loss(torch.log(integ + 1e-8), y_va_t)
+            else:
+                loss = torch.nn.functional.mse_loss(integ.squeeze(), y_va_t)
+                
             loss.backward(); optimizer.step()
             
             if loss.item() < best_loss:
