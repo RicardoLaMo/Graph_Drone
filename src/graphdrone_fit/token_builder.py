@@ -17,7 +17,7 @@ class TokenBatch:
     expert_ids: tuple[str, ...]
     field_slices: dict[str, tuple[int, int]]
     field_names: dict[str, tuple[str, ...]]
-    task_token: Optional[torch.Tensor] = None # [B, 1, D_task]
+    task_token: Optional[torch.Tensor] = None  # [B, 1, D_task]
 
 class UniversalTokenBuilder:
     """
@@ -43,15 +43,10 @@ class UniversalTokenBuilder:
         expert_ids = tuple(d.expert_id for d in descriptors)
         full_index = expert_ids.index(full_expert_id)
         
-        # 1. Prediction Residuals, Consensus & Entropy
+        # 1. Prediction Residuals & Consensus
         # For multi-class, we focus on the anchor (Full) and the class distributions
         full_pred = pred_tensor[:, full_index : full_index + 1, :] # [N, 1, C]
         row_mean = pred_tensor.mean(dim=1, keepdim=True)           # [N, 1, C]
-        
-        # Entropy computation: -sum(p * log(p))
-        # Helps router detect when experts are uncertain
-        eps = 1e-8
-        entropy = -(pred_tensor * torch.log(pred_tensor + eps)).sum(dim=-1, keepdim=True) # [N, E, 1]
         
         # Disagreement is the mean variation across experts for each class
         if pred_tensor.shape[1] > 1:
@@ -59,13 +54,20 @@ class UniversalTokenBuilder:
         else:
             prediction_consensus = torch.zeros((pred_tensor.shape[0], 1, 1), device=device)
         
+        # We build features: [N, E, D]
+        # For simplicity in the first pass of tokenization, we use the average/full class probability
+        # plus the residuals. To keep token dim manageable, we might use max prob or entropy here.
+        # But let's try raw class diffs if C is small, or just mean diffs.
+        
         res_full = (pred_tensor - full_pred).mean(dim=-1, keepdim=True)
         res_mean = (pred_tensor - row_mean).mean(dim=-1, keepdim=True)
         
+        # If C=1 (regression), these are exact. If C>1, these are "distribution drift" indicators.
+        # We also include the max probability of the specialist to indicate confidence.
         max_prob, _ = pred_tensor.max(dim=-1, keepdim=True)
 
         prediction_fields = torch.cat(
-            [max_prob, res_full, res_mean, entropy, prediction_consensus.expand(-1, len(expert_ids), -1)],
+            [max_prob, res_full, res_mean, prediction_consensus.expand(-1, len(expert_ids), -1)],
             dim=-1
         )
 
@@ -118,7 +120,7 @@ class UniversalTokenBuilder:
         cursor = 0
         
         slices["prediction"] = (cursor, cursor + prediction_fields.shape[-1])
-        names["prediction"] = ("max_val", "residual_full", "residual_mean", "entropy", "disagreement_std")
+        names["prediction"] = ("max_val", "residual_full", "residual_mean", "disagreement_std")
         cursor += prediction_fields.shape[-1]
         
         if support_fields:
@@ -129,8 +131,8 @@ class UniversalTokenBuilder:
             
         slices["descriptor"] = (cursor, cursor + descriptor_tensor.shape[-1])
         names["descriptor"] = descriptor_names
-        
-        # Prepare Task Token for batch: [B, 1, D_task]
+
+        # Extract task_token from support_encoding and expand to batch size: [B, 1, D_task]
         batch_task_token = None
         if support_encoding is not None and support_encoding.task_token is not None:
             batch_task_token = support_encoding.task_token.to(device).expand(pred_tensor.shape[0], -1, -1)

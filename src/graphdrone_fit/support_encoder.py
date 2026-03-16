@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
 import numpy as np
 import torch
@@ -12,7 +13,7 @@ from .view_descriptor import ViewDescriptor
 class SupportEncoding:
     tensor: torch.Tensor
     feature_names: tuple[str, ...]
-    task_token: torch.Tensor | None = None # [1, D_task] Global summary
+    task_token: Optional[torch.Tensor] = None  # [1, D_task] — global dataset summary
 
 
 class MomentSupportEncoder:
@@ -25,17 +26,16 @@ class MomentSupportEncoder:
         full_matrix: np.ndarray | torch.Tensor | None = None,
     ) -> SupportEncoding:
         n_experts = len(descriptors)
-        
-        # 1. Global Task Token (Bayesian Prior)
+
+        # Build global Task Token (Bayesian prior) from dataset statistics
         task_token = None
         if full_matrix is not None:
             X = torch.as_tensor(full_matrix, dtype=torch.float32)
-            # Stats: Mean, Std, Sparsity, Dim
             g_mean = X.mean(dim=0).mean().unsqueeze(0)
             g_std = X.std(dim=0).mean().unsqueeze(0)
             g_sparsity = (X == 0).float().mean().unsqueeze(0)
             g_dim = torch.tensor([float(X.shape[1])], device=X.device)
-            task_token = torch.cat([g_mean, g_std, g_sparsity, g_dim]).unsqueeze(0) # [1, 4]
+            task_token = torch.cat([g_mean, g_std, g_sparsity, g_dim]).unsqueeze(0)  # [1, 4]
 
         if isinstance(support_tensor, SupportEncoding):
             tensor = torch.as_tensor(support_tensor.tensor, dtype=torch.float32)
@@ -43,21 +43,21 @@ class MomentSupportEncoder:
             return SupportEncoding(
                 tensor=tensor,
                 feature_names=tuple(support_tensor.feature_names),
-                task_token=task_token if task_token is not None else support_tensor.task_token
+                task_token=task_token if task_token is not None else support_tensor.task_token,
             )
 
         if support_tensor is None:
             return SupportEncoding(
                 tensor=torch.zeros((n_rows, n_experts, 0), dtype=torch.float32),
                 feature_names=(),
-                task_token=task_token
+                task_token=task_token,
             )
 
         tensor = torch.as_tensor(support_tensor, dtype=torch.float32)
         if tensor.ndim == 3:
             self._validate_shape(tensor, n_rows=n_rows, n_experts=n_experts)
             feature_names = tuple(f"support_{idx}" for idx in range(tensor.shape[2]))
-            return SupportEncoding(tensor=tensor, feature_names=feature_names)
+            return SupportEncoding(tensor=tensor, feature_names=feature_names, task_token=task_token)
 
         if tensor.ndim == 4 and tensor.shape[0] == n_rows and tensor.shape[1] == n_experts:
             mean = tensor.mean(dim=2)
@@ -80,7 +80,7 @@ class MomentSupportEncoder:
             return SupportEncoding(
                 tensor=summary,
                 feature_names=tuple(feature_names),
-                task_token=task_token
+                task_token=task_token,
             )
 
         raise ValueError(

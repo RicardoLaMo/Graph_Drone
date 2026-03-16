@@ -110,7 +110,7 @@ def fit_portfolio_from_specs(
     y_train: np.ndarray,
     specs: tuple[ExpertBuildSpec, ...],
     full_expert_id: str,
-    n_jobs: int = -1,
+    n_jobs: int = 1,
 ) -> LoadedPortfolio:
     from joblib import Parallel, delayed
     
@@ -145,6 +145,35 @@ def fit_portfolio_from_specs(
         experts=experts,
         full_expert_id=full_expert_id,
     ).validate()
+
+
+@dataclass(frozen=True)
+class ClassPaddingPredictor:
+    """
+    Wraps a classifier to ensure predict_proba() always returns n_classes columns.
+    Maps columns from the underlying model's local class set to global indices.
+    """
+    base_model: object
+    n_classes: int
+    local_classes: np.ndarray
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        probs = self.base_model.predict_proba(X)
+        if probs.shape[1] == self.n_classes:
+            return probs
+        
+        # Pad/Map to global classes
+        full_probs = np.zeros((len(X), self.n_classes), dtype=np.float32)
+        for i, cls_val in enumerate(self.local_classes):
+            cls_idx = int(cls_val)
+            if cls_idx < self.n_classes:
+                full_probs[:, cls_idx] = probs[:, i]
+        return full_probs
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        # For classification, predict() usually returns labels. 
+        # We prefer predict_proba for the router.
+        return np.argmax(self.predict_proba(X), axis=1)
 
 
 def _fit_predictor(
@@ -186,6 +215,9 @@ def _fit_predictor(
             n_preprocessing_jobs=int(model_params.get("n_preprocessing_jobs", 1)),
         )
         model.fit(X_view, y_train)
-        return model
+        
+        # Determine global n_classes from model_params or data
+        n_classes = int(model_params.get("n_classes", int(y_train.max() + 1)))
+        return ClassPaddingPredictor(base_model=model, n_classes=n_classes, local_classes=model.classes_)
 
     raise ValueError(f"Unsupported model_kind={model_kind!r}")
