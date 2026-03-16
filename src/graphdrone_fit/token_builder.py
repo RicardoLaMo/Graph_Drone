@@ -17,6 +17,7 @@ class TokenBatch:
     expert_ids: tuple[str, ...]
     field_slices: dict[str, tuple[int, int]]
     field_names: dict[str, tuple[str, ...]]
+    task_token: Optional[torch.Tensor] = None # [B, 1, D_task]
 
 class UniversalTokenBuilder:
     """
@@ -34,25 +35,39 @@ class UniversalTokenBuilder:
         prior_alignment: Optional[torch.Tensor] = None,
         geometric_obs: Optional[torch.Tensor] = None,
     ) -> TokenBatch:
-        pred_tensor = torch.as_tensor(predictions, dtype=torch.float32)
+        pred_tensor = torch.as_tensor(predictions, dtype=torch.float32) # [N, E, C]
+        if pred_tensor.ndim == 2:
+            pred_tensor = pred_tensor.unsqueeze(-1) # Ensure [N, E, 1]
+            
         device = pred_tensor.device
         expert_ids = tuple(d.expert_id for d in descriptors)
         full_index = expert_ids.index(full_expert_id)
         
-        # 1. Prediction Residuals & Consensus
-        full_pred = pred_tensor[:, full_index : full_index + 1]
-        row_mean = pred_tensor.mean(dim=1, keepdim=True)
-        if pred_tensor.shape[1] > 1:
-            prediction_consensus = pred_tensor.std(dim=1, keepdim=True)
-        else:
-            prediction_consensus = torch.zeros((pred_tensor.shape[0], 1), device=device)
+        # 1. Prediction Residuals, Consensus & Entropy
+        # For multi-class, we focus on the anchor (Full) and the class distributions
+        full_pred = pred_tensor[:, full_index : full_index + 1, :] # [N, 1, C]
+        row_mean = pred_tensor.mean(dim=1, keepdim=True)           # [N, 1, C]
         
-        prediction_fields = torch.stack(
-            (pred_tensor, pred_tensor - full_pred, pred_tensor - row_mean),
+        # Entropy computation: -sum(p * log(p))
+        # Helps router detect when experts are uncertain
+        eps = 1e-8
+        entropy = -(pred_tensor * torch.log(pred_tensor + eps)).sum(dim=-1, keepdim=True) # [N, E, 1]
+        
+        # Disagreement is the mean variation across experts for each class
+        if pred_tensor.shape[1] > 1:
+            prediction_consensus = pred_tensor.std(dim=1, keepdim=True).mean(dim=-1, keepdim=True) # [N, 1, 1]
+        else:
+            prediction_consensus = torch.zeros((pred_tensor.shape[0], 1, 1), device=device)
+        
+        res_full = (pred_tensor - full_pred).mean(dim=-1, keepdim=True)
+        res_mean = (pred_tensor - row_mean).mean(dim=-1, keepdim=True)
+        
+        max_prob, _ = pred_tensor.max(dim=-1, keepdim=True)
+
+        prediction_fields = torch.cat(
+            [max_prob, res_full, res_mean, entropy, prediction_consensus.expand(-1, len(expert_ids), -1)],
             dim=-1
         )
-        consensus_expanded = prediction_consensus.unsqueeze(1).expand(-1, len(expert_ids), 1)
-        prediction_fields = torch.cat([prediction_fields, consensus_expanded], dim=-1)
 
         # 2. Support Moments & SNR
         support_fields = []
@@ -103,7 +118,7 @@ class UniversalTokenBuilder:
         cursor = 0
         
         slices["prediction"] = (cursor, cursor + prediction_fields.shape[-1])
-        names["prediction"] = ("raw", "residual_full", "residual_mean", "disagreement_std")
+        names["prediction"] = ("max_val", "residual_full", "residual_mean", "entropy", "disagreement_std")
         cursor += prediction_fields.shape[-1]
         
         if support_fields:
@@ -115,7 +130,12 @@ class UniversalTokenBuilder:
         slices["descriptor"] = (cursor, cursor + descriptor_tensor.shape[-1])
         names["descriptor"] = descriptor_names
         
-        return TokenBatch(tokens, expert_ids, slices, names)
+        # Prepare Task Token for batch: [B, 1, D_task]
+        batch_task_token = None
+        if support_encoding is not None and support_encoding.task_token is not None:
+            batch_task_token = support_encoding.task_token.to(device).expand(pred_tensor.shape[0], -1, -1)
+
+        return TokenBatch(tokens, expert_ids, slices, names, task_token=batch_task_token)
 
     def _build_descriptor_tensor(self, descriptors: tuple[ViewDescriptor, ...]) -> tuple[torch.Tensor, tuple[str, ...]]:
         rows = []

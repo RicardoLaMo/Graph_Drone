@@ -1,0 +1,47 @@
+======================================================================
+H200 PARALLEL VALIDATION - Extended Benchmark
+======================================================================
+GPUs: 1, 2, 3, 4, 5
+Datasets: Wine, Breast Cancer, Digits, Segment
+Expected runtime: 10-15 minutes
+======================================================================
+
+2026-03-16 14:09:58,404 | GPU 2 | Starting Breast Cancer benchmark
+2026-03-16 14:09:58,404 | GPU 3 | Starting Digits benchmark
+2026-03-16 14:09:58,405 | GPU 4 | Starting Segment benchmark
+2026-03-16 14:09:58,404 | GPU 1 | Starting Wine benchmark
+2026-03-16 14:09:58,405 | GPU 0 | Fetching Segment dataset (OpenML)...
+2026-03-16 14:09:58,409 | GPU 1 | Train: 142, Test: 36
+2026-03-16 14:09:58,409 | GPU 1 | Training GraphDrone...
+2026-03-16 14:09:58,409 | GPU 2 | Train: 455, Test: 114
+2026-03-16 14:09:58,409 | GPU 2 | Training GraphDrone...
+2026-03-16 14:09:58,412 | GPU 3 | Train: 1200, Test: 300
+2026-03-16 14:09:58,412 | GPU 3 | Training GraphDrone...
+  -> Fitting GraphDrone for classification (n_classes=2)...
+  -> Fitting 1 specialists in parallel (n_jobs=-1)...
+  -> Fitting GraphDrone for classification (n_classes=3)...
+  -> Fitting 1 specialists in parallel (n_jobs=-1)...
+  -> Fitting GraphDrone for classification (n_classes=10)...
+  -> Fitting 1 specialists in parallel (n_jobs=-1)...
+2026-03-16 14:09:58,421 | GPU 4 | Train: 1600, Test: 400
+2026-03-16 14:09:58,421 | GPU 4 | Training GraphDrone...
+  -> Fitting GraphDrone for classification (n_classes=7)...
+  -> Fitting 1 specialists in parallel (n_jobs=-1)...
+2026-03-16 14:10:21,637 | GPU 4 | ❌ Segment failed: A result has failed to un-serialize. Please ensure that the objects returned by the function are always picklable.
+2026-03-16 14:10:22,670 | GPU 1 | ❌ Wine failed: A result has failed to un-serialize. Please ensure that the objects returned by the function are always picklable.
+2026-03-16 14:10:23,083 | GPU 3 | ❌ Digits failed: A result has failed to un-serialize. Please ensure that the objects returned by the function are always picklable.
+2026-03-16 14:10:23,171 | GPU 2 | ❌ Breast Cancer failed: A result has failed to un-serialize. Please ensure that the objects returned by the function are always picklable.
+
+======================================================================
+H200 PARALLEL VALIDATION RESULTS
+======================================================================
+Breast Cancer   | ❌ FAILED: A result has failed to un-serialize. Please ensure that the objects returned by the function are always picklable.
+Digits          | ❌ FAILED: A result has failed to un-serialize. Please ensure that the objects returned by the function are always picklable.
+Segment         | ❌ FAILED: A result has failed to un-serialize. Please ensure that the objects returned by the function are always picklable.
+Wine            | ❌ FAILED: A result has failed to un-serialize. Please ensure that the objects returned by the function are always picklable.
+======================================================================
+Total time: 24.8s (0.4m)
+Completed: 0/4
+======================================================================
+Results saved to: /home/wliu23/projects/GraphDrone2/Graph_Drone_research/eval/h200_validation_parallel/results_20260316_141023.json
+[W316 14:10:23.140084373 AllocatorConfig.cpp:28] Warning: PYTORCH_CUDA_ALLOC_CONF is deprecated, use PYTORCH_ALLOC_CONF instead (function operator())
