@@ -17,6 +17,7 @@ class TokenBatch:
     expert_ids: tuple[str, ...]
     field_slices: dict[str, tuple[int, int]]
     field_names: dict[str, tuple[str, ...]]
+    task_token: Optional[torch.Tensor] = None  # [B, 1, D_task]
 
 class UniversalTokenBuilder:
     """
@@ -130,8 +131,13 @@ class UniversalTokenBuilder:
             
         slices["descriptor"] = (cursor, cursor + descriptor_tensor.shape[-1])
         names["descriptor"] = descriptor_names
-        
-        return TokenBatch(tokens, expert_ids, slices, names)
+
+        # Extract task_token from support_encoding and expand to batch size: [B, 1, D_task]
+        batch_task_token = None
+        if support_encoding is not None and support_encoding.task_token is not None:
+            batch_task_token = support_encoding.task_token.to(device).expand(pred_tensor.shape[0], -1, -1)
+
+        return TokenBatch(tokens, expert_ids, slices, names, task_token=batch_task_token)
 
     def _build_descriptor_tensor(self, descriptors: tuple[ViewDescriptor, ...]) -> tuple[torch.Tensor, tuple[str, ...]]:
         rows = []

@@ -1,0 +1,57 @@
+WORST 3 DATASETS — GraphDrone HyperSetRouter
+======================================================================
+
+Dataset: optdigits
+  Config:  N=1000, features=64, classes=10
+  Metrics (GD-Hyper):    F1=0.9701  ROC=0.9996  PR=0.9968
+  Metrics (GD-Baseline): F1=0.9701
+  Metrics (TabPFN):      F1=0.9602
+  Delta vs Baseline:     +0.0000
+  Delta vs TabPFN:       +0.0099
+  Mean Defer Prob:       0.0000
+
+  Failure Hypotheses:
+  • High class count — TabPFN softmax calibration degrades beyond ~5 classes; specialist proba vectors become noisy, reducing SNR for the router.
+  • High feature dimensionality — single FULL expert with n_estimators=8 may underfit; view decomposition (subspace specialists) needed to surface geometric structure.
+  • Near-zero defer rate — router effectively ignores specialists (anchor dominates). TaskToken SNR signal may be uninformative for this distribution.
+
+  Recommended fixes:
+  → Use temperature-scaled proba from TabPFN; add per-class entropy as an additional token feature.
+  → Add PCA/random-subspace view specialists to the expert portfolio for structural diversity.
+  → Increase patience / lower LR for router training; add entropy-regularization term to prevent anchor collapse.
+
+Dataset: mfeat-factors
+  Config:  N=1000, features=216, classes=10
+  Metrics (GD-Hyper):    F1=0.9802  ROC=0.9992  PR=0.9941
+  Metrics (GD-Baseline): F1=0.9802
+  Metrics (TabPFN):      F1=0.9852
+  Delta vs Baseline:     +0.0000
+  Delta vs TabPFN:       -0.0050
+  Mean Defer Prob:       0.0000
+
+  Failure Hypotheses:
+  • High class count — TabPFN softmax calibration degrades beyond ~5 classes; specialist proba vectors become noisy, reducing SNR for the router.
+  • High feature dimensionality — single FULL expert with n_estimators=8 may underfit; view decomposition (subspace specialists) needed to surface geometric structure.
+  • Near-zero defer rate — router effectively ignores specialists (anchor dominates). TaskToken SNR signal may be uninformative for this distribution.
+
+  Recommended fixes:
+  → Use temperature-scaled proba from TabPFN; add per-class entropy as an additional token feature.
+  → Add PCA/random-subspace view specialists to the expert portfolio for structural diversity.
+  → Increase patience / lower LR for router training; add entropy-regularization term to prevent anchor collapse.
+
+Dataset: pendigits
+  Config:  N=1000, features=16, classes=10
+  Metrics (GD-Hyper):    F1=0.9905  ROC=0.9999  PR=0.9996
+  Metrics (GD-Baseline): F1=0.9905
+  Metrics (TabPFN):      F1=0.9905
+  Delta vs Baseline:     +0.0000
+  Delta vs TabPFN:       +0.0000
+  Mean Defer Prob:       0.0000
+
+  Failure Hypotheses:
+  • High class count — TabPFN softmax calibration degrades beyond ~5 classes; specialist proba vectors become noisy, reducing SNR for the router.
+  • Near-zero defer rate — router effectively ignores specialists (anchor dominates). TaskToken SNR signal may be uninformative for this distribution.
+
+  Recommended fixes:
+  → Use temperature-scaled proba from TabPFN; add per-class entropy as an additional token feature.
+  → Increase patience / lower LR for router training; add entropy-regularization term to prevent anchor collapse.
