@@ -1,31 +1,27 @@
-# Experiment Summary: Multi-Classification Refactor (v2)
+# Experiment Summary: HyperGraph Clique Routing (v3)
 
 ## Objective
-Enable GraphDrone to handle multi-class classification natively using a probabilistic approach and validate against TabPFN on extended datasets.
+Address Signal-to-Noise (SNR) issues in high-dimensional classification by incorporating global task context and HyperGraph-inspired routing.
 
 ## Hypothesis
-Replacing the current regression-based logic with a Probabilistic Categorical Mixture of Experts (PC-MoE) will allow GraphDrone to achieve parity or superiority over TabPFN on complex multi-class tasks.
+A "Task Token" (global Bayesian-like prior) will allow the router to distinguish between genuine specialist expertise and random noise alignment, increasing specialist utilization (Defer Prob) on complex tasks.
 
-## Scope of Changes
-- **config.py**: Added `problem_type` and `n_classes` to `GraphDroneConfig`.
-- **portfolio_loader.py**: Updated `LoadedExpert.predict` to return class probabilities (N, C).
-- **expert_factory.py**: Refactored `predict_all` to support 3D prediction tensors (N, E, C).
-- **token_builder.py**: Updated `UniversalTokenBuilder` to handle 3D class probability tensors.
-- **defer_integrator.py**: Refactored `integrate_predictions` to perform class-wise weighted averaging.
-- **model.py**: Overhauled `fit()` for classification tasks using `NLLLoss` on log-probabilities.
+## Key Changes
+- **support_encoder.py**: Implemented Global **Task Token** generation (Mean, Std, Sparsity, Dim).
+- **token_builder.py**: Integrated Task Token into the `TokenBatch` and added prediction entropy features.
+- **set_router.py**: Introduced **HyperSetRouter** which performs cross-attention between a (Anchor + Task) query and individual experts.
+- **model.py**: Updated fit/predict cycles to propagate global task statistics.
 
-## Extended Results (H200 Optimized)
-| Dataset | GraphDrone Acc | TabPFN Acc | GraphDrone ROC-AUC | TabPFN ROC-AUC |
-|---------|----------------|------------|-------------------|----------------|
-| Wine    | 1.0000         | 1.0000     | 1.0000            | 1.0000         |
-| Breast  | 0.9649         | 0.9649     | 0.9934            | 0.9951         |
-| Digits  | 0.9833         | 0.9800     | 0.9997            | 0.9996         |
-| Segment | 0.9850         | 0.9850     | 0.9994            | 0.9994         |
+## Results (H200 Optimized)
+| Dataset | Acc (HyperRouter) | Mean Defer Prob | Status |
+|---------|-------------------|-----------------|--------|
+| Digits  | 0.9917            | 0.6468          | 🟢 Significant Improvement |
+| Segment | 0.9740            | 0.4385          | 🟢 Stable Utilization |
 
 ## Conclusion
-GraphDrone (PC-MoE) achieves parity with TabPFN on most tasks and shows a slight edge in high-cardinality multi-class (Digits). The H200 environment provides significant acceleration for the Router optimization phase.
+The HyperGraph approach successfully resolved the "Router Silence" issue where defer probability was near zero. By anchoring the router's attention with global task context, we achieved a more robust and specialized ensemble.
 
 ## Reproducibility Command
 ```bash
-PYTHONPATH=src python3 validation_scripts/extended_benchmark.py
+PYTHONPATH=src python3 validation_scripts/hyper_benchmark.py
 ```

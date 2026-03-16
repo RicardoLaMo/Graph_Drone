@@ -44,12 +44,14 @@ class HyperSetRouter(nn.Module):
     def forward(self, tokens: torch.Tensor, *, full_index: int, task_token: torch.Tensor = None) -> RouterOutputs:
         # tokens: [B, E, D], task_token: [B, 1, D_task]
         B, E, D = tokens.shape
+        device = tokens.device
         
         e_hidden = self.expert_proj(tokens) # [B, E, H]
         anchor_hidden = e_hidden[:, full_index:full_index+1, :] # [B, 1, H]
         
         # Integrate Task Signal
         if task_token is not None:
+            task_token = task_token.to(device)
             t_hidden = self.task_proj(task_token) # [B, 1, H]
             # Global Task Query: Combine Anchor and Global Context
             query = anchor_hidden + t_hidden 
