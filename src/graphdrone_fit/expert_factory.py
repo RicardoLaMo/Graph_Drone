@@ -204,6 +204,38 @@ def _fit_predictor(
         model.fit(X_view, y_train)
         return model
 
+    if model_kind == "sklearn_hgbt_regressor":
+        from sklearn.ensemble import HistGradientBoostingRegressor
+        model = HistGradientBoostingRegressor(
+            max_iter=int(model_params.get("max_iter", 100)),
+            random_state=int(model_params.get("random_state", 42)),
+            l2_regularization=float(model_params.get("l2_regularization", 0.0))
+        )
+        model.fit(X_view, y_train)
+        return model
+
+    if model_kind == "catboost_regressor":
+        from catboost import CatBoostRegressor
+        model = CatBoostRegressor(
+            iterations=int(model_params.get("iterations", 200)),
+            random_state=int(model_params.get("random_state", 42)),
+            verbose=False,
+            allow_writing_files=False,
+            thread_count=1
+        )
+        model.fit(X_view, y_train)
+        return model
+
+    if model_kind == "xgboost_regressor":
+        from xgboost import XGBRegressor
+        model = XGBRegressor(
+            n_estimators=int(model_params.get("n_estimators", 200)),
+            random_state=int(model_params.get("random_state", 42)),
+            n_jobs=1
+        )
+        model.fit(X_view, y_train)
+        return model
+
     if model_kind == "foundation_classifier":
         from tabpfn import TabPFNClassifier
 
