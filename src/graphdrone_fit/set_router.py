@@ -36,6 +36,9 @@ class HyperSetRouter(nn.Module):
         # Project expert tokens and task signal into shared hidden space
         self.expert_proj = nn.Linear(token_dim, hidden_dim)
         self.task_proj = nn.Linear(task_dim, hidden_dim)
+        # LayerNorm after projection — prevents NaN in MultiheadAttention softmax when raw
+        # prediction tokens carry large magnitudes (e.g. regression targets in the hundreds)
+        self.expert_ln = nn.LayerNorm(hidden_dim)
 
         # Cross-attention: task-conditioned anchor queries over all expert keys/values
         self.attn = nn.MultiheadAttention(hidden_dim, n_heads, batch_first=True)
@@ -55,7 +58,7 @@ class HyperSetRouter(nn.Module):
         B, E, D = tokens.shape
         device = tokens.device
 
-        e_hidden = self.expert_proj(tokens)                          # [B, E, H]
+        e_hidden = self.expert_ln(self.expert_proj(tokens))          # [B, E, H] — normalised
         anchor_hidden = e_hidden[:, full_index:full_index + 1, :]   # [B, 1, H]
 
         # Build task-conditioned query: anchor + global task signal
