@@ -24,10 +24,14 @@ class MomentSupportEncoder:
         descriptors: tuple[ViewDescriptor, ...],
         support_tensor: np.ndarray | torch.Tensor | SupportEncoding | None = None,
         full_matrix: np.ndarray | torch.Tensor | None = None,
+        y_train: np.ndarray | torch.Tensor | None = None,
     ) -> SupportEncoding:
         n_experts = len(descriptors)
 
-        # Build global Task Token (Bayesian prior) from dataset statistics
+        # Build global Task Token (Bayesian prior) from dataset statistics.
+        # Dim 0-3: X-based stats [g_mean, g_std, g_sparsity, g_dim]
+        # Dim 4-7: y-based stats [y_mean, y_std, y_skew, y_range_norm]  (regression context)
+        # Total dim: 8 (zeros for dims 4-7 when y_train is not available, e.g. at predict time)
         task_token = None
         if full_matrix is not None:
             X = torch.as_tensor(full_matrix, dtype=torch.float32)
@@ -35,7 +39,20 @@ class MomentSupportEncoder:
             g_std = X.std(dim=0).mean().unsqueeze(0)
             g_sparsity = (X == 0).float().mean().unsqueeze(0)
             g_dim = torch.tensor([float(X.shape[1])], device=X.device)
-            task_token = torch.cat([g_mean, g_std, g_sparsity, g_dim]).unsqueeze(0)  # [1, 4]
+
+            if y_train is not None:
+                # Compute via numpy to avoid torch broadcast-dimension bugs when
+                # intermediate tensors have shape [1] rather than scalar (0-dim).
+                y_np = np.asarray(y_train, dtype=np.float64).ravel()
+                y_mean_v = float(np.mean(y_np))
+                y_std_v = max(float(np.std(y_np)), 1e-6)
+                y_skew_v = float(np.clip(np.mean((y_np - y_mean_v) ** 3) / (y_std_v ** 3), -3.0, 3.0))
+                y_range_v = float(np.clip((y_np.max() - y_np.min()) / (y_std_v * 4.0), 0.0, 10.0))
+                y_stats = torch.tensor([y_mean_v, y_std_v, y_skew_v, y_range_v], dtype=torch.float32)
+            else:
+                y_stats = torch.zeros(4, dtype=torch.float32)
+
+            task_token = torch.cat([g_mean, g_std, g_sparsity, g_dim, y_stats]).unsqueeze(0)  # [1, 8]
 
         if isinstance(support_tensor, SupportEncoding):
             tensor = torch.as_tensor(support_tensor.tensor, dtype=torch.float32)

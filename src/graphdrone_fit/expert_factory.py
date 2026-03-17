@@ -216,6 +216,9 @@ def _fit_predictor(
 
     if model_kind == "catboost_regressor":
         from catboost import CatBoostRegressor
+        # Guard: CatBoost raises if all targets are identical (constant target edge case)
+        if len(np.unique(y_train)) == 1:
+            return ConstantPredictor(value=float(y_train[0]))
         model = CatBoostRegressor(
             iterations=int(model_params.get("iterations", 200)),
             random_state=int(model_params.get("random_state", 42)),
@@ -228,6 +231,9 @@ def _fit_predictor(
 
     if model_kind == "xgboost_regressor":
         from xgboost import XGBRegressor
+        # Guard: XGBoost silently produces NaN predictions on constant targets
+        if len(np.unique(y_train)) == 1:
+            return ConstantPredictor(value=float(y_train[0]))
         model = XGBRegressor(
             n_estimators=int(model_params.get("n_estimators", 200)),
             random_state=int(model_params.get("random_state", 42)),

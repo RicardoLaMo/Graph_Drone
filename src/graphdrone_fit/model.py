@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from typing import Optional, Union
 
-from .config import GraphDroneConfig
+from .config import GraphDroneConfig, SetRouterConfig
 from .defer_integrator import IntegrationOutputs, integrate_predictions
 from .expert_factory import ExpertBuildSpec, ExpertPredictionBatch, PortfolioExpertFactory, fit_portfolio_from_specs, IdentitySelectorAdapter
 from .portfolio_loader import LoadedPortfolio, load_portfolio
@@ -36,7 +36,9 @@ class GraphDrone:
         self._token_builder = UniversalTokenBuilder()
         self._support_encoder = MomentSupportEncoder()
         self._router: Optional[torch.nn.Module] = None
-        self._X_tr: Optional[np.ndarray] = None  # stored for predict-time task_token
+        self._X_tr: Optional[np.ndarray] = None   # stored for predict-time task_token (X-stats)
+        self._y_tr: Optional[np.ndarray] = None   # stored for predict-time task_token (y-stats)
+        self._problem_type: Optional[str] = None  # stored to gate y-stats at predict time
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
     def fit(self, X: np.ndarray, y: np.ndarray, expert_specs: Optional[tuple[ExpertBuildSpec, ...]] = None) -> "GraphDrone":
@@ -75,6 +77,7 @@ class GraphDrone:
         matrix = _coerce_matrix(X_tr)
         self.n_features_in_ = matrix.shape[1]
         self._X_tr = matrix  # saved for task_token at predict time
+        self._problem_type = problem_type
 
         if expert_specs is None:
             full_idx = tuple(range(matrix.shape[1]))
@@ -108,14 +111,18 @@ class GraphDrone:
                         updated_specs.append(spec)
                 expert_specs = tuple(updated_specs)
         self._portfolio = fit_portfolio_from_specs(
-            X_train=matrix, y_train=y_tr, specs=expert_specs, full_expert_id=self.config.full_expert_id
+            X_train=matrix, y_train=y_tr, specs=expert_specs, full_expert_id=self.config.full_expert_id,
+            n_jobs=1  # CatBoost/XGBoost native libs don't survive loky subprocess pickling
         )
         self._expert_factory = PortfolioExpertFactory(self._portfolio)
 
-        # Router Training — build tokens with full_matrix so task_token is computed
+        # Router Training — build tokens with full_matrix + y_tr so task_token captures both
+        # feature-space and target-space statistics (y_mean, y_std, y_skew, y_range_norm)
+        self._y_tr = y_tr  # stored for predict-time task_token reconstruction
         va_batch = self._expert_factory.predict_all(X_va)
         va_enc = self._support_encoder.encode(
-            n_rows=len(X_va), descriptors=va_batch.descriptors, full_matrix=matrix
+            n_rows=len(X_va), descriptors=va_batch.descriptors, full_matrix=matrix,
+            y_train=y_tr if problem_type == "regression" else None,
         )
         va_tokens = self._token_builder.build(
             predictions=va_batch.predictions, descriptors=va_batch.descriptors,
@@ -187,9 +194,15 @@ class GraphDrone:
             residual_penalty = torch.relu(main_loss - anchor_loss)
 
             # 2. Defer Sparingness: Penalize excessive deferral to specialists.
-            defer_penalty = out.defer_prob.mean() * 0.05
+            # Weight raised from 0.05 → 0.15 to prevent router from over-committing to specialists.
+            defer_penalty = out.defer_prob.mean() * 0.15
 
-            loss = main_loss + 2.0 * residual_penalty + defer_penalty
+            # 3. Extreme-Defer Guard: Hard-penalise defer_prob > 0.80.
+            # Prevents degenerate full-deferral (defer=1.0) seen on datasets where specialists
+            # happen to score better on the internal validation split but hurt overall.
+            extreme_defer_penalty = torch.relu(out.defer_prob.mean() - 0.80) * 5.0
+
+            loss = main_loss + 2.0 * residual_penalty + defer_penalty + extreme_defer_penalty
 
             loss.backward()
             optimizer.step()
@@ -208,10 +221,12 @@ class GraphDrone:
         matrix = _coerce_matrix(X)
         batch = self._expert_factory.predict_all(matrix)
 
-        # Pass training matrix so task_token reflects dataset statistics from training
+        # Reconstruct task_token using same training statistics as during fit
+        _full_matrix = self._X_tr if self._X_tr is not None else matrix
+        _y_train_ctx = self._y_tr if self._problem_type == "regression" else None
         support_enc = self._support_encoder.encode(
             n_rows=matrix.shape[0], descriptors=batch.descriptors,
-            full_matrix=self._X_tr if self._X_tr is not None else matrix
+            full_matrix=_full_matrix, y_train=_y_train_ctx,
         )
         tokens = self._token_builder.build(
             predictions=batch.predictions,
