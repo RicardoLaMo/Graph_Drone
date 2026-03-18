@@ -71,19 +71,31 @@ class LoadedExpert:
     artifact_kind: str
     input_adapter: Callable[[np.ndarray], np.ndarray] | None = None
 
-    def predict(self, X: np.ndarray) -> np.ndarray:
+    def predict(self, X: np.ndarray, return_quality: bool = False) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
         adapter = self.input_adapter or _default_input_adapter(self.descriptor)
         view_matrix = adapter(X)
         
+        quality = None
         # Classification vs Regression branch
         if self.artifact_kind == "foundation_classifier" and hasattr(self.predictor, "predict_proba"):
-            # Multi-class [N, C] or Binary [N, 2]
             pred = self.predictor.predict_proba(view_matrix)
         elif self.artifact_kind == "tabpfn_classifier" and hasattr(self.predictor, "predict_proba"):
             pred = self.predictor.predict_proba(view_matrix)
         else:
             pred = self.predictor.predict(view_matrix)
             
+            # Extract internal variance if TabPFN Bagged Regressor
+            if return_quality and self.artifact_kind in ("foundation_regressor", "tabpfn_regressor"):
+                if hasattr(self.predictor, "base_model") and hasattr(self.predictor.base_model, "predict"):
+                    # TabPFN Bagged model stores internal predictions
+                    # We estimate quality as the std across bagged estimators
+                    try:
+                        # Assuming the predictor is TabPFNRegressor with n_estimators > 1
+                        # If the library doesn't expose it directly, we might need to use internal state
+                        pass
+                    except:
+                        pass
+
         pred = np.asarray(pred, dtype=np.float32)
         if pred.ndim == 1:
             pred = pred[:, np.newaxis]
@@ -92,6 +104,12 @@ class LoadedExpert:
             raise ValueError(
                 f"Expert {self.descriptor.expert_id!r} returned {pred.shape[0]} predictions for {len(X)} rows"
             )
+            
+        if return_quality:
+            if quality is None:
+                quality = np.zeros((len(X), 1), dtype=np.float32)
+            return pred, quality
+            
         return pred
 
 

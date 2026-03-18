@@ -15,6 +15,7 @@ class ExpertPredictionBatch:
     expert_ids: tuple[str, ...]
     descriptors: tuple[ViewDescriptor, ...]
     predictions: np.ndarray  # [N, E] or [N, E, C]
+    quality_scores: np.ndarray # [N, E, 1] or [N, E, C]
     full_expert_id: str
     full_index: int
 
@@ -89,16 +90,23 @@ class PortfolioExpertFactory:
         self.full_index = self.expert_ids.index(self.full_expert_id)
 
     def predict_all(self, X: np.ndarray) -> ExpertPredictionBatch:
-        preds = [
-            self.portfolio.experts[expert_id].predict(X)
+        results = [
+            self.portfolio.experts[expert_id].predict(X, return_quality=True)
             for expert_id in self.expert_ids
         ]
+        
+        preds = [r[0] for r in results]
+        quality = [r[1] for r in results]
+        
         # preds is list of [N, C_i]. For consistent engine, C_i must match across experts.
-        stacked = np.stack(preds, axis=1).astype(np.float32)
+        stacked_preds = np.stack(preds, axis=1).astype(np.float32)
+        stacked_quality = np.stack(quality, axis=1).astype(np.float32)
+        
         return ExpertPredictionBatch(
             expert_ids=self.expert_ids,
             descriptors=self.descriptors,
-            predictions=stacked,
+            predictions=stacked_preds,
+            quality_scores=stacked_quality,
             full_expert_id=self.full_expert_id,
             full_index=self.full_index,
         )
