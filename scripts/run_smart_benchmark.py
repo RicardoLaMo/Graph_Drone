@@ -79,7 +79,7 @@ QUICK_DATASETS = {
     "pendigits":     CLASSIFICATION_DATASETS["pendigits"],
 }
 
-GRAPHDRONE_VERSION = "2026.03.18b"  # bump when model changes to invalidate cache
+GRAPHDRONE_VERSION = "2026.03.18c"  # bump when model changes to invalidate cache
 
 
 # ---------------------------------------------------------------------------
@@ -182,21 +182,18 @@ def _device():
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
-def run_tabpfn(X_tr, y_tr, X_te, task_type: str, n_estimators: int = 1):
+def run_tabpfn(X_tr, y_tr, X_te, task_type: str):
+    """TabPFN v2.5 with its default configuration (n_estimators=8 out of the box).
+    Only override: ignore_pretraining_limits=True, needed because our datasets exceed
+    the 1000-row safety limit built into TabPFN."""
     if task_type == "regression":
         from tabpfn import TabPFNRegressor
-        m = TabPFNRegressor(
-            n_estimators=n_estimators, device=_device(),
-            ignore_pretraining_limits=len(X_tr) > 1000,
-        )
+        m = TabPFNRegressor(ignore_pretraining_limits=len(X_tr) > 1000)
         m.fit(X_tr, y_tr)
         return m.predict(X_te), None
     else:
         from tabpfn import TabPFNClassifier
-        m = TabPFNClassifier(
-            n_estimators=n_estimators, device=_device(),
-            ignore_pretraining_limits=len(X_tr) > 1000,
-        )
+        m = TabPFNClassifier(ignore_pretraining_limits=len(X_tr) > 1000)
         m.fit(X_tr, y_tr.astype(int))
         proba = m.predict_proba(X_te)
         return proba, np.argmax(proba, axis=1)
@@ -309,7 +306,7 @@ def run_graphdrone(X_tr, y_tr, X_te, task_type: str, seed: int = 42, n_classes: 
 # Single task runner (one dataset × one fold × all methods)
 # ---------------------------------------------------------------------------
 
-METHODS = ["tabpfn_1est", "tabpfn_8est", "graphdrone"]
+METHODS = ["tabpfn", "graphdrone"]
 
 
 def run_task(dataset: str, fold: int, cache_dir: Path, max_samples: int) -> list[dict]:
@@ -344,10 +341,8 @@ def run_task(dataset: str, fold: int, cache_dir: Path, max_samples: int) -> list
         print(f"    [{method}] running...", end=" ", flush=True)
         t0 = time.time()
         try:
-            if method == "tabpfn_1est":
-                out = run_tabpfn(X_tr, y_tr, X_te, task_type, n_estimators=1)
-            elif method == "tabpfn_8est":
-                out = run_tabpfn(X_tr, y_tr, X_te, task_type, n_estimators=8)
+            if method == "tabpfn":
+                out = run_tabpfn(X_tr, y_tr, X_te, task_type)
             else:
                 out = run_graphdrone(X_tr, y_tr, X_te, task_type, seed=42, n_classes=global_n_classes)
 
@@ -493,10 +488,9 @@ def build_report(all_rows: list[dict], output_dir: Path):
         lines.append(pivot.to_string(float_format="{:.4f}".format))
         lines.append("")
 
-        wr = _win_rate(df[df["task_type"] == "regression"], "r2", "graphdrone",
-                       ["tabpfn_1est", "tabpfn_8est"])
+        wr = _win_rate(df[df["task_type"] == "regression"], "r2", "graphdrone", ["tabpfn"])
         if not wr.empty:
-            lines.append("Win-rate (GraphDrone R² > baseline, per dataset per fold)")
+            lines.append("Win-rate (GraphDrone R² > TabPFN default, per dataset per fold)")
             lines.append(wr[["dataset", "vs", "win_rate", "delta_r2"]].to_string(index=False,
                 float_format="{:.3f}".format))
             lines.append("")
@@ -513,10 +507,9 @@ def build_report(all_rows: list[dict], output_dir: Path):
         lines.append(pivot_c.to_string(float_format="{:.4f}".format))
         lines.append("")
 
-        wr_c = _win_rate(df[df["task_type"] == "classification"], "f1_macro", "graphdrone",
-                         ["tabpfn_1est", "tabpfn_8est"])
+        wr_c = _win_rate(df[df["task_type"] == "classification"], "f1_macro", "graphdrone", ["tabpfn"])
         if not wr_c.empty:
-            lines.append("Win-rate (GraphDrone F1 > baseline, per dataset per fold)")
+            lines.append("Win-rate (GraphDrone F1 > TabPFN default, per dataset per fold)")
             lines.append(wr_c[["dataset", "vs", "win_rate", "delta_f1_macro"]].to_string(
                 index=False, float_format="{:.3f}".format))
             lines.append("")
