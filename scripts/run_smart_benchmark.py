@@ -390,6 +390,60 @@ def run_task(dataset: str, fold: int, cache_dir: Path, max_samples: int) -> list
 # Reporting
 # ---------------------------------------------------------------------------
 
+def compute_elo(df: pd.DataFrame, metric_map: dict[str, str],
+                K: int = 32, initial: int = 1500) -> pd.DataFrame:
+    """
+    Compute ELO ratings across all (dataset, fold) matchups.
+
+    metric_map: {task_type -> metric_column} e.g. {"regression": "r2", "classification": "f1_macro"}
+    For each (dataset, fold), every pair of methods is compared; the method with the
+    higher metric value wins the matchup (ties are treated as 0.5 each).
+    """
+    ratings = {m: float(initial) for m in df["method"].unique()}
+
+    for (dataset, fold), grp in df.groupby(["dataset", "fold"]):
+        task_type = grp["task_type"].iloc[0]
+        metric = metric_map.get(task_type)
+        if metric is None or metric not in grp.columns:
+            continue
+
+        method_scores = (
+            grp[grp["status"].isin(["ok", "cached"])]
+            .set_index("method")[metric]
+            .dropna()
+            .to_dict()
+        )
+        methods = list(method_scores.keys())
+
+        # All pairs
+        for i in range(len(methods)):
+            for j in range(i + 1, len(methods)):
+                a, b = methods[i], methods[j]
+                sa, sb = method_scores[a], method_scores[b]
+
+                if sa > sb:
+                    s_a, s_b = 1.0, 0.0
+                elif sb > sa:
+                    s_a, s_b = 0.0, 1.0
+                else:
+                    s_a, s_b = 0.5, 0.5
+
+                ra, rb = ratings[a], ratings[b]
+                ea = 1.0 / (1.0 + 10 ** ((rb - ra) / 400.0))
+                eb = 1.0 - ea
+
+                ratings[a] = ra + K * (s_a - ea)
+                ratings[b] = rb + K * (s_b - eb)
+
+    result = (
+        pd.DataFrame({"method": list(ratings.keys()), "elo": list(ratings.values())})
+        .sort_values("elo", ascending=False)
+        .reset_index(drop=True)
+    )
+    result["rank"] = result.index + 1
+    return result
+
+
 def _win_rate(df: pd.DataFrame, metric: str, challenger: str, baselines: list[str]) -> pd.DataFrame:
     """Per-dataset win rate: fraction of folds where challenger > baseline."""
     rows = []
@@ -465,6 +519,31 @@ def build_report(all_rows: list[dict], output_dir: Path):
             lines.append("Win-rate (GraphDrone F1 > baseline, per dataset per fold)")
             lines.append(wr_c[["dataset", "vs", "win_rate", "delta_f1_macro"]].to_string(
                 index=False, float_format="{:.3f}".format))
+            lines.append("")
+
+    # ELO ranking (combined regression + classification)
+    ok_df = df[df["status"].isin(["ok", "cached"])].copy()
+    if not ok_df.empty:
+        elo_df = compute_elo(
+            ok_df,
+            metric_map={"regression": "r2", "classification": "f1_macro"},
+        )
+        elo_df.to_csv(output_dir / "elo_ranking.csv", index=False)
+
+        lines.append("ELO RANKING  (K=32, all datasets+folds, regression=R²  classification=F1-macro)")
+        lines.append("-" * 80)
+        lines.append(elo_df[["rank", "method", "elo"]].to_string(index=False, float_format="{:.1f}".format))
+        lines.append("")
+
+        # Per-task-type ELO
+        for tt, metric in [("regression", "r2"), ("classification", "f1_macro")]:
+            sub = ok_df[ok_df["task_type"] == tt]
+            if sub.empty:
+                continue
+            elo_tt = compute_elo(sub, metric_map={tt: metric})
+            lines.append(f"  {tt.capitalize()} ELO  (metric={metric})")
+            lines.append("  " + elo_tt[["rank", "method", "elo"]].to_string(index=False,
+                float_format="{:.1f}".format).replace("\n", "\n  "))
             lines.append("")
 
     # Overall
