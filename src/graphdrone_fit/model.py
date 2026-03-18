@@ -6,49 +6,56 @@ from typing import Optional, Union
 
 from .config import GraphDroneConfig, SetRouterConfig
 from .defer_integrator import IntegrationOutputs, integrate_predictions
-from .expert_factory import ExpertBuildSpec, ExpertPredictionBatch, PortfolioExpertFactory, fit_portfolio_from_specs, IdentitySelectorAdapter
-from .portfolio_loader import LoadedPortfolio, load_portfolio
+from .expert_factory import (
+    ExpertBuildSpec,
+    IdentitySelectorAdapter,
+    PortfolioExpertFactory,
+    fit_portfolio_from_specs,
+)
 from .set_router import build_set_router
-from .support_encoder import MomentSupportEncoder, SupportEncoding
-from .token_builder import UniversalTokenBuilder, TokenBatch
+from .support_encoder import MomentSupportEncoder
+from .token_builder import UniversalTokenBuilder
 from .view_descriptor import ViewDescriptor
+
 
 @dataclass(frozen=True)
 class GraphDronePredictResult:
     predictions: np.ndarray
-    diagnostics: dict[str, object]
     expert_ids: tuple[str, ...]
+    diagnostics: dict[str, object]
+
 
 def _coerce_matrix(X: np.ndarray) -> np.ndarray:
     matrix = np.asarray(X, dtype=np.float32)
     if matrix.ndim != 2:
-        raise ValueError(f"Expected 2D feature matrix, got shape {matrix.shape}")
+        raise ValueError(f"Expected 2D matrix, got {matrix.shape}")
     return matrix
 
+
 class GraphDrone:
-    """
-    Consolidated GraphDrone Meta-Model (PURE_BASE Default).
-    High-performance Cross-Attention Ensemble of Foundation Specialists.
-    """
-    def __init__(self, config: GraphDroneConfig) -> None:
-        self.config = config.validate()
-        self._expert_factory: Optional[PortfolioExpertFactory] = None
-        self._token_builder = UniversalTokenBuilder()
-        self._support_encoder = MomentSupportEncoder()
+    def __init__(self, config: Optional[GraphDroneConfig] = None) -> None:
+        self.config = config.validate() if config else GraphDroneConfig().validate()
+        self._portfolio = None
+        self._expert_factory = None
         self._router: Optional[torch.nn.Module] = None
-        self._X_tr: Optional[np.ndarray] = None   # stored for predict-time task_token (X-stats)
-        self._y_tr: Optional[np.ndarray] = None   # stored for predict-time task_token (y-stats)
-        self._problem_type: Optional[str] = None  # stored to gate y-stats at predict time
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self._support_encoder = MomentSupportEncoder()
+        self._token_builder = UniversalTokenBuilder()
+        self._X_tr: Optional[np.ndarray] = None  # stored for predict-time task_token
+        self._y_tr: Optional[np.ndarray] = None  # stored for predict-time task_token
 
     def fit(self, X: np.ndarray, y: np.ndarray, expert_specs: Optional[tuple[ExpertBuildSpec, ...]] = None) -> "GraphDrone":
         X = np.asarray(X, dtype=np.float32)
-
+        
         # Detect problem type if not fixed in config
         unique_y = np.unique(y)
         is_float_target = np.issubdtype(y.dtype, np.floating) and not np.all(np.mod(y, 1) == 0)
-
-        if self.config.problem_type == "classification" or (not is_float_target and len(unique_y) < 50):
+        
+        if self.config.problem_type == "classification" or (
+            self.config.problem_type != "regression"
+            and not is_float_target
+            and len(unique_y) < 50
+        ):
             problem_type = "classification"
             # Respect config.n_classes if provided and > 1
             if self.config.n_classes > 1:
@@ -73,12 +80,12 @@ class GraphDrone:
         except ValueError:
             # Fallback for very small classes
             X_tr, X_va, y_tr, y_va = train_test_split(X, y, test_size=0.1, random_state=42)
-
+        
         matrix = _coerce_matrix(X_tr)
         self.n_features_in_ = matrix.shape[1]
         self._X_tr = matrix  # saved for task_token at predict time
-        self._problem_type = problem_type
-
+        self._y_tr = y_tr    # saved for task_token at predict time
+        
         if expert_specs is None:
             full_idx = tuple(range(matrix.shape[1]))
             params = {"n_estimators": 8, "device": self.device}
@@ -110,25 +117,28 @@ class GraphDrone:
                     else:
                         updated_specs.append(spec)
                 expert_specs = tuple(updated_specs)
+
+        # RPB Strategy: Specialists fit raw Y (scale stability)
         self._portfolio = fit_portfolio_from_specs(
             X_train=matrix, y_train=y_tr, specs=expert_specs, full_expert_id=self.config.full_expert_id,
-            n_jobs=1  # CatBoost/XGBoost native libs don't survive loky subprocess pickling
+            n_jobs=1
         )
         self._expert_factory = PortfolioExpertFactory(self._portfolio)
-
+        
         # Router Training — build tokens with full_matrix + y_tr so task_token captures both
-        # feature-space and target-space statistics (y_mean, y_std, y_skew, y_range_norm)
-        self._y_tr = y_tr  # stored for predict-time task_token reconstruction
         va_batch = self._expert_factory.predict_all(X_va)
         va_enc = self._support_encoder.encode(
             n_rows=len(X_va), descriptors=va_batch.descriptors, full_matrix=matrix,
             y_train=y_tr if problem_type == "regression" else None,
         )
         va_tokens = self._token_builder.build(
-            predictions=va_batch.predictions, descriptors=va_batch.descriptors,
-            full_expert_id=va_batch.full_expert_id, support_encoding=va_enc
+            predictions=va_batch.predictions, 
+            descriptors=va_batch.descriptors,
+            full_expert_id=va_batch.full_expert_id, 
+            quality_scores=va_batch.quality_scores,
+            support_encoding=va_enc
         )
-
+        
         token_dim = va_tokens.tokens.shape[-1]
         task_dim = va_tokens.task_token.shape[-1] if va_tokens.task_token is not None else 4
         
@@ -139,7 +149,7 @@ class GraphDrone:
             return self
 
         self._router = build_set_router(self.config.router, token_dim=token_dim, task_dim=task_dim).to(self.device)
-
+        
         trainable_params = list(self._router.parameters())
         if not trainable_params:
             # Static router (BootstrapFullRouter) — no training needed
@@ -156,10 +166,10 @@ class GraphDrone:
         best_loss = float('inf')
         patience = 25
         wait = 0
-
+        
         print(f"  -> Optimizing Router for {problem_type} on {self.device} (Patience={patience})...")
         y_va_t = torch.tensor(y_va).to(self.device)
-        v_preds_t = torch.tensor(va_batch.predictions).float().to(self.device)  # [N, E, C]
+        v_preds_t = torch.tensor(va_batch.predictions).float().to(self.device) # [N, E, C]
         v_tokens_t = va_tokens.tokens.to(self.device)
         task_token_t = va_tokens.task_token.to(self.device) if va_tokens.task_token is not None else None
 
@@ -168,45 +178,49 @@ class GraphDrone:
             optimizer.zero_grad()
             out = self._router(v_tokens_t, full_index=va_batch.full_index, task_token=task_token_t)
             
-            # Decay exploration bias: slowly transition from exploration to strict performance
+            # Decay exploration bias
             if hasattr(self._router, 'exploration_bias'):
                 with torch.no_grad():
-                    self._router.exploration_bias.mul_(0.98) # Smooth decay
+                    self._router.exploration_bias.mul_(0.98)
             
             # Integration in training loop
             full_pred = v_preds_t[:, va_batch.full_index : va_batch.full_index + 1, :]
-            spec_pred = (out.specialist_weights.unsqueeze(-1) * v_preds_t).sum(dim=1, keepdim=True)
-            integ = (1 - out.defer_prob.unsqueeze(-1)) * full_pred + out.defer_prob.unsqueeze(-1) * spec_pred
-
+            
+            # Mask out anchor from specialist weights
+            spec_mask = torch.ones(v_preds_t.shape[1], device=self.device)
+            spec_mask[va_batch.full_index] = 0
+            
+            masked_weights = out.specialist_weights * spec_mask.unsqueeze(0)
+            weight_sum = masked_weights.sum(dim=1, keepdim=True)
+            norm_spec_weights = masked_weights / torch.where(weight_sum > 0, weight_sum, torch.ones_like(weight_sum))
+            
+            spec_pred = (norm_spec_weights.unsqueeze(-1) * v_preds_t).sum(dim=1, keepdim=True)
+            
+            # Residual Probability Blending (RPB):
+            # specialists nudging the anchor: anchor + defer * (specialists - anchor)
+            if problem_type == "regression":
+                integ = full_pred + out.defer_prob.unsqueeze(-1) * (spec_pred - full_pred)
+            else:
+                integ = (1 - out.defer_prob.unsqueeze(-1)) * full_pred + out.defer_prob.unsqueeze(-1) * spec_pred
+            
             integ = integ.squeeze(1)  # [N, C]
             full_pred_sq = full_pred.squeeze(1) # [N, C]
 
             if problem_type == "classification":
-                main_loss = torch.nn.functional.nll_loss(torch.log(integ + 1e-8), y_va_t)
-                # Loss if we only used the anchor expert
-                anchor_loss = torch.nn.functional.nll_loss(torch.log(full_pred_sq + 1e-8), y_va_t)
+                main_loss = torch.nn.functional.nll_loss(torch.log(torch.clamp(integ, min=1e-8)), y_va_t)
+                anchor_loss = torch.nn.functional.nll_loss(torch.log(torch.clamp(full_pred_sq, min=1e-8)), y_va_t)
             else:
                 main_loss = torch.nn.functional.mse_loss(integ.squeeze(), y_va_t)
                 anchor_loss = torch.nn.functional.mse_loss(full_pred_sq.squeeze(), y_va_t)
-
-            # 1. Residual Penalty: If integrated is worse than anchor alone, penalize heavily.
-            # Ensures we don't 'break' the baseline anchor model.
+            
+            # Anchor-Aware Residual Penalty
             residual_penalty = torch.relu(main_loss - anchor_loss)
-
-            # 2. Defer Sparingness: Penalize excessive deferral to specialists.
-            # Weight raised from 0.05 → 0.15 to prevent router from over-committing to specialists.
-            defer_penalty = out.defer_prob.mean() * 0.15
-
-            # 3. Extreme-Defer Guard: Hard-penalise defer_prob > 0.80.
-            # Prevents degenerate full-deferral (defer=1.0) seen on datasets where specialists
-            # happen to score better on the internal validation split but hurt overall.
-            extreme_defer_penalty = torch.relu(out.defer_prob.mean() - 0.80) * 5.0
-
-            loss = main_loss + 2.0 * residual_penalty + defer_penalty + extreme_defer_penalty
-
-            loss.backward()
-            optimizer.step()
-
+            defer_penalty = out.defer_prob.mean() * 0.05
+            
+            loss = main_loss + 2.0 * residual_penalty + defer_penalty
+                
+            loss.backward(); optimizer.step()
+            
             if loss.item() < best_loss:
                 best_loss = loss.item()
                 wait = 0
@@ -220,28 +234,60 @@ class GraphDrone:
         X = np.asarray(X, dtype=np.float32)
         matrix = _coerce_matrix(X)
         batch = self._expert_factory.predict_all(matrix)
-
-        # Reconstruct task_token using same training statistics as during fit
-        _full_matrix = self._X_tr if self._X_tr is not None else matrix
-        _y_train_ctx = self._y_tr if self._problem_type == "regression" else None
+        
+        # Pass training matrix/target so task_token reflects dataset statistics from training
         support_enc = self._support_encoder.encode(
-            n_rows=matrix.shape[0], descriptors=batch.descriptors,
-            full_matrix=_full_matrix, y_train=_y_train_ctx,
+            n_rows=matrix.shape[0], descriptors=batch.descriptors, 
+            full_matrix=self._X_tr if self._X_tr is not None else matrix,
+            y_train=self._y_tr
         )
         tokens = self._token_builder.build(
             predictions=batch.predictions,
             descriptors=batch.descriptors,
             full_expert_id=batch.full_expert_id,
+            quality_scores=batch.quality_scores,
             support_encoding=support_enc
         )
-
+        
         self._router.eval()
         with torch.no_grad():
             token_tensor = tokens.tokens.to(self.device)
             task_token_t = tokens.task_token.to(self.device) if tokens.task_token is not None else None
             router_out = self._router(token_tensor, full_index=batch.full_index, task_token=task_token_t)
-            integration = integrate_predictions(expert_predictions=batch.predictions, router_outputs=router_out)
-
+            
+            pred_tensor = torch.as_tensor(batch.predictions, dtype=torch.float32).to(self.device)
+            if pred_tensor.ndim == 2: pred_tensor = pred_tensor.unsqueeze(-1)
+            
+            full_pred = pred_tensor[:, batch.full_index : batch.full_index + 1, :]
+            
+            # Mask out anchor from specialist weights
+            spec_mask = torch.ones(pred_tensor.shape[1], device=self.device)
+            spec_mask[batch.full_index] = 0
+            
+            masked_weights = router_out.specialist_weights * spec_mask.unsqueeze(0)
+            weight_mass = masked_weights.sum(dim=1, keepdim=True)
+            norm_spec_weights = masked_weights / torch.where(weight_mass > 0, weight_mass, torch.ones_like(weight_mass))
+            
+            spec_pred = (norm_spec_weights.unsqueeze(-1) * pred_tensor).sum(dim=1, keepdim=True)
+            
+            if self.config.problem_type == "regression":
+                blended = full_pred + router_out.defer_prob.unsqueeze(-1) * (spec_pred - full_pred)
+            else:
+                blended = (1.0 - router_out.defer_prob.unsqueeze(-1)) * full_pred + router_out.defer_prob.unsqueeze(-1) * spec_pred
+            
+            result = blended.squeeze(1)
+            if result.shape[1] == 1: result = result.squeeze(1)
+            
+            integration = IntegrationOutputs(
+                predictions=result.detach().cpu().numpy().astype(np.float32),
+                normalized_weights=norm_spec_weights.detach().cpu().numpy().astype(np.float32),
+                defer_prob=router_out.defer_prob.detach().cpu().numpy().astype(np.float32),
+                diagnostics={
+                    "mean_defer_prob": float(router_out.defer_prob.mean().item()),
+                    "router_kind": router_out.router_kind
+                },
+            )
+            
         if return_diagnostics:
             return GraphDronePredictResult(
                 predictions=integration.predictions,

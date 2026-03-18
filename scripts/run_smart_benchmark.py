@@ -58,8 +58,8 @@ REGRESSION_DATASETS = {
     "diamonds":      {"openml_id": 42225, "type": "regression"},
     "house_prices":  {"openml_id": 42165, "type": "regression"},
     "elevators":     {"openml_id": 216,   "type": "regression"},
-    "airfoil":       {"openml_id": 1412,  "type": "regression"},
-    "wine_quality":  {"openml_id": 40691, "type": "regression"},
+    "cpu_act":       {"openml_id": 761,   "type": "regression"},  # ~8k rows, continuous CPU activity
+    "kin8nm":        {"openml_id": 189,   "type": "regression"},  # ~8k rows, kinematic regression
 }
 
 CLASSIFICATION_DATASETS = {
@@ -75,11 +75,11 @@ ALL_DATASETS = {**REGRESSION_DATASETS, **CLASSIFICATION_DATASETS}
 
 QUICK_DATASETS = {
     "california":    REGRESSION_DATASETS["california"],
-    "elevators":     REGRESSION_DATASETS["elevators"],
+    "cpu_act":       REGRESSION_DATASETS["cpu_act"],
     "pendigits":     CLASSIFICATION_DATASETS["pendigits"],
 }
 
-GRAPHDRONE_VERSION = "2026.03.18"  # bump when model changes to invalidate cache
+GRAPHDRONE_VERSION = "2026.03.18b"  # bump when model changes to invalidate cache
 
 
 # ---------------------------------------------------------------------------
@@ -202,7 +202,7 @@ def run_tabpfn(X_tr, y_tr, X_te, task_type: str, n_estimators: int = 1):
         return proba, np.argmax(proba, axis=1)
 
 
-def run_graphdrone(X_tr, y_tr, X_te, task_type: str, seed: int = 42):
+def run_graphdrone(X_tr, y_tr, X_te, task_type: str, seed: int = 42, n_classes: int = None):
     n = X_tr.shape[1]
     full_idx = tuple(range(n))
     dev = _device()
@@ -256,7 +256,10 @@ def run_graphdrone(X_tr, y_tr, X_te, task_type: str, seed: int = 42):
             problem_type="regression",
         )
     else:
-        n_classes = int(np.max(y_tr) + 1)
+        # Use caller-supplied n_classes (computed from full y before split) to avoid
+        # missing-class assertion when the training split happens to exclude the max class.
+        if n_classes is None:
+            n_classes = int(len(np.unique(y_tr)))
         clf_params = {**params_fp, "n_classes": n_classes}
         specs = (
             ExpertBuildSpec(
@@ -321,6 +324,8 @@ def run_task(dataset: str, fold: int, cache_dir: Path, max_samples: int) -> list
         return []
 
     X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, random_state=fold * 17 + 42)
+    # Compute n_classes from full y (before split) so GraphDrone never gets a truncated class range
+    global_n_classes = int(len(np.unique(y))) if task_type == "classification" else None
 
     for method in METHODS:
         cpath = _cache_path(cache_dir, dataset, fold, method)
@@ -344,7 +349,7 @@ def run_task(dataset: str, fold: int, cache_dir: Path, max_samples: int) -> list
             elif method == "tabpfn_8est":
                 out = run_tabpfn(X_tr, y_tr, X_te, task_type, n_estimators=8)
             else:
-                out = run_graphdrone(X_tr, y_tr, X_te, task_type, seed=42)
+                out = run_graphdrone(X_tr, y_tr, X_te, task_type, seed=42, n_classes=global_n_classes)
 
             elapsed = time.time() - t0
 
