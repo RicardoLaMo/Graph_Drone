@@ -12,6 +12,7 @@ from .expert_factory import (
     PortfolioExpertFactory,
     fit_portfolio_from_specs,
 )
+from .observers import calculate_kappa, calculate_lid
 from .set_router import build_set_router
 from .support_encoder import MomentSupportEncoder
 from .token_builder import UniversalTokenBuilder
@@ -43,6 +44,7 @@ class GraphDrone:
         self._token_builder = UniversalTokenBuilder()
         self._X_tr: Optional[np.ndarray] = None  # stored for predict-time task_token
         self._y_tr: Optional[np.ndarray] = None  # stored for predict-time task_token
+        self._train_views: dict[str, np.ndarray] = {}  # expert_id → view of training data for GORA
 
     def fit(self, X: np.ndarray, y: np.ndarray, expert_specs: Optional[tuple[ExpertBuildSpec, ...]] = None) -> "GraphDrone":
         X = np.asarray(X, dtype=np.float32)
@@ -81,21 +83,23 @@ class GraphDrone:
             # Fallback for very small classes
             X_tr, X_va, y_tr, y_va = train_test_split(X, y, test_size=0.1, random_state=42)
         
-        matrix = _coerce_matrix(X_tr)
-        self.n_features_in_ = matrix.shape[1]
-        self._X_tr = matrix  # saved for task_token at predict time
-        self._y_tr = y_tr    # saved for task_token at predict time
+        # Experts train on the full dataset; only the router uses the held-out val split.
+        # This recovers the v1-width data-utilization strategy (100% for experts).
+        full_matrix = _coerce_matrix(X)
+        self.n_features_in_ = full_matrix.shape[1]
+        self._X_tr = _coerce_matrix(X_tr)  # saved for task_token / GORA at predict time
+        self._y_tr = y_tr                   # saved for task_token at predict time
         
         if expert_specs is None:
-            full_idx = tuple(range(matrix.shape[1]))
+            full_idx = tuple(range(full_matrix.shape[1]))
             params = {"n_estimators": 8, "device": self.device}
             if problem_type == "classification":
                 params["n_classes"] = n_classes
             expert_specs = (
                 ExpertBuildSpec(
                     descriptor=ViewDescriptor(
-                        expert_id=self.config.full_expert_id, family="FULL", 
-                        view_name="Full dataset", is_anchor=True, input_dim=matrix.shape[1], input_indices=full_idx
+                        expert_id=self.config.full_expert_id, family="FULL",
+                        view_name="Full dataset", is_anchor=True, input_dim=full_matrix.shape[1], input_indices=full_idx
                     ),
                     model_kind=base_model_kind, 
                     input_adapter=IdentitySelectorAdapter(indices=full_idx),
@@ -118,25 +122,33 @@ class GraphDrone:
                         updated_specs.append(spec)
                 expert_specs = tuple(updated_specs)
 
-        # RPB Strategy: Specialists fit raw Y (scale stability)
+        # Experts train on full data; router validates on the held-out 10% split.
         self._portfolio = fit_portfolio_from_specs(
-            X_train=matrix, y_train=y_tr, specs=expert_specs, full_expert_id=self.config.full_expert_id,
+            X_train=full_matrix, y_train=y, specs=expert_specs, full_expert_id=self.config.full_expert_id,
             n_jobs=1
         )
         self._expert_factory = PortfolioExpertFactory(self._portfolio)
-        
-        # Router Training — build tokens with full_matrix + y_tr so task_token captures both
+
+        # Store per-expert training views for GORA geometric observers at predict time
+        self._train_views = {}
+        for spec in expert_specs:
+            adapted = spec.input_adapter.transform(full_matrix)
+            self._train_views[spec.descriptor.expert_id] = adapted
+
+        # Router Training — build tokens with GORA observers for richer routing signal
         va_batch = self._expert_factory.predict_all(X_va)
+        va_gora = self._compute_gora_obs(X_va, va_batch.descriptors)
         va_enc = self._support_encoder.encode(
-            n_rows=len(X_va), descriptors=va_batch.descriptors, full_matrix=matrix,
+            n_rows=len(X_va), descriptors=va_batch.descriptors, full_matrix=full_matrix,
             y_train=y_tr if problem_type == "regression" else None,
         )
         va_tokens = self._token_builder.build(
-            predictions=va_batch.predictions, 
+            predictions=va_batch.predictions,
             descriptors=va_batch.descriptors,
-            full_expert_id=va_batch.full_expert_id, 
+            full_expert_id=va_batch.full_expert_id,
             quality_scores=va_batch.quality_scores,
-            support_encoding=va_enc
+            support_encoding=va_enc,
+            geometric_obs=va_gora,
         )
         
         token_dim = va_tokens.tokens.shape[-1]
@@ -230,6 +242,24 @@ class GraphDrone:
                     break
         return self
 
+    def _compute_gora_obs(self, X: np.ndarray, descriptors: tuple) -> torch.Tensor:
+        """Compute per-expert GORA geometric observers (kappa + LID) for each query point."""
+        from sklearn.neighbors import NearestNeighbors
+        all_obs = []
+        for d in descriptors:
+            X_tr_v = self._train_views.get(d.expert_id)
+            if X_tr_v is None or len(X_tr_v) < 2:
+                all_obs.append(np.zeros((len(X), 2), dtype=np.float32))
+                continue
+            X_v = X[:, list(d.input_indices)] if d.input_indices else X
+            k = min(getattr(d, 'preferred_k', 15), len(X_tr_v) - 1)
+            knn = NearestNeighbors(n_neighbors=k).fit(X_tr_v)
+            dists, indices = knn.kneighbors(X_v)
+            kappa = calculate_kappa(X_tr_v, indices).reshape(-1, 1)
+            lid = calculate_lid(dists).reshape(-1, 1)
+            all_obs.append(np.concatenate([kappa, lid], axis=1))
+        return torch.tensor(np.stack(all_obs, axis=1), dtype=torch.float32)
+
     def predict(self, X: np.ndarray, return_diagnostics: bool = False) -> Union[np.ndarray, GraphDronePredictResult]:
         X = np.asarray(X, dtype=np.float32)
         matrix = _coerce_matrix(X)
@@ -241,12 +271,14 @@ class GraphDrone:
             full_matrix=self._X_tr if self._X_tr is not None else matrix,
             y_train=self._y_tr
         )
+        gora_obs = self._compute_gora_obs(matrix, batch.descriptors)
         tokens = self._token_builder.build(
             predictions=batch.predictions,
             descriptors=batch.descriptors,
             full_expert_id=batch.full_expert_id,
             quality_scores=batch.quality_scores,
-            support_encoding=support_enc
+            support_encoding=support_enc,
+            geometric_obs=gora_obs,
         )
         
         self._router.eval()
