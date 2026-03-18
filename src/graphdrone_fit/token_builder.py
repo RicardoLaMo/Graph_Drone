@@ -30,6 +30,7 @@ class UniversalTokenBuilder:
         predictions: np.ndarray,
         descriptors: tuple[ViewDescriptor, ...],
         full_expert_id: str,
+        quality_scores: Optional[np.ndarray] = None,
         support_encoding: Optional[SupportEncoding] = None,
         neural_support: Optional[torch.Tensor] = None,
         prior_alignment: Optional[torch.Tensor] = None,
@@ -43,10 +44,12 @@ class UniversalTokenBuilder:
         expert_ids = tuple(d.expert_id for d in descriptors)
         full_index = expert_ids.index(full_expert_id)
         
-        # 1. Prediction Residuals & Consensus
-        # For multi-class, we focus on the anchor (Full) and the class distributions
+        # 1. Prediction Residuals, Consensus & Quality
         full_pred = pred_tensor[:, full_index : full_index + 1, :] # [N, 1, C]
         row_mean = pred_tensor.mean(dim=1, keepdim=True)           # [N, 1, C]
+        
+        res_full = (pred_tensor - full_pred)
+        res_mean = (pred_tensor - row_mean)
         
         # Disagreement is the mean variation across experts for each class
         if pred_tensor.shape[1] > 1:
@@ -54,20 +57,18 @@ class UniversalTokenBuilder:
         else:
             prediction_consensus = torch.zeros((pred_tensor.shape[0], 1, 1), device=device)
         
-        # We build features: [N, E, D]
-        # For simplicity in the first pass of tokenization, we use the average/full class probability
-        # plus the residuals. To keep token dim manageable, we might use max prob or entropy here.
-        # But let's try raw class diffs if C is small, or just mean diffs.
-        
-        res_full = (pred_tensor - full_pred).mean(dim=-1, keepdim=True)
-        res_mean = (pred_tensor - row_mean).mean(dim=-1, keepdim=True)
-        
-        # If C=1 (regression), these are exact. If C>1, these are "distribution drift" indicators.
-        # We also include the max probability of the specialist to indicate confidence.
         max_prob, _ = pred_tensor.max(dim=-1, keepdim=True)
 
+        # Quality (Uncertainty) - [N, E, 1]
+        if quality_scores is not None:
+            q_tensor = torch.as_tensor(quality_scores, dtype=torch.float32).to(device)
+            if q_tensor.ndim == 2:
+                q_tensor = q_tensor.unsqueeze(-1)
+        else:
+            q_tensor = torch.zeros((pred_tensor.shape[0], pred_tensor.shape[1], 1), device=device)
+
         prediction_fields = torch.cat(
-            [max_prob, res_full, res_mean, prediction_consensus.expand(-1, len(expert_ids), -1)],
+            [max_prob, res_full, res_mean, q_tensor, prediction_consensus.expand(-1, len(expert_ids), -1)],
             dim=-1
         )
 
@@ -120,7 +121,7 @@ class UniversalTokenBuilder:
         cursor = 0
         
         slices["prediction"] = (cursor, cursor + prediction_fields.shape[-1])
-        names["prediction"] = ("max_val", "residual_full", "residual_mean", "disagreement_std")
+        names["prediction"] = ("max_val", "residual_full", "residual_mean", "quality", "disagreement_std")
         cursor += prediction_fields.shape[-1]
         
         if support_fields:
