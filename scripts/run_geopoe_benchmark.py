@@ -121,7 +121,11 @@ def load_dataset(name: str, max_samples: int = 5000):
 # ---------------------------------------------------------------------------
 
 def _cache_key(dataset: str, fold: int, method: str) -> str:
-    raw = f"{dataset}|{fold}|{method}|{GRAPHDRONE_VERSION}"
+    # Baselines (tabpfn, etc.) never change — pin them to a stable version
+    # so they survive GRAPHDRONE_VERSION bumps and are never re-computed.
+    # Only GraphDrone results are version-sensitive.
+    version = GRAPHDRONE_VERSION if method == "graphdrone" else "baseline_v1"
+    raw = f"{dataset}|{fold}|{method}|{version}"
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
