@@ -79,7 +79,7 @@ QUICK_DATASETS = {
     "pendigits":     CLASSIFICATION_DATASETS["pendigits"],
 }
 
-GRAPHDRONE_VERSION = "v1-geopoe-2026.03.19c"  # reg: FULL+3xSUB TabPFN + GORA + residual-protected router
+GRAPHDRONE_VERSION = "v1-geopoe-2026.03.20a"  # reg: +quality_scores token (local label std per expert view)
 
 
 # ---------------------------------------------------------------------------
