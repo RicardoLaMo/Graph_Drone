@@ -138,7 +138,7 @@ class GraphDrone:
                     model_params=params,
                 )
                 sub_specs = []
-                for sub_seed, sub_frac in [(0, 0.7), (1, 0.7), (2, 0.8)]:
+                for sub_seed, sub_frac in [(0, 0.8), (1, 0.85), (2, 0.9)]:
                     rng_i = np.random.RandomState(sub_seed)
                     sz_i = max(1, int(matrix.shape[1] * sub_frac))
                     idx_i = tuple(sorted(rng_i.choice(matrix.shape[1], sz_i, replace=False).tolist()))
@@ -206,13 +206,16 @@ class GraphDrone:
             # --- OOF Router Training -------------------------------------------
             # Experts are already fit on 100% data (self._portfolio).
             # To avoid optimism bias, train the router on genuinely held-out expert
-            # predictions: fit a temporary 90% portfolio, generate OOF predictions
-            # on the 10% holdout, train router there, then restore 100% inference setup.
+            # predictions: fit a temporary 80-90% portfolio, generate OOF predictions
+            # on the 10-20% holdout, train router there, then restore 100% inference setup.
             from sklearn.model_selection import train_test_split as _tts
             import torch.nn.functional as F
 
             n_all = len(matrix)
-            idx_tr90, idx_va = _tts(np.arange(n_all), test_size=0.1, random_state=42)
+            # Lead 2: Increase OOF holdout size for small binary datasets
+            # 10% of 1000 is only 100 rows; 20% (200 rows) provides better signal for router.
+            oof_test_size = 0.2 if n_all <= 1500 else 0.1
+            idx_tr90, idx_va = _tts(np.arange(n_all), test_size=oof_test_size, random_state=42, stratify=y)
             X_tr90, X_va = matrix[idx_tr90], matrix[idx_va]
             y_tr90, y_va = y[idx_tr90], y[idx_va]
 
@@ -433,10 +436,14 @@ class GraphDrone:
                     "mean_defer_prob": float(router_out.defer_prob.mean().item()),
                 }
             else:
-                # Static anchor-boosted GeoPOE (anchor_weight=3.0 default)
+                # Static anchor-boosted GeoPOE.
+                # anchor_weight=5.0: FULL gets 62.5% weight vs 50% at 3.0 (4 experts,
+                # confidence-flat regime).  Larger SUB fracs (0.8/0.85/0.9) further
+                # reduce per-SUB noise, especially on low-dim datasets (pendigits, segment).
                 preds = anchor_geo_poe_blend(
                     batch.predictions,
                     anchor_idx=batch.full_index,
+                    anchor_weight=5.0,
                 )
                 diagnostics = {
                     "router_kind": "geo_poe",
