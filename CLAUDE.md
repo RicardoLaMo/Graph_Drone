@@ -1,10 +1,11 @@
 # GraphDrone — Developer Guide for Claude
 
-## Current best ELO: 1427 (2026-03-18, main, v2026.03.18h)
-Benchmark: 12 datasets × 3 folds vs TabPFN v2.5 default (smart benchmark runner).
-TabPFN overall ELO: 1573 | GraphDrone overall ELO: **1427**
-Regression ELO: TabPFN 1560 / GraphDrone 1440
-Classification ELO: TabPFN 1545 / GraphDrone 1455
+## Current best ELO: 1479.5 classification (2026-03-19, feat/clf-improvement, v1-geopoe-2026.03.19a)
+Benchmark (GeoPOE classification only): 6 datasets × 3 folds vs TabPFN v2.5 default.
+TabPFN Classification ELO: 1520.5 | GraphDrone Classification ELO: **1479.5** (+24.5 vs prior 1455)
+
+Previous best overall ELO: 1427 (2026-03-18, main, v2026.03.18h)
+Regression ELO (main): TabPFN 1560 / GraphDrone 1440
 
 ---
 
@@ -86,8 +87,9 @@ PYTHONPATH=src python scripts/run_smart_benchmark.py --folds 0 1 2
 | Date | Version | ELO | Notes |
 |---|---|---|---|
 | 2026-03-15 | v1-width (v2026.03.15) | 1507 | GORA + TabPFN-only specialists. Binary clf only. |
-| 2026-03-18 | 2026.03.18h | **1427** | ← **current main**. No GORA. CatBoost+XGBoost+TabPFN. Full multiclass. 72/72 tasks. |
+| 2026-03-18 | 2026.03.18h | **1427** | No GORA. CatBoost+XGBoost+TabPFN. Full multiclass. 72/72 tasks. |
 | 2026-03-18 | 2026.03.18e (PR #19) | 1415 | GORA restored but mismatched with tree specialists → over-defers. Closed. |
+| 2026-03-19 | v1-geopoe-2026.03.19a | **1479.5 clf** | ← **feat/clf-improvement**. Multi-view SUB portfolio (FULL+3×SUB) + static GeoPOE (anchor_weight=3.0). Drops learned router for clf. Diabetes now beats TabPFN. 35/36 tasks (1 OOM). |
 
 ---
 
@@ -97,4 +99,4 @@ PYTHONPATH=src python scripts/run_smart_benchmark.py --folds 0 1 2
 
 2. **GORA with TabPFN-only specialists** — The geometric signal is sound; the specialist portfolio is the mismatch. A pure TabPFN multi-view portfolio + GORA should recover the v1-width advantage.
 
-3. **Multiclass classification lag** — GD wins on credit_g, diabetes, mfeat_factors but trails on pendigits, optdigits, segment (saturated datasets where TabPFN is very strong). Routing signal is weak when all experts agree.
+3. **Multiclass classification lag** — Partially resolved in feat/clf-improvement: diabetes and segment now beat TabPFN with multi-view static GeoPOE. credit_g still slightly behind (and hit OOM on fold 2). pendigits/optdigits remain tiny margin saturated datasets.

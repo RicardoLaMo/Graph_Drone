@@ -79,7 +79,7 @@ QUICK_DATASETS = {
     "pendigits":     CLASSIFICATION_DATASETS["pendigits"],
 }
 
-GRAPHDRONE_VERSION = "v1-geopoe-2026.03.18b"  # learned anchor-protective router for classification
+GRAPHDRONE_VERSION = "v1-geopoe-2026.03.19a"  # multi-view SUB portfolio + static GeoPOE (anchor_weight=3.0)
 
 
 # ---------------------------------------------------------------------------
@@ -240,32 +240,39 @@ def run_graphdrone(X_tr, y_tr, X_te, task_type: str, seed: int = 42, n_classes: 
         # v1-width config has no problem_type field — only n_classes needed for clf
         cfg = GraphDroneConfig()
     else:
-        # GeoPOE classification: n_classes pins output dimension
+        # GeoPOE classification: multi-view SUB portfolio + static anchor-boosted GeoPOE
+        # 3 SUB views with different seeds/subspace sizes → richer ensemble diversity
+        # Static router avoids overfitting on tiny OOF splits (~78-100 samples)
         if n_classes is None:
             n_classes = int(len(np.unique(y_tr)))
-        specs = (
-            ExpertBuildSpec(
-                descriptor=ViewDescriptor(
-                    expert_id="FULL", family="FULL", view_name="Foundation Full",
-                    is_anchor=True, input_dim=n, input_indices=full_idx,
-                ),
-                model_kind="foundation_classifier",
-                input_adapter=IdentitySelectorAdapter(indices=full_idx),
-                model_params=params_fp,
+        full_spec = ExpertBuildSpec(
+            descriptor=ViewDescriptor(
+                expert_id="FULL", family="FULL", view_name="Foundation Full",
+                is_anchor=True, input_dim=n, input_indices=full_idx,
             ),
-            ExpertBuildSpec(
-                descriptor=ViewDescriptor(
-                    expert_id="SUB", family="structural_subspace", view_name="Foundation Sub",
-                    input_dim=sub_size, input_indices=sub_idx,
-                ),
-                model_kind="foundation_classifier",
-                input_adapter=IdentitySelectorAdapter(indices=sub_idx),
-                model_params=params_fp,
-            ),
+            model_kind="foundation_classifier",
+            input_adapter=IdentitySelectorAdapter(indices=full_idx),
+            model_params=params_fp,
         )
+        sub_specs = []
+        for sub_seed, sub_frac in [(0, 0.7), (1, 0.7), (2, 0.8)]:
+            rng_i = np.random.RandomState(sub_seed)
+            sz_i = max(1, int(n * sub_frac))
+            idx_i = tuple(sorted(rng_i.choice(n, sz_i, replace=False).tolist()))
+            sub_specs.append(ExpertBuildSpec(
+                descriptor=ViewDescriptor(
+                    expert_id=f"SUB{sub_seed}", family="structural_subspace",
+                    view_name=f"Foundation Sub {sub_seed}",
+                    input_dim=sz_i, input_indices=idx_i,
+                ),
+                model_kind="foundation_classifier",
+                input_adapter=IdentitySelectorAdapter(indices=idx_i),
+                model_params=params_fp,
+            ))
+        specs = (full_spec, *sub_specs)
         cfg = GraphDroneConfig(
             n_classes=n_classes,
-            router=SetRouterConfig(kind="contextual_transformer"),
+            router=SetRouterConfig(kind="bootstrap_full_only"),
         )
 
     gd = GraphDrone(cfg)

@@ -126,28 +126,32 @@ class GraphDrone:
 
             if is_classification:
                 model_kind = "foundation_classifier"
-                expert_specs = (
-                    ExpertBuildSpec(
-                        descriptor=ViewDescriptor(
-                            expert_id=self.config.full_expert_id, family="FULL",
-                            view_name="Foundation Full", is_anchor=True,
-                            input_dim=matrix.shape[1], input_indices=full_idx,
-                        ),
-                        model_kind=model_kind,
-                        input_adapter=IdentitySelectorAdapter(indices=full_idx),
-                        model_params=params,
+                full_spec = ExpertBuildSpec(
+                    descriptor=ViewDescriptor(
+                        expert_id=self.config.full_expert_id, family="FULL",
+                        view_name="Foundation Full", is_anchor=True,
+                        input_dim=matrix.shape[1], input_indices=full_idx,
                     ),
-                    ExpertBuildSpec(
-                        descriptor=ViewDescriptor(
-                            expert_id="SUB", family="structural_subspace",
-                            view_name="Foundation Sub",
-                            input_dim=sub_size, input_indices=sub_idx,
-                        ),
-                        model_kind=model_kind,
-                        input_adapter=IdentitySelectorAdapter(indices=sub_idx),
-                        model_params=params,
-                    ),
+                    model_kind=model_kind,
+                    input_adapter=IdentitySelectorAdapter(indices=full_idx),
+                    model_params=params,
                 )
+                sub_specs = []
+                for sub_seed, sub_frac in [(0, 0.7), (1, 0.7), (2, 0.8)]:
+                    rng_i = np.random.RandomState(sub_seed)
+                    sz_i = max(1, int(matrix.shape[1] * sub_frac))
+                    idx_i = tuple(sorted(rng_i.choice(matrix.shape[1], sz_i, replace=False).tolist()))
+                    sub_specs.append(ExpertBuildSpec(
+                        descriptor=ViewDescriptor(
+                            expert_id=f"SUB{sub_seed}", family="structural_subspace",
+                            view_name=f"Foundation Sub {sub_seed}",
+                            input_dim=sz_i, input_indices=idx_i,
+                        ),
+                        model_kind=model_kind,
+                        input_adapter=IdentitySelectorAdapter(indices=idx_i),
+                        model_params=params,
+                    ))
+                expert_specs = (full_spec, *sub_specs)
             else:
                 expert_specs = (
                     ExpertBuildSpec(
@@ -396,12 +400,10 @@ class GraphDrone:
                     "mean_defer_prob": float(router_out.defer_prob.mean().item()),
                 }
             else:
-                # Static anchor-boosted GeoPOE fallback
+                # Static anchor-boosted GeoPOE (anchor_weight=3.0 default)
                 preds = anchor_geo_poe_blend(
                     batch.predictions,
                     anchor_idx=batch.full_index,
-                    anchor_weight=2.0,
-                    temperature=1.0,
                 )
                 diagnostics = {
                     "router_kind": "geo_poe",

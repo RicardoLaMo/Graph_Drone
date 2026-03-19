@@ -84,7 +84,7 @@ def anchor_geo_poe_blend(
     predictions: np.ndarray,
     anchor_idx: int,
     *,
-    anchor_weight: float = 2.0,
+    anchor_weight: float = 3.0,
     temperature: float = 1.0,
 ) -> np.ndarray:
     """
