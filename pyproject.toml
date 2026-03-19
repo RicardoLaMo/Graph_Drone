@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "graph-drone"
-version = "2026.03.15"
-description = "Multi-View Mixture-of-Specialists meta-model for tabular data. #10 on TabArena (43 datasets, 58 methods, no tuning)."
+version = "2026.03.19"
+description = "Multi-View Mixture-of-Specialists meta-model for tabular data. Binary+multiclass classification wins over TabPFN v2.5. Regression ELO 1523.2."
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [

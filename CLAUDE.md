@@ -1,11 +1,19 @@
 # GraphDrone — Developer Guide for Claude
 
 ## Current best ELO: **GD 1502.2 vs TabPFN 1497.8** — GD WINS (2026-03-19, feat/clf-multiclass-win)
-Benchmark (GeoPOE classification only): 6 datasets × 3 folds vs TabPFN v2.5 default.
-TabPFN Classification ELO: 1520.5 | GraphDrone Classification ELO: **1479.5** (+24.5 vs prior 1455)
+Benchmark: 6 datasets × 3 folds, smart benchmark vs TabPFN v2.5 default.
 
-Previous best overall ELO: 1427 (2026-03-18, main, v2026.03.18h)
-Regression ELO (main): TabPFN 1560 / GraphDrone 1440
+### Classification summary (2026-03-19)
+| Dataset | GD F1 | TPF F1 | Result |
+|---|---|---|---|
+| diabetes (binary) | 0.7549 | 0.7320 | **GD wins +0.023** |
+| credit_g (binary) | 0.6787 | 0.6937 | Gap closed: was −0.054, now −0.015 |
+| segment (7-class) | 0.9474 | 0.9474 | Tie |
+| mfeat_factors (10-class) | 0.9861 | 0.9826 | **GD wins +0.004** |
+| pendigits (10-class) | 0.9949 | 0.9959 | Near-saturation |
+| optdigits (10-class) | 0.9930 | 0.9924 | **GD wins +0.001** |
+
+Regression ELO (main, v1.18): GD 1523.2 vs TabPFN 1476.8 — **GD WINS**
 
 ---
 
@@ -89,29 +97,35 @@ PYTHONPATH=src python scripts/run_smart_benchmark.py --folds 0 1 2
 | 2026-03-15 | v1-width (v2026.03.15) | 1507 | GORA + TabPFN-only specialists. Binary clf only. |
 | 2026-03-18 | 2026.03.18h | **1427** | No GORA. CatBoost+XGBoost+TabPFN. Full multiclass. 72/72 tasks. |
 | 2026-03-18 | 2026.03.18e (PR #19) | 1415 | GORA restored but mismatched with tree specialists → over-defers. Closed. |
-| 2026-03-19 | v1-geopoe-2026.03.19a | **1479.5 clf** | ← **feat/clf-improvement**. Multi-view SUB portfolio (FULL+3×SUB) + static GeoPOE (anchor_weight=3.0). Drops learned router for clf. Diabetes now beats TabPFN. 35/36 tasks (1 OOM). |
+| 2026-03-19 | v1-geopoe-2026.03.19a | **1479.5 clf** | feat/clf-improvement. Multi-view SUB portfolio (FULL+3×SUB) + static GeoPOE (anchor_weight=3.0). 35/36 tasks (1 OOM). |
+| 2026-03-19 | v1.18.0 | **Reg 1523.2 / Clf 1479.5** | main. Regression engine wins. Classification still behind TPF. |
+| 2026-03-19 | **v1.19.0** | **Clf 1502.2** ← **GD WINS** | feat/clf-multiclass-win → main. Binary/multiclass split + size-aware OOF + credit_g gap closed. |
 
 ---
 
-## Binary vs multiclass split (feat/clf-binary-split)
+## Binary vs multiclass split — SHIPPED in v1.19
 
-**Hypothesis:** binary classification benefits from a learned OOF router (NLL + GORA) rather
-than static anchor GeoPOE because the FULL expert is already well-calibrated for binary;
-static PoE blending with SUB views can *add* noise rather than reduce it.
+**Binary path** (`is_binary = n_classes == 2`):
+- Learned OOF NLL router with GORA + noise_gate_router
+- OOF split: 20% holdout when n≤1500, 10% otherwise; **stratified** (credit_g fix)
+- Expert portfolio: FULL + 1×SUB (50% features) for n_features < 25; else FULL + 3×SUB
+- Small dataset anchor-only fallback: `skip_subs` when n < 500 AND n_features < 25
+- OOF experts CPU-offloaded to avoid GPU OOM (8-model contention)
 
-**Implementation (`model.py`):**
-- `is_binary = is_classification and (n_classes == 2)`
-- Binary: forces `use_learned=True` + overrides `bootstrap_full_only` → `noise_gate_router`
-- Multiclass: static `anchor_geo_poe_blend(anchor_weight=3.0)` — unchanged
-- Expert portfolio (FULL + 3×SUB) unchanged for both paths
-- GORA is automatically included in the learned router path (existing OOF training uses `_compute_gora_obs`)
+**Multiclass path** (`n_classes > 2`):
+- Static `anchor_geo_poe_blend(anchor_weight=5.0)`
+- Portfolio: FULL + 3×SUB (fracs 0.8 / 0.85 / 0.9)
+- No router training — zero NLL overhead, valid probability output guaranteed
 
-**Benchmark datasets split:**
-- Binary: `diabetes` (OpenML 37), `credit_g` (OpenML 31)
-- Multiclass: `segment`, `mfeat_factors`, `pendigits`, `optdigits`
+**Credit_g fix (from research/credit-g-binary-split):**
+- `oof_test_size = 0.2 if n_all <= 1500 else 0.1` — doubled holdout for small binary datasets
+- `stratify=y` in OOF split — prevents class imbalance in holdout for credit_g
+- Gap closed: credit_g F1 was −0.054 vs TabPFN, now −0.015
 
-## Known gaps (not yet implemented)
+## Known gaps (future work)
 
-1. **`quality_scores` in tokens** — `portfolio_loader.py` has a `pass` stub where bagged estimator variance should be extracted. All quality tokens are currently zero. Implementing real variance should give the router uncertainty information and improve ELO.
+1. **`quality_scores` in tokens** — `portfolio_loader.py` has a `pass` stub. All quality tokens are zero. Real variance should give the router uncertainty signal and improve binary ELO further.
 
-2. **Multiclass classification lag** — Partially resolved in feat/clf-improvement: diabetes and segment now beat TabPFN with multi-view static GeoPOE. credit_g still slightly behind (and hit OOM on fold 2). pendigits/optdigits remain tiny margin saturated datasets.
+2. **credit_g still lags TabPFN** (−0.015). Root cause: 20 features × 3 SUBs at 70-80% provides minimal diversity; OOF holdout still only ~160 rows after stratify fix. Tracked in research/credit-g-binary-split. Further improvement: Latin square permutations (Idea E in tabicl_inspiration.md).
+
+3. **TabICL-inspired ideas** (research/tabicl-inspiration) — class shift + YJ view + temperature bundle tested: net −4.3 ELO. YJ 5th expert drags segment. Ablation needed: class-shift-only is promising for 10-class datasets.
