@@ -1,6 +1,6 @@
 # GraphDrone — Developer Guide for Claude
 
-## Current best ELO: 1479.5 classification (2026-03-19, feat/clf-improvement, v1-geopoe-2026.03.19a)
+## Current best ELO: **GD 1502.2 vs TabPFN 1497.8** — GD WINS (2026-03-19, feat/clf-multiclass-win)
 Benchmark (GeoPOE classification only): 6 datasets × 3 folds vs TabPFN v2.5 default.
 TabPFN Classification ELO: 1520.5 | GraphDrone Classification ELO: **1479.5** (+24.5 vs prior 1455)
 
@@ -93,10 +93,25 @@ PYTHONPATH=src python scripts/run_smart_benchmark.py --folds 0 1 2
 
 ---
 
+## Binary vs multiclass split (feat/clf-binary-split)
+
+**Hypothesis:** binary classification benefits from a learned OOF router (NLL + GORA) rather
+than static anchor GeoPOE because the FULL expert is already well-calibrated for binary;
+static PoE blending with SUB views can *add* noise rather than reduce it.
+
+**Implementation (`model.py`):**
+- `is_binary = is_classification and (n_classes == 2)`
+- Binary: forces `use_learned=True` + overrides `bootstrap_full_only` → `noise_gate_router`
+- Multiclass: static `anchor_geo_poe_blend(anchor_weight=3.0)` — unchanged
+- Expert portfolio (FULL + 3×SUB) unchanged for both paths
+- GORA is automatically included in the learned router path (existing OOF training uses `_compute_gora_obs`)
+
+**Benchmark datasets split:**
+- Binary: `diabetes` (OpenML 37), `credit_g` (OpenML 31)
+- Multiclass: `segment`, `mfeat_factors`, `pendigits`, `optdigits`
+
 ## Known gaps (not yet implemented)
 
 1. **`quality_scores` in tokens** — `portfolio_loader.py` has a `pass` stub where bagged estimator variance should be extracted. All quality tokens are currently zero. Implementing real variance should give the router uncertainty information and improve ELO.
 
-2. **GORA with TabPFN-only specialists** — The geometric signal is sound; the specialist portfolio is the mismatch. A pure TabPFN multi-view portfolio + GORA should recover the v1-width advantage.
-
-3. **Multiclass classification lag** — Partially resolved in feat/clf-improvement: diabetes and segment now beat TabPFN with multi-view static GeoPOE. credit_g still slightly behind (and hit OOM on fold 2). pendigits/optdigits remain tiny margin saturated datasets.
+2. **Multiclass classification lag** — Partially resolved in feat/clf-improvement: diabetes and segment now beat TabPFN with multi-view static GeoPOE. credit_g still slightly behind (and hit OOM on fold 2). pendigits/optdigits remain tiny margin saturated datasets.
