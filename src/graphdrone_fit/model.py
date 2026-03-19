@@ -122,8 +122,10 @@ class GraphDrone:
             full_idx = tuple(range(matrix.shape[1]))
             params = {"n_estimators": 8, "device": self.device}
             rng = np.random.RandomState(42)
-            sub_size = max(1, int(matrix.shape[1] * 0.7))
-            sub_idx = tuple(sorted(rng.choice(matrix.shape[1], sub_size, replace=False).tolist()))
+            
+            # Lead 4: Anchor-only fallback for very small binary datasets.
+            # Scaling router training on < 500 rows is noisy; better to trust the FULL anchor.
+            skip_subs = is_binary and (len(matrix) < 500 and matrix.shape[1] < 25)
 
             if is_classification:
                 model_kind = "foundation_classifier"
@@ -137,21 +139,30 @@ class GraphDrone:
                     input_adapter=IdentitySelectorAdapter(indices=full_idx),
                     model_params=params,
                 )
+                
                 sub_specs = []
-                for sub_seed, sub_frac in [(0, 0.8), (1, 0.85), (2, 0.9)]:
-                    rng_i = np.random.RandomState(sub_seed)
-                    sz_i = max(1, int(matrix.shape[1] * sub_frac))
-                    idx_i = tuple(sorted(rng_i.choice(matrix.shape[1], sz_i, replace=False).tolist()))
-                    sub_specs.append(ExpertBuildSpec(
-                        descriptor=ViewDescriptor(
-                            expert_id=f"SUB{sub_seed}", family="structural_subspace",
-                            view_name=f"Foundation Sub {sub_seed}",
-                            input_dim=sz_i, input_indices=idx_i,
-                        ),
-                        model_kind=model_kind,
-                        input_adapter=IdentitySelectorAdapter(indices=idx_i),
-                        model_params=params,
-                    ))
+                if not skip_subs:
+                    # Lead 1: For low-dim binary datasets, use 1 SUB at 50% features.
+                    # Higher dimensionality can support more specialists.
+                    if is_binary and matrix.shape[1] < 25:
+                        sub_specs_config = [(0, 0.5)]
+                    else:
+                        sub_specs_config = [(0, 0.8), (1, 0.85), (2, 0.9)]
+
+                    for sub_seed, sub_frac in sub_specs_config:
+                        rng_i = np.random.RandomState(sub_seed)
+                        sz_i = max(1, int(matrix.shape[1] * sub_frac))
+                        idx_i = tuple(sorted(rng_i.choice(matrix.shape[1], sz_i, replace=False).tolist()))
+                        sub_specs.append(ExpertBuildSpec(
+                            descriptor=ViewDescriptor(
+                                expert_id=f"SUB{sub_seed}", family="structural_subspace",
+                                view_name=f"Foundation Sub {sub_seed}",
+                                input_dim=sz_i, input_indices=idx_i,
+                            ),
+                            model_kind=model_kind,
+                            input_adapter=IdentitySelectorAdapter(indices=idx_i),
+                            model_params=params,
+                        ))
                 expert_specs = (full_spec, *sub_specs)
             else:
                 expert_specs = (
@@ -213,8 +224,8 @@ class GraphDrone:
 
             n_all = len(matrix)
             # Lead 2: Increase OOF holdout size for small binary datasets
-            # 10% of 1000 is only 100 rows; 20% (200 rows) provides better signal for router.
-            oof_test_size = 0.2 if n_all <= 1500 else 0.1
+            # 10% of 1000 is only 100 rows; 25% (250 rows) provides better signal for router.
+            oof_test_size = 0.25 if n_all <= 1500 else 0.1
             idx_tr90, idx_va = _tts(np.arange(n_all), test_size=oof_test_size, random_state=42, stratify=y)
             X_tr90, X_va = matrix[idx_tr90], matrix[idx_va]
             y_tr90, y_va = y[idx_tr90], y[idx_va]
