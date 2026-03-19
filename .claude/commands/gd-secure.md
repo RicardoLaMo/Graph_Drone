@@ -27,11 +27,13 @@ If any of these files are missing, **STOP and report** — do not proceed with s
 
 ## Step 2: Verify version string matches $ARGUMENTS
 
+Parse $ARGUMENTS: the first word is the engine (`regression`, `classification`, or `both`); the second word is the expected version string (e.g. `v1-geopoe-2026.03.20b`).
+
 ```
 !`grep "GRAPHDRONE_VERSION" /home/wliu23/projects/GraphDrone2/Graph_Drone_research/scripts/run_geopoe_benchmark.py | head -3`
 ```
 
-If the version string in the script does not match $ARGUMENTS, **STOP** and report the mismatch. Ask the user to confirm they ran the correct version.
+Compare only the version string part of $ARGUMENTS against the version string in the script. If they do not match, **STOP** and report: "Script has version X but you passed version Y. Did you forget to bump GRAPHDRONE_VERSION before running the benchmark?"
 
 ## Step 3: Extract ELOs from result files
 

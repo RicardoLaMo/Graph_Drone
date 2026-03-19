@@ -37,13 +37,22 @@ Read the full DO NOT section of CLAUDE.md:
 !`grep -A 60 "DO NOT rules" /home/wliu23/projects/GraphDrone2/Graph_Drone_research/CLAUDE.md`
 ```
 
-Before proposing any changes, verify the proposed approach does NOT:
-- Use `bootstrap_full_only` for regression
-- Add CatBoost or XGBoost to either engine
-- Use `contextual_transformer` router for classification
-- Omit the MSE residual penalty for regression
-- Re-enable GORA for classification
-- Treat 1514.7 as a regression ELO target
+Before proposing any changes, verify the proposed approach does NOT violate any rule listed in the CLAUDE.md DO NOT section (read above). Key rules by engine:
+
+**If $ARGUMENTS = regression:**
+- Do NOT use `bootstrap_full_only` (= vanilla TabPFN, ELO 1440)
+- Do NOT add CatBoost or XGBoost (mis-routes in complex regions)
+- Do NOT omit the MSE residual penalty (defer→1.0 collapse on diamonds)
+- Do NOT treat 1514.7 as a regression target (it was a combined ELO, not regression-only)
+
+**If $ARGUMENTS = classification:**
+- Do NOT use `contextual_transformer` router (37:1 param/sample ratio on 78–100 OOF rows)
+- Do NOT add CatBoost or XGBoost
+- Do NOT re-enable GORA (kNN noisy on small N; no router to consume it anyway)
+- Current classification baseline is GD 1479.5 vs TabPFN 1520.5 — improvement means closing this gap
+
+**Either engine:**
+- Do NOT mix up `run_geopoe_benchmark.py` ELOs with `run_smart_benchmark.py` ELOs — incompatible scales
 
 If $ARGUMENTS involves any of the above, **STOP and warn the user** with the specific DO NOT rule and the measured failure that backed it.
 
