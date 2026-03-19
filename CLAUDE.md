@@ -47,6 +47,9 @@ Without `2.0 * relu(mse - anchor_mse)`, the router drives `defer→1.0` whenever
 **DO NOT re-enable GORA for classification.**
 GORA tokens are computed via kNN in each expert's subspace. For classification, with 4 experts and small N, the kNN computation on the 10% OOF split is noisy and doesn't improve the static GeoPOE path (which has no router to consume the signal anyway).
 
+**DO NOT use local label std as a quality score token for regression.**
+Attempted in v1-geopoe-2026.03.20a (feat/reg-quality-scores-20260319, reverted). `-log1p(std(y_train[kNN]))` per expert measures label smoothness in the expert's feature subspace, NOT prediction quality. A SUB expert missing key features (e.g., carat for diamonds) groups samples by non-predictive dimensions, showing artificially low local label variance. The router interprets this as "trust this expert more" → defer→1.0 on diamonds fold 1/2 and house_prices fold 2 → R² collapses −0.034 to −0.039. ELO dropped 1523.2 → 1484.4. The residual penalty does NOT protect here because the SUB blend appeared genuinely better on the OOF split (false signal that passed the penalty gate). The correct quality signal requires OOF per-expert residuals (computed directly from held-out predictions), not neighborhood label statistics.
+
 **DO NOT treat 1514.7 as a regression ELO target.**
 That number is in `eval/geopoe_benchmark/run_log.txt` from v1-geopoe-2026.03.18a. It was a combined ELO (6 regression + 6 classification datasets). The regression component used `bootstrap_full_only` (= vanilla TabPFN with n_estimators=8) vs a TabPFN baseline with unspecified n_estimators. GD appeared to win only because it used more estimators. It was never a real regression improvement. The true regression baseline before 2026-03-19 was ~1440–1447.
 
