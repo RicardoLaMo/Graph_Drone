@@ -16,7 +16,7 @@ class PortfolioLoadConfig:
 
 @dataclass(frozen=True)
 class SetRouterConfig:
-    kind: Literal["bootstrap_full_only", "contextual_transformer_router", "noise_gate_router", "hyper_set_router"] = "contextual_transformer_router"
+    kind: Literal["bootstrap_full_only", "contextual_transformer", "noise_gate_router"] = "bootstrap_full_only"
     sparse_top_k: int = 1
 
     def validate(self) -> "SetRouterConfig":
@@ -30,15 +30,18 @@ class GraphDroneConfig:
     portfolio: PortfolioLoadConfig | None = None
     full_expert_id: str = "FULL"
     router: SetRouterConfig = field(default_factory=SetRouterConfig)
-    problem_type: Literal["regression", "classification"] = "regression"
+    # n_classes > 1 forces classification mode and pins the output dimension.
+    # Leave at 1 for regression or binary auto-detection.
     n_classes: int = 1
+    # When True, trains a ContextualTransformerRouter for classification with
+    # NLL loss + residual anchor penalty (same protective mechanism as regression).
+    # When False, falls back to static anchor_geo_poe_blend.
+    use_learned_router_for_classification: bool = True
 
     def validate(self) -> "GraphDroneConfig":
         if not self.full_expert_id.strip():
             raise ValueError("full_expert_id must be non-empty")
         self.router.validate()
-        if self.problem_type == "classification" and self.n_classes < 2:
-            raise ValueError(f"Classification requires at least 2 classes, got {self.n_classes}")
         if self.portfolio is not None:
             self.portfolio.resolved_manifest_path()
         return self

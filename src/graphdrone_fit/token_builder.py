@@ -17,7 +17,6 @@ class TokenBatch:
     expert_ids: tuple[str, ...]
     field_slices: dict[str, tuple[int, int]]
     field_names: dict[str, tuple[str, ...]]
-    task_token: Optional[torch.Tensor] = None  # [B, 1, D_task]
 
 class UniversalTokenBuilder:
     """
@@ -30,47 +29,30 @@ class UniversalTokenBuilder:
         predictions: np.ndarray,
         descriptors: tuple[ViewDescriptor, ...],
         full_expert_id: str,
-        quality_scores: Optional[np.ndarray] = None,
         support_encoding: Optional[SupportEncoding] = None,
         neural_support: Optional[torch.Tensor] = None,
         prior_alignment: Optional[torch.Tensor] = None,
         geometric_obs: Optional[torch.Tensor] = None,
     ) -> TokenBatch:
-        pred_tensor = torch.as_tensor(predictions, dtype=torch.float32) # [N, E, C]
-        if pred_tensor.ndim == 2:
-            pred_tensor = pred_tensor.unsqueeze(-1) # Ensure [N, E, 1]
-            
+        pred_tensor = torch.as_tensor(predictions, dtype=torch.float32)
         device = pred_tensor.device
         expert_ids = tuple(d.expert_id for d in descriptors)
         full_index = expert_ids.index(full_expert_id)
         
-        # 1. Prediction Residuals, Consensus & Quality
-        full_pred = pred_tensor[:, full_index : full_index + 1, :] # [N, 1, C]
-        row_mean = pred_tensor.mean(dim=1, keepdim=True)           # [N, 1, C]
-        
-        res_full = (pred_tensor - full_pred)
-        res_mean = (pred_tensor - row_mean)
-        
-        # Disagreement is the mean variation across experts for each class
+        # 1. Prediction Residuals & Consensus
+        full_pred = pred_tensor[:, full_index : full_index + 1]
+        row_mean = pred_tensor.mean(dim=1, keepdim=True)
         if pred_tensor.shape[1] > 1:
-            prediction_consensus = pred_tensor.std(dim=1, keepdim=True).mean(dim=-1, keepdim=True) # [N, 1, 1]
+            prediction_consensus = pred_tensor.std(dim=1, keepdim=True)
         else:
-            prediction_consensus = torch.zeros((pred_tensor.shape[0], 1, 1), device=device)
+            prediction_consensus = torch.zeros((pred_tensor.shape[0], 1), device=device)
         
-        max_prob, _ = pred_tensor.max(dim=-1, keepdim=True)
-
-        # Quality (Uncertainty) - [N, E, 1]
-        if quality_scores is not None:
-            q_tensor = torch.as_tensor(quality_scores, dtype=torch.float32).to(device)
-            if q_tensor.ndim == 2:
-                q_tensor = q_tensor.unsqueeze(-1)
-        else:
-            q_tensor = torch.zeros((pred_tensor.shape[0], pred_tensor.shape[1], 1), device=device)
-
-        prediction_fields = torch.cat(
-            [max_prob, res_full, res_mean, q_tensor, prediction_consensus.expand(-1, len(expert_ids), -1)],
+        prediction_fields = torch.stack(
+            (pred_tensor, pred_tensor - full_pred, pred_tensor - row_mean),
             dim=-1
         )
+        consensus_expanded = prediction_consensus.unsqueeze(1).expand(-1, len(expert_ids), 1)
+        prediction_fields = torch.cat([prediction_fields, consensus_expanded], dim=-1)
 
         # 2. Support Moments & SNR
         support_fields = []
@@ -121,7 +103,7 @@ class UniversalTokenBuilder:
         cursor = 0
         
         slices["prediction"] = (cursor, cursor + prediction_fields.shape[-1])
-        names["prediction"] = ("max_val", "residual_full", "residual_mean", "quality", "disagreement_std")
+        names["prediction"] = ("raw", "residual_full", "residual_mean", "disagreement_std")
         cursor += prediction_fields.shape[-1]
         
         if support_fields:
@@ -132,13 +114,8 @@ class UniversalTokenBuilder:
             
         slices["descriptor"] = (cursor, cursor + descriptor_tensor.shape[-1])
         names["descriptor"] = descriptor_names
-
-        # Extract task_token from support_encoding and expand to batch size: [B, 1, D_task]
-        batch_task_token = None
-        if support_encoding is not None and support_encoding.task_token is not None:
-            batch_task_token = support_encoding.task_token.to(device).expand(pred_tensor.shape[0], -1, -1)
-
-        return TokenBatch(tokens, expert_ids, slices, names, task_token=batch_task_token)
+        
+        return TokenBatch(tokens, expert_ids, slices, names)
 
     def _build_descriptor_tensor(self, descriptors: tuple[ViewDescriptor, ...]) -> tuple[torch.Tensor, tuple[str, ...]]:
         rows = []

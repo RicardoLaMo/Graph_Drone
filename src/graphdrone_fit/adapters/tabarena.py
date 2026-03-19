@@ -2,6 +2,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import torch
+from sklearn.impute import SimpleImputer
 from tabarena.benchmark.models.wrapper.abstract_class import AbstractExecModel
 from graphdrone_fit import GraphDrone, GraphDroneConfig, SetRouterConfig, ExpertBuildSpec, ViewDescriptor, IdentitySelectorAdapter
 
@@ -31,7 +32,15 @@ class GraphDroneTabArenaAdapter(AbstractExecModel):
         self.use_gora = use_gora
         self.use_hybrid_prior = use_hybrid_prior
         self.model = None
+        self.imputer = None
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    def _to_array(self, X: pd.DataFrame) -> np.ndarray:
+        """Convert DataFrame to float32 array, imputing NaNs with training medians."""
+        arr = X.values.astype(np.float32)
+        if self.imputer is not None:
+            arr = self.imputer.transform(arr)
+        return arr
 
     def _fit(self, X: pd.DataFrame, y: pd.Series, X_val=None, y_val=None):
         n_features = X.shape[1]
@@ -69,21 +78,30 @@ class GraphDroneTabArenaAdapter(AbstractExecModel):
             )
         )
 
-        config = GraphDroneConfig(full_expert_id="FULL", router=SetRouterConfig(kind=self.router_kind))
-        self.model = GraphDrone(config)
+        config = GraphDroneConfig(
+            full_expert_id="FULL",
+            router=SetRouterConfig(kind=self.router_kind)
+        )
         
-        if not self.use_gora:
-            self.model._compute_gora_obs = lambda X, descriptors: torch.zeros((X.shape[0], len(descriptors), 2), device=self.model.device)
+        # Fit imputer on training data to handle datasets with missing values
+        X_arr = X.values.astype(np.float32)
+        if np.isnan(X_arr).any():
+            self.imputer = SimpleImputer(strategy="median")
+            X_arr = self.imputer.fit_transform(X_arr)
 
-        self.model.fit(X.values.astype(np.float32), y.values.astype(np.float32), expert_specs=specs)
+        self.model = GraphDrone(config)
+        self.model.fit(X_arr, y.values.astype(np.float32), expert_specs=specs,
+                       problem_type=self.problem_type)
         return self
 
     def _predict(self, X: pd.DataFrame) -> pd.Series:
-        preds = self.model.predict(X.values.astype(np.float32))
+        preds = self.model.predict(self._to_array(X))
         return pd.Series(preds, index=X.index)
 
     def _predict_proba(self, X: pd.DataFrame) -> pd.DataFrame:
-        probas = self.model.predict(X.values.astype(np.float32))
+        # Latest GraphDrone predict() returns probabilities for classification
+        probas = self.model.predict(self._to_array(X))
+        
         if self.problem_type == "binary":
             if probas.ndim == 1:
                 df_probas = pd.DataFrame({0: 1 - probas, 1: probas}, index=X.index)

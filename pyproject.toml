@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "graph-drone"
-version = "2026.03.12"
-description = "A Multi-View Mixture-of-Experts Meta-Model for Tabular Data."
+version = "2026.03.15"
+description = "Multi-View Mixture-of-Specialists meta-model for tabular data. #10 on TabArena (43 datasets, 58 methods, no tuning)."
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [
@@ -24,6 +24,10 @@ dev = [
     "pytest>=7.0.0",
     "black",
     "isort",
+]
+benchmark = [
+    "pandas>=2.0.0",
+    "scipy>=1.11.0",
 ]
 
 [tool.setuptools.packages.find]

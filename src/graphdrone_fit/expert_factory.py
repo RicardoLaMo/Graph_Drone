@@ -14,8 +14,7 @@ from .view_descriptor import ViewDescriptor
 class ExpertPredictionBatch:
     expert_ids: tuple[str, ...]
     descriptors: tuple[ViewDescriptor, ...]
-    predictions: np.ndarray  # [N, E] or [N, E, C]
-    quality_scores: np.ndarray # [N, E, 1] or [N, E, C]
+    predictions: np.ndarray
     full_expert_id: str
     full_index: int
 
@@ -90,23 +89,20 @@ class PortfolioExpertFactory:
         self.full_index = self.expert_ids.index(self.full_expert_id)
 
     def predict_all(self, X: np.ndarray) -> ExpertPredictionBatch:
-        results = [
-            self.portfolio.experts[expert_id].predict(X, return_quality=True)
+        preds = [
+            self.portfolio.experts[expert_id].predict(X)
             for expert_id in self.expert_ids
         ]
-        
-        preds = [r[0] for r in results]
-        quality = [r[1] for r in results]
-        
-        # preds is list of [N, C_i]. For consistent engine, C_i must match across experts.
-        stacked_preds = np.stack(preds, axis=1).astype(np.float32)
-        stacked_quality = np.stack(quality, axis=1).astype(np.float32)
-        
+        # Regression: each pred is [N] → column_stack → [N, E]
+        # Classification: each pred is [N, C] → stack on axis=1 → [N, E, C]
+        if preds[0].ndim == 1:
+            stacked = np.column_stack(preds).astype(np.float32)   # [N, E]
+        else:
+            stacked = np.stack(preds, axis=1).astype(np.float32)  # [N, E, C]
         return ExpertPredictionBatch(
             expert_ids=self.expert_ids,
             descriptors=self.descriptors,
-            predictions=stacked_preds,
-            quality_scores=stacked_quality,
+            predictions=stacked,
             full_expert_id=self.full_expert_id,
             full_index=self.full_index,
         )
@@ -118,12 +114,12 @@ def fit_portfolio_from_specs(
     y_train: np.ndarray,
     specs: tuple[ExpertBuildSpec, ...],
     full_expert_id: str,
-    n_jobs: int = 1,
+    n_jobs: int = -1,
 ) -> LoadedPortfolio:
     from joblib import Parallel, delayed
     
     matrix = np.asarray(X_train, dtype=np.float32)
-    target = np.asarray(y_train, dtype=np.float32).reshape(-1)
+    target = np.asarray(y_train).reshape(-1)  # keep dtype; classifiers need int, regressors float
     
     def _fit_single_spec(spec):
         descriptor = spec.descriptor.validate()
@@ -155,35 +151,6 @@ def fit_portfolio_from_specs(
     ).validate()
 
 
-@dataclass(frozen=True)
-class ClassPaddingPredictor:
-    """
-    Wraps a classifier to ensure predict_proba() always returns n_classes columns.
-    Maps columns from the underlying model's local class set to global indices.
-    """
-    base_model: object
-    n_classes: int
-    local_classes: np.ndarray
-
-    def predict_proba(self, X: np.ndarray) -> np.ndarray:
-        probs = self.base_model.predict_proba(X)
-        if probs.shape[1] == self.n_classes:
-            return probs
-        
-        # Pad/Map to global classes
-        full_probs = np.zeros((len(X), self.n_classes), dtype=np.float32)
-        for i, cls_val in enumerate(self.local_classes):
-            cls_idx = int(cls_val)
-            if cls_idx < self.n_classes:
-                full_probs[:, cls_idx] = probs[:, i]
-        return full_probs
-
-    def predict(self, X: np.ndarray) -> np.ndarray:
-        # For classification, predict() usually returns labels. 
-        # We prefer predict_proba for the router.
-        return np.argmax(self.predict_proba(X), axis=1)
-
-
 def _fit_predictor(
     *,
     model_kind: str,
@@ -212,44 +179,6 @@ def _fit_predictor(
         model.fit(X_view, y_train)
         return model
 
-    if model_kind == "sklearn_hgbt_regressor":
-        from sklearn.ensemble import HistGradientBoostingRegressor
-        model = HistGradientBoostingRegressor(
-            max_iter=int(model_params.get("max_iter", 100)),
-            random_state=int(model_params.get("random_state", 42)),
-            l2_regularization=float(model_params.get("l2_regularization", 0.0))
-        )
-        model.fit(X_view, y_train)
-        return model
-
-    if model_kind == "catboost_regressor":
-        from catboost import CatBoostRegressor
-        # Guard: CatBoost raises if all targets are identical (constant target edge case)
-        if len(np.unique(y_train)) == 1:
-            return ConstantPredictor(value=float(y_train[0]))
-        model = CatBoostRegressor(
-            iterations=int(model_params.get("iterations", 200)),
-            random_state=int(model_params.get("random_state", 42)),
-            verbose=False,
-            allow_writing_files=False,
-            thread_count=1
-        )
-        model.fit(X_view, y_train)
-        return model
-
-    if model_kind == "xgboost_regressor":
-        from xgboost import XGBRegressor
-        # Guard: XGBoost silently produces NaN predictions on constant targets
-        if len(np.unique(y_train)) == 1:
-            return ConstantPredictor(value=float(y_train[0]))
-        model = XGBRegressor(
-            n_estimators=int(model_params.get("n_estimators", 200)),
-            random_state=int(model_params.get("random_state", 42)),
-            n_jobs=1
-        )
-        model.fit(X_view, y_train)
-        return model
-
     if model_kind == "foundation_classifier":
         from tabpfn import TabPFNClassifier
 
@@ -261,9 +190,6 @@ def _fit_predictor(
             n_preprocessing_jobs=int(model_params.get("n_preprocessing_jobs", 1)),
         )
         model.fit(X_view, y_train)
-        
-        # Determine global n_classes from model_params or data
-        n_classes = int(model_params.get("n_classes", int(y_train.max() + 1)))
-        return ClassPaddingPredictor(base_model=model, n_classes=n_classes, local_classes=model.classes_)
+        return model
 
     raise ValueError(f"Unsupported model_kind={model_kind!r}")

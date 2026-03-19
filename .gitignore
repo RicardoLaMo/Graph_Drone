@@ -70,19 +70,13 @@ models/
 experiments/gora_tabular/artifacts/*.npy
 experiments/gora_tabular/figures/**/*.png
 
-# Runtime artifacts
-logs/
-checkpoints/
+# TabArena benchmark artifacts (large, ephemeral)
+experiments/tabarena_benchmark/
+experiments/tabarena_full/
 eval/
-experiments/tabarena*/
-std.out
-*.log
+external/
+logs/
 
-# Temporary session/status docs
-SESSION_*.md
-FINAL_STATUS_*.md
-STRESS_TEST_RESULTS.md
-DEPLOYMENT_READY.md
-H200_BENCHMARK_GUIDE.md
-MULTICLASS_VALIDATION_GUIDE.md
-reports/
+# Stray files
+std.out
+0
