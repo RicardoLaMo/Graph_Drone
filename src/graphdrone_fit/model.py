@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from typing import Optional, Union
 
-from .config import GraphDroneConfig
+from .config import GraphDroneConfig, SetRouterConfig
 from .defer_integrator import IntegrationOutputs, integrate_predictions
 from .expert_factory import ExpertBuildSpec, ExpertPredictionBatch, PortfolioExpertFactory, fit_portfolio_from_specs, IdentitySelectorAdapter
 from .portfolio_loader import LoadedPortfolio, load_portfolio
@@ -109,6 +109,7 @@ class GraphDrone:
             )
 
         is_classification = (self._problem_type == "classification")
+        is_binary = is_classification and (self._n_classes == 2)
 
         # Cast y appropriately
         if is_classification:
@@ -182,12 +183,25 @@ class GraphDrone:
                 fitted_adapter = spec.input_adapter.fit(matrix)
                 self._train_views[spec.descriptor.expert_id] = fitted_adapter.transform(matrix)
 
-            use_learned = self.config.use_learned_router_for_classification and \
-                          self.config.router.kind != "bootstrap_full_only"
+            # Binary: always use the learned router (OOF NLL + GORA) — the static GeoPOE
+            # blending that works for multiclass is too blunt for binary where the FULL
+            # expert is already well-calibrated.  The learned router can reject bad SUBs.
+            # Multiclass: static anchor GeoPOE (effective; avoids OOF overhead per class).
+            use_learned = is_binary or (
+                self.config.use_learned_router_for_classification
+                and self.config.router.kind != "bootstrap_full_only"
+            )
 
             if not use_learned:
-                print(f"  -> Classification: using static Geometric PoE blending (no router training).")
+                print(f"  -> Classification (multiclass): using static Geometric PoE blending.")
                 return self
+
+            if is_binary and self.config.router.kind == "bootstrap_full_only":
+                # Override to noise_gate_router for binary — bootstrap_full_only has no
+                # trainable parameters and would skip optimization entirely.
+                _binary_router_config = SetRouterConfig(kind="noise_gate_router")
+            else:
+                _binary_router_config = None
 
             # --- OOF Router Training -------------------------------------------
             # Experts are already fit on 100% data (self._portfolio).
@@ -202,10 +216,28 @@ class GraphDrone:
             X_tr90, X_va = matrix[idx_tr90], matrix[idx_va]
             y_tr90, y_va = y[idx_tr90], y[idx_va]
 
-            print(f"  -> OOF router training: fitting temporary experts on {len(X_tr90)} rows...")
+            # OOF experts are fitted on CPU to avoid GPU OOM when the 100% portfolio
+            # is already resident in GPU memory.  The OOF portfolio is a temporary
+            # artefact used only to generate held-out predictions for router training;
+            # it is discarded after this block.  CPU TabPFN adds ~3-5s per expert
+            # but eliminates the 4(100%)+4(OOF)=8-model GPU contention entirely.
+            # A Data-DAG / multi-GPU scheme would be equivalent but far more complex.
+            oof_specs = tuple(
+                ExpertBuildSpec(
+                    descriptor=spec.descriptor,
+                    model_kind=spec.model_kind,
+                    input_adapter=spec.input_adapter,
+                    model_params={**spec.model_params, "device": "cpu"},
+                )
+                for spec in expert_specs
+            )
+            torch.cuda.empty_cache()   # release cached allocations before OOF fit
+
+            print(f"  -> OOF router training: fitting temporary experts on CPU ({len(X_tr90)} rows)...")
             oof_portfolio = fit_portfolio_from_specs(
-                X_train=X_tr90, y_train=y_tr90, specs=expert_specs,
+                X_train=X_tr90, y_train=y_tr90, specs=oof_specs,
                 full_expert_id=self.config.full_expert_id,
+                n_jobs=1,   # sequential — CPU TabPFN; avoids process-fork races
             )
             oof_factory = PortfolioExpertFactory(oof_portfolio)
 
@@ -234,7 +266,8 @@ class GraphDrone:
             )
 
             token_dim = va_tokens.tokens.shape[-1]
-            self._router = build_set_router(self.config.router, token_dim=token_dim).to(self.device)
+            router_cfg = _binary_router_config if _binary_router_config is not None else self.config.router
+            self._router = build_set_router(router_cfg, token_dim=token_dim).to(self.device)
             trainable_params = list(self._router.parameters())
             if not trainable_params:
                 print("  -> Classification Router has no trainable parameters, skipping optimization.")
