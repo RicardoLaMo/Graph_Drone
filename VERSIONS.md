@@ -20,6 +20,18 @@ To prevent the "Looping Error" and performance fluctuations, GraphDrone versions
 
 ---
 
+### **🏷 `v1.18` — Current production (2026-03-19)**
+*   **Git tag**: `v1.18` on `main`
+*   **Package version**: `1.18.0` (`pyproject.toml`)
+*   **Benchmark version string**: `v1-geopoe-2026.03.19c` (regression) / `v1-geopoe-2026.03.19a` (classification)
+*   **Regression ELO**: **1523.2** vs TabPFN 1476.8 — GD wins (geopoe benchmark, 36/36 tasks)
+*   **Classification ELO**: **1479.5** vs TabPFN 1520.5 (geopoe benchmark, 35/36 tasks)
+*   **Regression engine**: FULL + 3×SUB TabPFN (seeds 0/1/2, fracs 0.7/0.7/0.8) + GORA + contextual_transformer router + MSE residual penalty
+*   **Classification engine**: FULL + 3×SUB TabPFN + static anchor_geo_poe_blend (anchor_weight=3.0, no router training)
+*   **Smoke test**: `python tests/test_smoke_v118.py` — 24/24 checks
+
+---
+
 ## 🚀 The V2 Roadmap
 
 To advance beyond Rank #10 without breaking the codebase via local patching, the following items are strictly tracked for the **GraphDrone V2.0** architecture:

@@ -1,102 +1,96 @@
 # GraphDrone — Developer Guide for Claude
 
-## Current best ELO: 1479.5 classification (2026-03-19, feat/clf-improvement, v1-geopoe-2026.03.19a)
-Benchmark (GeoPOE classification only): 6 datasets × 3 folds vs TabPFN v2.5 default.
-TabPFN Classification ELO: 1520.5 | GraphDrone Classification ELO: **1479.5** (+24.5 vs prior 1455)
+## Current best ELO (2026-03-19, main, v1.18.0)
 
-Previous best overall ELO: 1427 (2026-03-18, main, v2026.03.18h)
-Regression ELO (main): TabPFN 1560 / GraphDrone 1440
+| Engine | GD ELO | TabPFN ELO | Benchmark | Tasks |
+|---|---|---|---|---|
+| **Regression** | **1523.2** | 1476.8 | geopoe, v1-geopoe-2026.03.19c | 36/36 |
+| **Classification** | **1479.5** | 1520.5 | geopoe, v1-geopoe-2026.03.19a | 35/36 (1 OOM credit_g fold=2) |
 
----
-
-## Architecture decisions — DO NOT change without benchmarking
-
-### Router loss
-```python
-loss = main_loss + 2.0 * residual_penalty + defer_penalty
-defer_penalty = out.defer_prob.mean() * 0.05
-```
-- `residual_penalty` guards against specialists hurting the anchor
-- `defer_penalty = 0.05` is calibrated for the current specialist portfolio
-- Raising this above 0.05 suppresses routing; lowering it causes over-deferral
-- ONLY change if you also change the specialist portfolio
-
-### Expert training / router validation split
-```python
-X_tr, X_va = train_test_split(X, test_size=0.1)
-# Experts fit on X_tr (90%)
-# Router validates on X_va (10%) — must be a clean holdout
-```
-- **Do NOT train experts on full X** — tree models (CatBoost/XGBoost) memorise X_va, inflating defer_prob artificially
-- The 90/10 split keeps expert training and router validation independent
-
-### HyperSetRouter + LayerNorm
-- `expert_ln = nn.LayerNorm(hidden_dim)` after `expert_proj` is critical — prevents NaN in MultiheadAttention when regression targets have large magnitude (±hundreds)
-- Do not remove this LayerNorm
-
-### Problem type detection
-```python
-if self.config.problem_type == "classification" or (
-    self.config.problem_type != "regression"
-    and not is_float_target and len(unique_y) < 50
-):
-```
-- Explicit `problem_type="regression"` in config is a hard override — it bypasses auto-detection
-- Required to prevent CUDA NLL-loss assertion failures on integer-valued regression targets
-
-### Anchor masking in integration
-- The anchor expert (FULL) is **excluded** from the specialist weight blend
-- `spec_mask[full_index] = 0` before normalisation
-- This prevents the router from "deferring to itself"
+Both engines are in `main`. Both are independent. One `GraphDrone` class dispatches via `_detect_problem_type(y)`.
 
 ---
 
-## GORA geometric observers — NOT in main (do not re-add without reading this)
+## The two engines — exact current implementation
 
-`observers.py` (kappa + LID) was removed from the active routing path.
+### Regression engine (`model.py` lines ~300–350)
 
-**Why:** GORA was beneficial in v1-width (ELO 1507) where all specialists were TabPFN subspace views. In current main, specialists include CatBoost and XGBoost. GORA's geometric signal causes the router to defer to tree models in geometrically complex regions, but tree models are weaker than TabPFN on those exact regions → ELO drops to 1415.
+- **Portfolio**: FULL (anchor, all features) + SUB0 (70%, seed 0) + SUB1 (70%, seed 1) + SUB2 (80%, seed 2) — all `foundation_regressor` (TabPFN). No tree models.
+- **Router**: `contextual_transformer` (`ContextualTransformerRouter`) — learned.
+- **GORA**: active. `_compute_gora_obs()` computes kappa + LID per expert in each subspace view. Included in tokens fed to the router.
+- **Training**: experts fit on 100% of X. Router trained on 10% OOF split. Loss = `mse + 2.0 * relu(mse - anchor_mse)`. Patience=25, max 500 steps.
+- **Configured in**: `run_geopoe_benchmark.py` regression branch + `GraphDroneConfig(router=SetRouterConfig(kind="contextual_transformer"))`.
 
-**To re-enable GORA correctly:** Use TabPFN-only specialist views (remove CatBoost/XGBoost). Then GORA routes between TabPFN views of different feature subsets, which works well.
+### Classification engine (`model.py` lines ~174–186)
 
-Investigation: PR #18 and PR #19 on GitHub.
+- **Portfolio**: FULL (anchor, all features) + SUB0 (70%, seed 0) + SUB1 (70%, seed 1) + SUB2 (80%, seed 2) — all `foundation_classifier` (TabPFN). No tree models.
+- **Router**: `bootstrap_full_only` → triggers static `anchor_geo_poe_blend()` at predict time. No router training.
+- **anchor_weight**: 3.0 (default in `geo_ensemble.py`).
+- **Configured in**: `run_geopoe_benchmark.py` classification branch + `GraphDroneConfig(router=SetRouterConfig(kind="bootstrap_full_only"))`.
 
 ---
 
-## Benchmark runner
+## DO NOT rules — each backed by a measured failure
+
+**DO NOT use `bootstrap_full_only` for regression.**
+It returns only the FULL expert's predictions, `defer=0.0` always. That is vanilla TabPFN. You gain nothing. Prior state: every regression run before 2026-03-19 used this and scored 1440–1447 (GD loses to TabPFN).
+
+**DO NOT add CatBoost or XGBoost to either engine.**
+Both are weaker than TabPFN on these benchmark datasets. The router cannot tell when to trust them and mis-routes in geometrically complex regions. Smart benchmark (2026-03-18, v2026.03.18h) used CB+XGB → regression ELO dropped to 1440 (TabPFN 1560). Removing them entirely is correct.
+
+**DO NOT use `contextual_transformer` router for classification.**
+Overfits on the 10% OOF split. diabetes/credit_g have ~78–100 OOF rows; the router has ~2,946 parameters → 37:1 param/sample ratio → pathological defer solutions (0.0003 on one fold, 0.9998 on the next). Static GeoPOE is strictly better for small datasets.
+
+**DO NOT omit the MSE residual penalty for regression.**
+Without `2.0 * relu(mse - anchor_mse)`, the router drives `defer→1.0` whenever SUB views get lucky on the 10% split. First run (v1-geopoe-2026.03.19b, no penalty): diamonds fold 0/2 had defer=1.0, R² collapsed from 0.98 to 0.94. Penalty added in v1-geopoe-2026.03.19c: diamonds R² restored, ELO 1482→1523.
+
+**DO NOT re-enable GORA for classification.**
+GORA tokens are computed via kNN in each expert's subspace. For classification, with 4 experts and small N, the kNN computation on the 10% OOF split is noisy and doesn't improve the static GeoPOE path (which has no router to consume the signal anyway).
+
+**DO NOT treat 1514.7 as a regression ELO target.**
+That number is in `eval/geopoe_benchmark/run_log.txt` from v1-geopoe-2026.03.18a. It was a combined ELO (6 regression + 6 classification datasets). The regression component used `bootstrap_full_only` (= vanilla TabPFN with n_estimators=8) vs a TabPFN baseline with unspecified n_estimators. GD appeared to win only because it used more estimators. It was never a real regression improvement. The true regression baseline before 2026-03-19 was ~1440–1447.
+
+**DO NOT confuse the two benchmark scripts.**
+- `scripts/run_geopoe_benchmark.py` — canonical benchmark. TabPFN baseline uses `TabPFNRegressor/Classifier(n_estimators=8)` implicitly via `params_fp`. Version string is `GRAPHDRONE_VERSION`. Cache in `eval/geopoe_cache/`. Results in `eval/geopoe_benchmark/`.
+- `scripts/run_smart_benchmark.py` — older benchmark. Used tree models (CB+XGB). Separate cache in `eval/smart_cache/`. ELOs from this runner are NOT comparable to geopoe benchmark ELOs.
+
+---
+
+## Benchmark commands
 
 ```bash
-# Full run (12 datasets × 3 folds)
-PYTHONPATH=src python scripts/run_smart_benchmark.py --folds 0 1 2
+cd /home/wliu23/projects/GraphDrone2/Graph_Drone_research
 
-# Quick smoke test (3 datasets × 1 fold)
-PYTHONPATH=src python scripts/run_smart_benchmark.py --quick --folds 0
+# Regression only (6 datasets × 3 folds)
+PYTHONPATH=src python scripts/run_geopoe_benchmark.py --tasks regression --folds 0 1 2
 
-# Resume after crash — already-cached tasks are skipped automatically
-PYTHONPATH=src python scripts/run_smart_benchmark.py --folds 0 1 2
+# Classification only (6 datasets × 3 folds)
+PYTHONPATH=src python scripts/run_geopoe_benchmark.py --tasks classification --folds 0 1 2
+
+# Both engines together (12 datasets × 3 folds)
+PYTHONPATH=src python scripts/run_geopoe_benchmark.py --folds 0 1 2
 ```
 
-- Cache is keyed by `SHA256(dataset|fold|method|GRAPHDRONE_VERSION)[:16]`
-- **Bump `GRAPHDRONE_VERSION`** in `scripts/run_smart_benchmark.py` whenever you change model code, or old results will be used
-- Results in `eval/smart_benchmark/` (gitignored)
+- Cache key: `SHA256(dataset|fold|method|GRAPHDRONE_VERSION)[:16]`
+- **Bump `GRAPHDRONE_VERSION`** in `run_geopoe_benchmark.py` after any model code change, or stale cached results will be used.
+- Current version string: `v1-geopoe-2026.03.19c`
 
 ---
 
-## ELO history
+## ELO history (geopoe benchmark only — not comparable to smart benchmark)
 
-| Date | Version | ELO | Notes |
-|---|---|---|---|
-| 2026-03-15 | v1-width (v2026.03.15) | 1507 | GORA + TabPFN-only specialists. Binary clf only. |
-| 2026-03-18 | 2026.03.18h | **1427** | No GORA. CatBoost+XGBoost+TabPFN. Full multiclass. 72/72 tasks. |
-| 2026-03-18 | 2026.03.18e (PR #19) | 1415 | GORA restored but mismatched with tree specialists → over-defers. Closed. |
-| 2026-03-19 | v1-geopoe-2026.03.19a | **1479.5 clf** | ← **feat/clf-improvement**. Multi-view SUB portfolio (FULL+3×SUB) + static GeoPOE (anchor_weight=3.0). Drops learned router for clf. Diabetes now beats TabPFN. 35/36 tasks (1 OOM). |
+| Date | Version | Reg ELO | Clf ELO | Notes |
+|---|---|---|---|---|
+| 2026-03-18 | v1-geopoe-2026.03.18a | — | — | Combined 1514.7 was NOT regression-only. See DO NOT section. |
+| 2026-03-18 | v1-geopoe-2026.03.18b | — | 1455 | Learned router for clf. OOF overfitting problem. |
+| 2026-03-19 | v1-geopoe-2026.03.19a | — | **1479.5** | Static GeoPOE clf. FULL+3×SUB. anchor_weight=3.0. |
+| 2026-03-19 | v1-geopoe-2026.03.19b | 1482.3 | — | Multi-view reg, no residual penalty. Diamonds collapse (defer=1.0). |
+| **2026-03-19** | **v1-geopoe-2026.03.19c** | **1523.2** | **1479.5** | **← current main (v1.18.0)**. Residual penalty added. GD beats TabPFN on regression. |
 
 ---
 
-## Known gaps (not yet implemented)
+## Known gaps
 
-1. **`quality_scores` in tokens** — `portfolio_loader.py` has a `pass` stub where bagged estimator variance should be extracted. All quality tokens are currently zero. Implementing real variance should give the router uncertainty information and improve ELO.
+1. **`quality_scores` in tokens** — `portfolio_loader.py` has a `pass` stub. All quality tokens are zero. Implementing real bagged-estimator variance would give the router better uncertainty signal.
 
-2. **GORA with TabPFN-only specialists** — The geometric signal is sound; the specialist portfolio is the mismatch. A pure TabPFN multi-view portfolio + GORA should recover the v1-width advantage.
-
-3. **Multiclass classification lag** — Partially resolved in feat/clf-improvement: diabetes and segment now beat TabPFN with multi-view static GeoPOE. credit_g still slightly behind (and hit OOM on fold 2). pendigits/optdigits remain tiny margin saturated datasets.
+2. **credit_g OOM** — 4×TabPFN classifiers (FULL + 3 SUBs) on 800 training samples hit CUDA OOM on fold 2. Could stagger fitting or reduce `n_estimators` for small-N classification datasets.
