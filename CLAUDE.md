@@ -1,7 +1,10 @@
 # GraphDrone — Developer Guide for Claude
 
-## Current best ELO: 1429 (2026-03-18, main)
+## Current best ELO: 1427 (2026-03-18, main, v2026.03.18h)
 Benchmark: 12 datasets × 3 folds vs TabPFN v2.5 default (smart benchmark runner).
+TabPFN overall ELO: 1573 | GraphDrone overall ELO: **1427**
+Regression ELO: TabPFN 1560 / GraphDrone 1440
+Classification ELO: TabPFN 1545 / GraphDrone 1455
 
 ---
 
@@ -83,7 +86,7 @@ PYTHONPATH=src python scripts/run_smart_benchmark.py --folds 0 1 2
 | Date | Version | ELO | Notes |
 |---|---|---|---|
 | 2026-03-15 | v1-width (v2026.03.15) | 1507 | GORA + TabPFN-only specialists. Binary clf only. |
-| 2026-03-18 | 2026.03.18d | **1429** | ← **current main**. No GORA. CatBoost+XGBoost+TabPFN. Full multiclass. |
+| 2026-03-18 | 2026.03.18h | **1427** | ← **current main**. No GORA. CatBoost+XGBoost+TabPFN. Full multiclass. 72/72 tasks. |
 | 2026-03-18 | 2026.03.18e (PR #19) | 1415 | GORA restored but mismatched with tree specialists → over-defers. Closed. |
 
 ---
