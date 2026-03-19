@@ -77,7 +77,6 @@ class GraphDrone:
         self._support_encoder = MomentSupportEncoder()
         self._router: Optional[torch.nn.Module] = None
         self._train_views: dict[str, np.ndarray] = {}
-        self._y_train_reg: Optional[np.ndarray] = None  # stored for quality score computation at predict time
         self._problem_type: str = "regression"
         self._n_classes: int = 1
         self._clf_uses_learned_router: bool = False
@@ -298,13 +297,10 @@ class GraphDrone:
             self._clf_uses_learned_router = True
             return self
 
-        # Regression path: GORA + quality scores + learned router -----------
+        # Regression path: GORA + static router (v1-width unchanged) --------
         for spec in expert_specs:
             fitted_adapter = spec.input_adapter.fit(matrix)
             self._train_views[spec.descriptor.expert_id] = fitted_adapter.transform(matrix)
-
-        # Store y_train for quality score computation at predict time
-        self._y_train_reg = y
 
         from sklearn.model_selection import train_test_split
         _, X_va, _, y_va = train_test_split(X, y, test_size=0.1, random_state=42)
@@ -312,12 +308,10 @@ class GraphDrone:
         va_batch = self._expert_factory.predict_all(X_va)
         va_enc = self._support_encoder.encode(n_rows=len(X_va), descriptors=va_batch.descriptors)
         va_gora = self._compute_gora_obs(X_va, va_batch.descriptors)
-        va_quality = self._compute_quality_obs(X_va, va_batch.descriptors)
 
         va_tokens = self._token_builder.build(
             predictions=va_batch.predictions, descriptors=va_batch.descriptors,
             full_expert_id=va_batch.full_expert_id, support_encoding=va_enc,
-            quality_scores=va_quality,
             geometric_obs=va_gora,
         )
 
@@ -380,39 +374,6 @@ class GraphDrone:
 
         return torch.tensor(np.stack(all_obs, axis=1), dtype=torch.float32)
 
-    def _compute_quality_obs(self, X: np.ndarray, descriptors: tuple[ViewDescriptor, ...]) -> torch.Tensor:
-        """
-        Per-expert local label uncertainty for regression.
-
-        For each test sample × expert view, finds the k nearest training neighbors
-        in that expert's feature subspace and computes std of their y_train labels.
-        High std = noisy/uncertain region for this expert = lower quality.
-
-        Returns [N, E, 1] tensor: -log1p(local_label_std) per expert per sample.
-        More negative = less reliable expert here. Zero = perfectly smooth region.
-
-        Shares training views with _compute_gora_obs but uses y labels, not geometry.
-        Only valid for regression (requires self._y_train_reg).
-        """
-        from sklearn.neighbors import NearestNeighbors
-
-        y_ref = self._y_train_reg  # [N_train] full training labels
-        all_scores = []
-        for d in descriptors:
-            X_tr_v = self._train_views[d.expert_id]
-            X_v = X[:, list(d.input_indices)] if d.input_indices else X
-            k = min(d.preferred_k, len(X_tr_v) - 1)
-            knn = NearestNeighbors(n_neighbors=k).fit(X_tr_v)
-            _, indices = knn.kneighbors(X_v)
-            # std of training labels in this expert's local neighborhood
-            local_std = np.std(y_ref[indices], axis=1)  # [N]
-            # Log-scale and negate: higher std → more negative → lower quality
-            # log1p prevents -inf at std=0 (perfectly smooth region → score=0)
-            quality = -np.log1p(local_std).reshape(-1, 1)  # [N, 1]
-            all_scores.append(quality)
-        scores = np.stack(all_scores, axis=1)  # [N, E, 1]
-        return torch.tensor(scores, dtype=torch.float32)
-
     def predict(self, X: np.ndarray, return_diagnostics: bool = False) -> Union[np.ndarray, GraphDronePredictResult]:
         X = np.asarray(X, dtype=np.float32)
         matrix = _coerce_matrix(X)
@@ -465,19 +426,17 @@ class GraphDrone:
                 )
             return preds
 
-        # --- Regression path: GORA + quality scores + learned router --------
+        # --- Regression path: GORA + static router (v1-width) ---------------
         support_enc = self._support_encoder.encode(
             n_rows=matrix.shape[0], descriptors=batch.descriptors
         )
         gora_obs = self._compute_gora_obs(matrix, batch.descriptors)
-        quality_obs = self._compute_quality_obs(matrix, batch.descriptors)
 
         tokens = self._token_builder.build(
             predictions=batch.predictions,
             descriptors=batch.descriptors,
             full_expert_id=batch.full_expert_id,
             support_encoding=support_enc,
-            quality_scores=quality_obs,
             geometric_obs=gora_obs,
         )
 

@@ -32,7 +32,6 @@ class UniversalTokenBuilder:
         support_encoding: Optional[SupportEncoding] = None,
         neural_support: Optional[torch.Tensor] = None,
         prior_alignment: Optional[torch.Tensor] = None,
-        quality_scores: Optional[torch.Tensor] = None,
         geometric_obs: Optional[torch.Tensor] = None,
     ) -> TokenBatch:
         pred_tensor = torch.as_tensor(predictions, dtype=torch.float32)
@@ -55,16 +54,9 @@ class UniversalTokenBuilder:
         consensus_expanded = prediction_consensus.unsqueeze(1).expand(-1, len(expert_ids), 1)
         prediction_fields = torch.cat([prediction_fields, consensus_expanded], dim=-1)
 
-        # 2. Quality Scores (local label uncertainty per expert per sample)
+        # 2. Support Moments & SNR
         support_fields = []
         support_names_list = []
-        if quality_scores is not None:
-            # quality_scores: [N, E, 1] — log-scaled local label std, negated
-            # More negative = higher local uncertainty = expert less reliable here
-            support_fields.append(quality_scores.to(device))
-            support_names_list.append("quality_local_label_std")
-
-        # 3. Support Moments & SNR
         if support_encoding is not None:
             moments = support_encoding.tensor.to(device)
             if moments.ndim == 2:
@@ -81,22 +73,22 @@ class UniversalTokenBuilder:
                 support_fields.append(log_snr)
                 support_names_list.append("log_snr")
 
-        # 4. Neural Support
+        # 3. Neural Support
         if neural_support is not None:
             support_fields.append(neural_support.to(device))
             support_names_list.extend([f"neural_support_{i}" for i in range(neural_support.shape[-1])])
 
-        # 5. Prior Alignment
+        # 4. Prior Alignment
         if prior_alignment is not None:
             support_fields.append(prior_alignment.to(device))
             support_names_list.append("prior_alignment")
 
-        # 6. Geometric Observers (GoRA Logic)
+        # 5. Geometric Observers (GoRA Logic)
         if geometric_obs is not None:
             support_fields.append(geometric_obs.to(device))
             support_names_list.extend(["kappa", "lid"])
 
-        # 7. Static Descriptors
+        # 6. Static Descriptors
         descriptor_tensor, descriptor_names = self._build_descriptor_tensor(descriptors)
         descriptor_tensor = descriptor_tensor.to(device).unsqueeze(0).expand(pred_tensor.shape[0], -1, -1)
 
