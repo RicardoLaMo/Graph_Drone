@@ -74,25 +74,16 @@ class LoadedExpert:
     def predict(self, X: np.ndarray) -> np.ndarray:
         adapter = self.input_adapter or _default_input_adapter(self.descriptor)
         view_matrix = adapter(X)
-        
-        # Classification vs Regression branch
+
         if hasattr(self.predictor, "predict_proba") and self.artifact_kind == "foundation_classifier":
-            # For classification, we currently return the proba of class 1 (binary focus for lab)
-            # or simplify to a scalar for the integrated shared engine.
-            # In a full PR, we'd handle [N, C] tensors.
-            proba = self.predictor.predict_proba(view_matrix)
-            if proba.ndim == 2 and proba.shape[1] == 2:
-                pred = proba[:, 1]
-            else:
-                pred = proba # May be multi-class [N, C]
+            # Always return full [N, C] probability matrix for GeoPOE blending.
+            # Binary case (C=2) is kept as-is — GeoPOE handles it uniformly.
+            pred = np.asarray(self.predictor.predict_proba(view_matrix), dtype=np.float32)
         else:
-            pred = self.predictor.predict(view_matrix)
-            
-        pred = np.asarray(pred, dtype=np.float32)
-        # Handle flattening for standard scalar expert integration
-        if pred.ndim > 1 and pred.shape[-1] == 1:
-            pred = pred.reshape(-1)
-            
+            pred = np.asarray(self.predictor.predict(view_matrix), dtype=np.float32)
+            if pred.ndim > 1 and pred.shape[-1] == 1:
+                pred = pred.reshape(-1)
+
         if pred.shape[0] != len(X):
             raise ValueError(
                 f"Expert {self.descriptor.expert_id!r} returned {pred.shape[0]} predictions for {len(X)} rows"

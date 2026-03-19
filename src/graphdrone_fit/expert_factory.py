@@ -93,7 +93,12 @@ class PortfolioExpertFactory:
             self.portfolio.experts[expert_id].predict(X)
             for expert_id in self.expert_ids
         ]
-        stacked = np.column_stack(preds).astype(np.float32)
+        # Regression: each pred is [N] → column_stack → [N, E]
+        # Classification: each pred is [N, C] → stack on axis=1 → [N, E, C]
+        if preds[0].ndim == 1:
+            stacked = np.column_stack(preds).astype(np.float32)   # [N, E]
+        else:
+            stacked = np.stack(preds, axis=1).astype(np.float32)  # [N, E, C]
         return ExpertPredictionBatch(
             expert_ids=self.expert_ids,
             descriptors=self.descriptors,
@@ -114,7 +119,7 @@ def fit_portfolio_from_specs(
     from joblib import Parallel, delayed
     
     matrix = np.asarray(X_train, dtype=np.float32)
-    target = np.asarray(y_train, dtype=np.float32).reshape(-1)
+    target = np.asarray(y_train).reshape(-1)  # keep dtype; classifiers need int, regressors float
     
     def _fit_single_spec(spec):
         descriptor = spec.descriptor.validate()
