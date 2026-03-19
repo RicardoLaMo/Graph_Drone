@@ -22,13 +22,17 @@ class BootstrapFullRouter(nn.Module):
 class ContextualTransformerRouter(nn.Module):
     """
     Consolidated Router for GraphDrone.
-    Includes Noise-Gate Pruning and Cross-Attention specialist weighting.
+    Uses explicit scaled dot-product cross-attention (anchor queries all experts)
+    to avoid nn.MultiheadAttention version incompatibilities (4D attn_weights bug).
+    Includes optional Noise-Gate Pruning.
     """
     def __init__(self, token_dim: int, n_heads: int = 4, hidden_dim: int = 64, use_noise_gate: bool = True):
         super().__init__()
         self.token_dim = token_dim
+        self.hidden_dim = hidden_dim
+        self.scale = hidden_dim ** -0.5
         self.use_noise_gate = use_noise_gate
-        
+
         if use_noise_gate:
             self.noise_gate = nn.Sequential(
                 nn.Linear(token_dim, 32),
@@ -36,31 +40,31 @@ class ContextualTransformerRouter(nn.Module):
                 nn.Linear(32, 1),
                 nn.Sigmoid()
             )
-        
+
+        # Anchor queries experts — single-query cross-attention (no MHA needed)
         self.q_proj = nn.Linear(token_dim, hidden_dim)
         self.k_proj = nn.Linear(token_dim, hidden_dim)
-        self.v_proj = nn.Linear(token_dim, hidden_dim)
-        self.attn = nn.MultiheadAttention(hidden_dim, n_heads, batch_first=True)
-        
+
         self.defer_head = nn.Sequential(nn.Linear(token_dim, 32), nn.GELU(), nn.Linear(32, 1))
+        # Anchor-first prior: initialize defer toward zero so the router must earn blending.
+        # sigmoid(-3) ≈ 0.047 — specialists prove themselves before being trusted.
+        nn.init.constant_(self.defer_head[-1].bias, -3.0)
 
     def forward(self, tokens: torch.Tensor, *, full_index: int) -> RouterOutputs:
         if self.use_noise_gate:
             validity = self.noise_gate(tokens)
             tokens = tokens * validity
-            
-        anchor_token = tokens[:, full_index:full_index+1, :]
-        q = self.q_proj(anchor_token)
-        k = self.k_proj(tokens)
-        v = self.v_proj(tokens)
-        
-        # need_weights=True → attn_weights shape [B, 1, E] (anchor attends to all E experts)
-        # average_attn_weights averages over heads → clean [B, 1, E] distribution
-        _, attn_weights = self.attn(q, k, v, need_weights=True, average_attn_weights=True)
-        # squeeze(1) → [B, E]: cross-attention distribution = learned relevance per expert
-        specialist_weights = attn_weights.squeeze(1)
-        defer_prob = torch.sigmoid(self.defer_head(anchor_token.squeeze(1)))
-        
+
+        anchor_token = tokens[:, full_index, :]         # [B, token_dim]
+        q = self.q_proj(anchor_token)                   # [B, hidden_dim]
+        k = self.k_proj(tokens)                         # [B, E, hidden_dim]
+
+        # Scaled dot-product: anchor attends to all experts → [B, E]
+        attn_scores = torch.einsum("bh,beh->be", q, k) * self.scale
+        specialist_weights = torch.softmax(attn_scores, dim=-1)
+
+        defer_prob = torch.sigmoid(self.defer_head(anchor_token))  # [B, 1]
+
         return RouterOutputs(specialist_weights, defer_prob, full_index, "contextual_transformer_router")
 
 def build_set_router(config: SetRouterConfig, token_dim: int = 14) -> torch.nn.Module:
