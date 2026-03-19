@@ -325,10 +325,17 @@ class GraphDrone:
         optimizer = torch.optim.Adam(trainable_params, lr=1e-3)
         best_loss = float("inf")
         patience, wait = 25, 0
-        print(f"  -> Optimizing Router on {self.device} (Patience={patience}, MSE)...")
         y_va_t = torch.tensor(y_va).float().to(self.device)
         v_preds_t = torch.tensor(va_batch.predictions).float().to(self.device)
         v_tokens_t = va_tokens.tokens.to(self.device)
+
+        import torch.nn.functional as F
+        with torch.no_grad():
+            anchor_mse_val = F.mse_loss(
+                v_preds_t[:, va_batch.full_index], y_va_t
+            ).item()
+        print(f"  -> Optimizing Router on {self.device} "
+              f"(Patience={patience}, MSE+ResidualPenalty, anchor_mse={anchor_mse_val:.6f})...")
 
         for _ in range(500):
             self._router.train()
@@ -338,7 +345,8 @@ class GraphDrone:
                 (1 - out.defer_prob) * v_preds_t[:, va_batch.full_index : va_batch.full_index + 1]
                 + out.defer_prob * (out.specialist_weights * v_preds_t).sum(dim=1, keepdim=True)
             )
-            loss = torch.nn.functional.mse_loss(integ.squeeze(), y_va_t)
+            mse = F.mse_loss(integ.squeeze(), y_va_t)
+            loss = mse + 2.0 * F.relu(mse - anchor_mse_val)
             loss.backward()
             optimizer.step()
             if loss.item() < best_loss:

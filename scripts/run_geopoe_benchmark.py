@@ -79,7 +79,7 @@ QUICK_DATASETS = {
     "pendigits":     CLASSIFICATION_DATASETS["pendigits"],
 }
 
-GRAPHDRONE_VERSION = "v1-geopoe-2026.03.19a"  # multi-view SUB portfolio + static GeoPOE (anchor_weight=3.0)
+GRAPHDRONE_VERSION = "v1-geopoe-2026.03.19c"  # reg: FULL+3xSUB TabPFN + GORA + residual-protected router
 
 
 # ---------------------------------------------------------------------------
@@ -201,10 +201,11 @@ def run_tabpfn(X_tr, y_tr, X_te, task_type: str):
 
 def run_graphdrone(X_tr, y_tr, X_te, task_type: str, seed: int = 42, n_classes: int = None):
     """
-    v1-width + GeoPOE:
-    - Regression: TabPFN-only specialists on 100% data, GORA, static anchor router
-    - Classification: TabPFN FULL + SUB subspace view on 100% data, GeoPOE blending
-      (no router training, no NLL loss — principled geometric ensemble)
+    Two independent engines:
+    - Regression: FULL + 3×SUB TabPFN views, GORA observers, contextual_transformer
+      router trained with MSE loss on 10% OOF validation. No tree models.
+    - Classification: FULL + 3×SUB TabPFN views, static anchor-boosted GeoPOE
+      (anchor_weight=3.0). No learned router — avoids OOF overfitting.
     """
     n = X_tr.shape[1]
     full_idx = tuple(range(n))
@@ -216,29 +217,36 @@ def run_graphdrone(X_tr, y_tr, X_te, task_type: str, seed: int = 42, n_classes: 
     sub_idx = tuple(sorted(rng.choice(n, sub_size, replace=False).tolist()))
 
     if task_type == "regression":
-        # v1-width regression: FULL + SUB TabPFN views, GORA, static router
-        specs = (
-            ExpertBuildSpec(
-                descriptor=ViewDescriptor(
-                    expert_id="FULL", family="FULL", view_name="Foundation Full",
-                    is_anchor=True, input_dim=n, input_indices=full_idx,
-                ),
-                model_kind="foundation_regressor",
-                input_adapter=IdentitySelectorAdapter(indices=full_idx),
-                model_params=params_fp,
+        # Multi-view regression: FULL + 3×SUB TabPFN, GORA observers, learned router.
+        # No tree models — they are weaker than TabPFN and cause the router to mis-route.
+        # contextual_transformer router trains on 10% OOF validation with MSE loss;
+        # GORA (kappa + LID) is computed in model.py fit() and included in tokens.
+        full_spec = ExpertBuildSpec(
+            descriptor=ViewDescriptor(
+                expert_id="FULL", family="FULL", view_name="Foundation Full",
+                is_anchor=True, input_dim=n, input_indices=full_idx,
             ),
-            ExpertBuildSpec(
-                descriptor=ViewDescriptor(
-                    expert_id="SUB", family="structural_subspace", view_name="Foundation Sub",
-                    input_dim=sub_size, input_indices=sub_idx,
-                ),
-                model_kind="foundation_regressor",
-                input_adapter=IdentitySelectorAdapter(indices=sub_idx),
-                model_params=params_fp,
-            ),
+            model_kind="foundation_regressor",
+            input_adapter=IdentitySelectorAdapter(indices=full_idx),
+            model_params=params_fp,
         )
-        # v1-width config has no problem_type field — only n_classes needed for clf
-        cfg = GraphDroneConfig()
+        sub_specs = []
+        for sub_seed, sub_frac in [(0, 0.7), (1, 0.7), (2, 0.8)]:
+            rng_i = np.random.RandomState(sub_seed)
+            sz_i = max(1, int(n * sub_frac))
+            idx_i = tuple(sorted(rng_i.choice(n, sz_i, replace=False).tolist()))
+            sub_specs.append(ExpertBuildSpec(
+                descriptor=ViewDescriptor(
+                    expert_id=f"SUB{sub_seed}", family="structural_subspace",
+                    view_name=f"Foundation Sub {sub_seed}",
+                    input_dim=sz_i, input_indices=idx_i,
+                ),
+                model_kind="foundation_regressor",
+                input_adapter=IdentitySelectorAdapter(indices=idx_i),
+                model_params=params_fp,
+            ))
+        specs = (full_spec, *sub_specs)
+        cfg = GraphDroneConfig(router=SetRouterConfig(kind="contextual_transformer"))
     else:
         # GeoPOE classification: multi-view SUB portfolio + static anchor-boosted GeoPOE
         # 3 SUB views with different seeds/subspace sizes → richer ensemble diversity
