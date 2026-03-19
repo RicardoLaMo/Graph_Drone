@@ -19,6 +19,7 @@ VALID_PROJECTION_KINDS = frozenset(
         "external_transform",
         "support_defined",
         "opaque",
+        "structural_subspace",
     }
 )
 

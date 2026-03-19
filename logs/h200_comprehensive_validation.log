@@ -1,0 +1,65 @@
+================================================================================
+COMPREHENSIVE H200 PARALLEL VALIDATION
+================================================================================
+Mode: Extended benchmark (4 datasets: Wine, Breast Cancer, Digits, Segment)
+Parallel execution across GPUs: 1, 2, 3, 4, 5
+Total validations: 10 (2 per GPU)
+Expected runtime: 20-30 minutes
+================================================================================
+
+Starting 10 parallel validations...
+
+2026-03-16 14:15:19,385 | GPU 2 | Starting iteration 1
+2026-03-16 14:15:19,385 | GPU 1 | Starting iteration 0
+2026-03-16 14:15:19,385 | GPU 4 | Starting iteration 3
+2026-03-16 14:15:19,385 | GPU 5 | Starting iteration 4
+2026-03-16 14:15:19,385 | GPU 3 | Starting iteration 2
+2026-03-16 14:16:48,908 | GPU 1 | ✅ Iteration 0 completed (89.5s)
+2026-03-16 14:16:48,908 | GPU 1 | Starting iteration 5
+2026-03-16 14:16:48,909 | GPU 1 | Progress: 1/10 (10%) | Completed: 1, Failed: 0
+2026-03-16 14:16:56,061 | GPU 2 | ✅ Iteration 1 completed (96.7s)
+2026-03-16 14:16:56,061 | GPU 2 | Starting iteration 6
+2026-03-16 14:16:56,061 | GPU 2 | Progress: 2/10 (20%) | Completed: 2, Failed: 0
+2026-03-16 14:17:00,645 | GPU 5 | ✅ Iteration 4 completed (101.3s)
+2026-03-16 14:17:00,645 | GPU 3 | Starting iteration 7
+2026-03-16 14:17:00,646 | GPU 5 | Progress: 3/10 (30%) | Completed: 3, Failed: 0
+2026-03-16 14:17:06,564 | GPU 4 | ✅ Iteration 3 completed (107.2s)
+2026-03-16 14:17:06,564 | GPU 4 | Starting iteration 8
+2026-03-16 14:17:06,564 | GPU 4 | Progress: 4/10 (40%) | Completed: 4, Failed: 0
+2026-03-16 14:17:06,721 | GPU 3 | ✅ Iteration 2 completed (107.3s)
+2026-03-16 14:17:06,722 | GPU 5 | Starting iteration 9
+2026-03-16 14:17:06,722 | GPU 3 | Progress: 5/10 (50%) | Completed: 5, Failed: 0
+2026-03-16 14:18:13,319 | GPU 1 | ✅ Iteration 5 completed (84.4s)
+2026-03-16 14:18:13,319 | GPU 1 | Progress: 6/10 (60%) | Completed: 6, Failed: 0
+2026-03-16 14:18:23,333 | GPU 2 | ✅ Iteration 6 completed (87.3s)
+2026-03-16 14:18:23,333 | GPU 2 | Progress: 7/10 (70%) | Completed: 7, Failed: 0
+2026-03-16 14:18:31,106 | GPU 3 | ✅ Iteration 7 completed (90.5s)
+2026-03-16 14:18:31,107 | GPU 3 | Progress: 8/10 (80%) | Completed: 8, Failed: 0
+2026-03-16 14:18:32,096 | GPU 4 | ✅ Iteration 8 completed (85.5s)
+2026-03-16 14:18:32,096 | GPU 4 | Progress: 9/10 (90%) | Completed: 9, Failed: 0
+2026-03-16 14:18:32,196 | GPU 5 | ✅ Iteration 9 completed (85.5s)
+2026-03-16 14:18:32,197 | GPU 5 | Progress: 10/10 (100%) | Completed: 10, Failed: 0
+
+================================================================================
+COMPREHENSIVE VALIDATION SUMMARY
+================================================================================
+Total time: 3.2 minutes (0.05 hours)
+Completed validations: 10
+Failed validations: 0
+Success rate: 100.0%
+Average duration per validation: 19.3s
+================================================================================
+
+GPU Distribution:
+  GPU 1: 2/2 completed | 173.9s total
+  GPU 2: 2/2 completed | 183.9s total
+  GPU 3: 2/2 completed | 197.8s total
+  GPU 4: 2/2 completed | 192.7s total
+  GPU 5: 2/2 completed | 186.7s total
+
+Results saved to: /home/wliu23/projects/GraphDrone2/Graph_Drone_research/eval/h200_comprehensive_validation/comprehensive_validation_20260316_141832.json
+
+================================================================================
+✅ ALL VALIDATIONS PASSED
+🚀 H200 optimization validated successfully
+🎯 Ready for full TabArena benchmark

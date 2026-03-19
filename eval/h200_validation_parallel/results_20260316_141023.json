@@ -1,0 +1,26 @@
+[
+  {
+    "dataset": "Segment",
+    "status": "failed",
+    "error": "A result has failed to un-serialize. Please ensure that the objects returned by the function are always picklable.",
+    "duration": 23.232747316360474
+  },
+  {
+    "dataset": "Wine",
+    "status": "failed",
+    "error": "A result has failed to un-serialize. Please ensure that the objects returned by the function are always picklable.",
+    "duration": 24.266186952590942
+  },
+  {
+    "dataset": "Digits",
+    "status": "failed",
+    "error": "A result has failed to un-serialize. Please ensure that the objects returned by the function are always picklable.",
+    "duration": 24.67894220352173
+  },
+  {
+    "dataset": "Breast Cancer",
+    "status": "failed",
+    "error": "A result has failed to un-serialize. Please ensure that the objects returned by the function are always picklable.",
+    "duration": 24.766918659210205
+  }
+]
