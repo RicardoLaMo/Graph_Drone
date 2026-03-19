@@ -79,7 +79,7 @@ QUICK_DATASETS = {
     "pendigits":     CLASSIFICATION_DATASETS["pendigits"],
 }
 
-GRAPHDRONE_VERSION = "2026.03.19-binary-oom-fix"  # bump when model changes to invalidate cache
+GRAPHDRONE_VERSION = "2026.03.19-clf-binary-split-v1"  # bump when model changes to invalidate cache
 
 
 # ---------------------------------------------------------------------------
