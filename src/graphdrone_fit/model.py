@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from typing import Optional, Union
 
-from .config import GraphDroneConfig
+from .config import GraphDroneConfig, SetRouterConfig
 from .defer_integrator import IntegrationOutputs, integrate_predictions
 from .expert_factory import ExpertBuildSpec, ExpertPredictionBatch, PortfolioExpertFactory, fit_portfolio_from_specs, IdentitySelectorAdapter
 from .portfolio_loader import LoadedPortfolio, load_portfolio
@@ -109,6 +109,7 @@ class GraphDrone:
             )
 
         is_classification = (self._problem_type == "classification")
+        is_binary = is_classification and (self._n_classes == 2)
 
         # Cast y appropriately
         if is_classification:
@@ -121,8 +122,10 @@ class GraphDrone:
             full_idx = tuple(range(matrix.shape[1]))
             params = {"n_estimators": 8, "device": self.device}
             rng = np.random.RandomState(42)
-            sub_size = max(1, int(matrix.shape[1] * 0.7))
-            sub_idx = tuple(sorted(rng.choice(matrix.shape[1], sub_size, replace=False).tolist()))
+            
+            # Lead 4: Anchor-only fallback for very small binary datasets.
+            # Scaling router training on < 500 rows is noisy; better to trust the FULL anchor.
+            skip_subs = is_binary and (len(matrix) < 500 and matrix.shape[1] < 25)
 
             if is_classification:
                 model_kind = "foundation_classifier"
@@ -136,21 +139,30 @@ class GraphDrone:
                     input_adapter=IdentitySelectorAdapter(indices=full_idx),
                     model_params=params,
                 )
+                
                 sub_specs = []
-                for sub_seed, sub_frac in [(0, 0.7), (1, 0.7), (2, 0.8)]:
-                    rng_i = np.random.RandomState(sub_seed)
-                    sz_i = max(1, int(matrix.shape[1] * sub_frac))
-                    idx_i = tuple(sorted(rng_i.choice(matrix.shape[1], sz_i, replace=False).tolist()))
-                    sub_specs.append(ExpertBuildSpec(
-                        descriptor=ViewDescriptor(
-                            expert_id=f"SUB{sub_seed}", family="structural_subspace",
-                            view_name=f"Foundation Sub {sub_seed}",
-                            input_dim=sz_i, input_indices=idx_i,
-                        ),
-                        model_kind=model_kind,
-                        input_adapter=IdentitySelectorAdapter(indices=idx_i),
-                        model_params=params,
-                    ))
+                if not skip_subs:
+                    # Lead 1: For low-dim binary datasets, use 1 SUB at 50% features.
+                    # Higher dimensionality can support more specialists.
+                    if is_binary and matrix.shape[1] < 25:
+                        sub_specs_config = [(0, 0.5)]
+                    else:
+                        sub_specs_config = [(0, 0.8), (1, 0.85), (2, 0.9)]
+
+                    for sub_seed, sub_frac in sub_specs_config:
+                        rng_i = np.random.RandomState(sub_seed)
+                        sz_i = max(1, int(matrix.shape[1] * sub_frac))
+                        idx_i = tuple(sorted(rng_i.choice(matrix.shape[1], sz_i, replace=False).tolist()))
+                        sub_specs.append(ExpertBuildSpec(
+                            descriptor=ViewDescriptor(
+                                expert_id=f"SUB{sub_seed}", family="structural_subspace",
+                                view_name=f"Foundation Sub {sub_seed}",
+                                input_dim=sz_i, input_indices=idx_i,
+                            ),
+                            model_kind=model_kind,
+                            input_adapter=IdentitySelectorAdapter(indices=idx_i),
+                            model_params=params,
+                        ))
                 expert_specs = (full_spec, *sub_specs)
             else:
                 expert_specs = (
@@ -182,30 +194,64 @@ class GraphDrone:
                 fitted_adapter = spec.input_adapter.fit(matrix)
                 self._train_views[spec.descriptor.expert_id] = fitted_adapter.transform(matrix)
 
-            use_learned = self.config.use_learned_router_for_classification and \
-                          self.config.router.kind != "bootstrap_full_only"
+            # Binary: always use the learned router (OOF NLL + GORA) — the static GeoPOE
+            # blending that works for multiclass is too blunt for binary where the FULL
+            # expert is already well-calibrated.  The learned router can reject bad SUBs.
+            # Multiclass: static anchor GeoPOE (effective; avoids OOF overhead per class).
+            use_learned = is_binary or (
+                self.config.use_learned_router_for_classification
+                and self.config.router.kind != "bootstrap_full_only"
+            )
 
             if not use_learned:
-                print(f"  -> Classification: using static Geometric PoE blending (no router training).")
+                print(f"  -> Classification (multiclass): using static Geometric PoE blending.")
                 return self
+
+            if is_binary and self.config.router.kind == "bootstrap_full_only":
+                # Override to noise_gate_router for binary — bootstrap_full_only has no
+                # trainable parameters and would skip optimization entirely.
+                _binary_router_config = SetRouterConfig(kind="noise_gate_router")
+            else:
+                _binary_router_config = None
 
             # --- OOF Router Training -------------------------------------------
             # Experts are already fit on 100% data (self._portfolio).
             # To avoid optimism bias, train the router on genuinely held-out expert
-            # predictions: fit a temporary 90% portfolio, generate OOF predictions
-            # on the 10% holdout, train router there, then restore 100% inference setup.
+            # predictions: fit a temporary 80-90% portfolio, generate OOF predictions
+            # on the 10-20% holdout, train router there, then restore 100% inference setup.
             from sklearn.model_selection import train_test_split as _tts
             import torch.nn.functional as F
 
             n_all = len(matrix)
-            idx_tr90, idx_va = _tts(np.arange(n_all), test_size=0.1, random_state=42)
+            # Lead 2: Increase OOF holdout size for small binary datasets
+            # 10% of 1000 is only 100 rows; 25% (250 rows) provides better signal for router.
+            oof_test_size = 0.25 if n_all <= 1500 else 0.1
+            idx_tr90, idx_va = _tts(np.arange(n_all), test_size=oof_test_size, random_state=42, stratify=y)
             X_tr90, X_va = matrix[idx_tr90], matrix[idx_va]
             y_tr90, y_va = y[idx_tr90], y[idx_va]
 
-            print(f"  -> OOF router training: fitting temporary experts on {len(X_tr90)} rows...")
+            # OOF experts are fitted on CPU to avoid GPU OOM when the 100% portfolio
+            # is already resident in GPU memory.  The OOF portfolio is a temporary
+            # artefact used only to generate held-out predictions for router training;
+            # it is discarded after this block.  CPU TabPFN adds ~3-5s per expert
+            # but eliminates the 4(100%)+4(OOF)=8-model GPU contention entirely.
+            # A Data-DAG / multi-GPU scheme would be equivalent but far more complex.
+            oof_specs = tuple(
+                ExpertBuildSpec(
+                    descriptor=spec.descriptor,
+                    model_kind=spec.model_kind,
+                    input_adapter=spec.input_adapter,
+                    model_params={**spec.model_params, "device": "cpu"},
+                )
+                for spec in expert_specs
+            )
+            torch.cuda.empty_cache()   # release cached allocations before OOF fit
+
+            print(f"  -> OOF router training: fitting temporary experts on CPU ({len(X_tr90)} rows)...")
             oof_portfolio = fit_portfolio_from_specs(
-                X_train=X_tr90, y_train=y_tr90, specs=expert_specs,
+                X_train=X_tr90, y_train=y_tr90, specs=oof_specs,
                 full_expert_id=self.config.full_expert_id,
+                n_jobs=1,   # sequential — CPU TabPFN; avoids process-fork races
             )
             oof_factory = PortfolioExpertFactory(oof_portfolio)
 
@@ -234,7 +280,8 @@ class GraphDrone:
             )
 
             token_dim = va_tokens.tokens.shape[-1]
-            self._router = build_set_router(self.config.router, token_dim=token_dim).to(self.device)
+            router_cfg = _binary_router_config if _binary_router_config is not None else self.config.router
+            self._router = build_set_router(router_cfg, token_dim=token_dim).to(self.device)
             trainable_params = list(self._router.parameters())
             if not trainable_params:
                 print("  -> Classification Router has no trainable parameters, skipping optimization.")
@@ -408,10 +455,14 @@ class GraphDrone:
                     "mean_defer_prob": float(router_out.defer_prob.mean().item()),
                 }
             else:
-                # Static anchor-boosted GeoPOE (anchor_weight=3.0 default)
+                # Static anchor-boosted GeoPOE.
+                # anchor_weight=5.0: FULL gets 62.5% weight vs 50% at 3.0 (4 experts,
+                # confidence-flat regime).  Larger SUB fracs (0.8/0.85/0.9) further
+                # reduce per-SUB noise, especially on low-dim datasets (pendigits, segment).
                 preds = anchor_geo_poe_blend(
                     batch.predictions,
                     anchor_idx=batch.full_index,
+                    anchor_weight=5.0,
                 )
                 diagnostics = {
                     "router_kind": "geo_poe",

@@ -79,7 +79,7 @@ QUICK_DATASETS = {
     "pendigits":     CLASSIFICATION_DATASETS["pendigits"],
 }
 
-GRAPHDRONE_VERSION = "2026.03.18d"  # bump when model changes to invalidate cache
+GRAPHDRONE_VERSION = "2026.03.19-clf-multiclass-win-v1"  # bump when model changes to invalidate cache
 
 
 # ---------------------------------------------------------------------------
@@ -205,11 +205,11 @@ def run_graphdrone(X_tr, y_tr, X_te, task_type: str, seed: int = 42, n_classes: 
     dev = _device()
     params_fp = {"n_estimators": 8, "device": dev}
 
-    rng = np.random.RandomState(seed)
-    sub_size = max(1, int(n * 0.7))
-    sub_idx = tuple(sorted(rng.choice(n, sub_size, replace=False).tolist()))
-
     if task_type == "regression":
+        # Regression: FULL TabPFN anchor + one random subspace TabPFN specialist.
+        rng = np.random.RandomState(seed)
+        sub_size = max(1, int(n * 0.7))
+        sub_idx = tuple(sorted(rng.choice(n, sub_size, replace=False).tolist()))
         specs = (
             ExpertBuildSpec(
                 descriptor=ViewDescriptor(
@@ -222,24 +222,6 @@ def run_graphdrone(X_tr, y_tr, X_te, task_type: str, seed: int = 42, n_classes: 
             ),
             ExpertBuildSpec(
                 descriptor=ViewDescriptor(
-                    expert_id="CB", family="structural_subspace", view_name="CatBoost",
-                    input_dim=n, input_indices=full_idx,
-                ),
-                model_kind="catboost_regressor",
-                input_adapter=IdentitySelectorAdapter(indices=full_idx),
-                model_params={"iterations": 200, "random_state": seed},
-            ),
-            ExpertBuildSpec(
-                descriptor=ViewDescriptor(
-                    expert_id="XGB", family="structural_subspace", view_name="XGBoost",
-                    input_dim=n, input_indices=full_idx,
-                ),
-                model_kind="xgboost_regressor",
-                input_adapter=IdentitySelectorAdapter(indices=full_idx),
-                model_params={"n_estimators": 200, "random_state": seed},
-            ),
-            ExpertBuildSpec(
-                descriptor=ViewDescriptor(
                     expert_id="SUB", family="structural_subspace", view_name="Foundation Sub",
                     input_dim=sub_size, input_indices=sub_idx,
                 ),
@@ -248,44 +230,20 @@ def run_graphdrone(X_tr, y_tr, X_te, task_type: str, seed: int = 42, n_classes: 
                 model_params=params_fp,
             ),
         )
-        cfg = GraphDroneConfig(
-            router=SetRouterConfig(kind="hyper_set_router"),
-            problem_type="regression",
-        )
+        cfg = GraphDroneConfig(router=SetRouterConfig(kind="noise_gate_router"))
+        gd = GraphDrone(cfg)
+        gd.fit(X_tr, y_tr, expert_specs=specs, problem_type="regression")
     else:
-        # Use caller-supplied n_classes (computed from full y before split) to avoid
-        # missing-class assertion when the training split happens to exclude the max class.
+        # Classification: let model build FULL + 3×SUB portfolio internally.
+        # Binary → learned noise_gate_router (OOF NLL + GORA).
+        # Multiclass → static anchor GeoPOE.
+        # n_classes pinned from full y to handle missing-class splits.
         if n_classes is None:
             n_classes = int(len(np.unique(y_tr)))
-        clf_params = {**params_fp, "n_classes": n_classes}
-        specs = (
-            ExpertBuildSpec(
-                descriptor=ViewDescriptor(
-                    expert_id="FULL", family="FULL", view_name="Foundation Full",
-                    is_anchor=True, input_dim=n, input_indices=full_idx,
-                ),
-                model_kind="foundation_classifier",
-                input_adapter=IdentitySelectorAdapter(indices=full_idx),
-                model_params=clf_params,
-            ),
-            ExpertBuildSpec(
-                descriptor=ViewDescriptor(
-                    expert_id="SUB", family="structural_subspace", view_name="Foundation Sub",
-                    input_dim=sub_size, input_indices=sub_idx,
-                ),
-                model_kind="foundation_classifier",
-                input_adapter=IdentitySelectorAdapter(indices=sub_idx),
-                model_params=clf_params,
-            ),
-        )
-        cfg = GraphDroneConfig(
-            router=SetRouterConfig(kind="hyper_set_router"),
-            problem_type="classification",
-            n_classes=n_classes,
-        )
+        cfg = GraphDroneConfig(n_classes=n_classes)
+        gd = GraphDrone(cfg)
+        gd.fit(X_tr, y_tr, problem_type="classification")
 
-    gd = GraphDrone(cfg)
-    gd.fit(X_tr, y_tr, expert_specs=specs)
     result = gd.predict(X_te, return_diagnostics=True)
     preds = result.predictions
     defer = result.diagnostics.get("mean_defer_prob", 0.0)
@@ -293,12 +251,7 @@ def run_graphdrone(X_tr, y_tr, X_te, task_type: str, seed: int = 42, n_classes: 
     if task_type == "regression":
         return preds, None, defer
     else:
-        if preds.ndim == 1:
-            n_c = n_classes
-            proba = np.zeros((len(preds), n_c), dtype=np.float32)
-            proba[np.arange(len(preds)), preds.astype(int)] = 1.0
-        else:
-            proba = preds
+        proba = preds if preds.ndim == 2 else np.column_stack([1 - preds, preds])
         return proba, np.argmax(proba, axis=1), defer
 
 
