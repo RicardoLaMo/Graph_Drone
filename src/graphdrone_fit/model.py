@@ -15,6 +15,16 @@ from .view_descriptor import ViewDescriptor
 from .geo_ensemble import anchor_geo_poe_blend, learned_geo_poe_blend, learned_geo_poe_blend_torch
 
 
+def _make_quality_encoding(quality_scores: "np.ndarray | None") -> "QualityEncoding | None":
+    """Wrap quality_scores array into a QualityEncoding, or return None."""
+    if quality_scores is None:
+        return None
+    return QualityEncoding(
+        tensor=torch.as_tensor(quality_scores),  # already float32 from expert_factory
+        feature_names=("bag_variance",),
+    )
+
+
 @dataclass(frozen=True)
 class GraphDronePredictResult:
     predictions: np.ndarray
@@ -288,18 +298,11 @@ class GraphDrone:
 
             # Token builder expects scalar predictions [N, E]; for classification
             # use per-expert Shannon entropy as the routing signal (high H → uncertain).
-            # Include quality encoding (bagged variance) when available — gives the router
-            # a genuine per-expert uncertainty signal beyond entropy alone.
-            va_quality = None
-            if va_batch.quality_scores is not None:
-                va_quality = QualityEncoding(
-                    tensor=torch.tensor(va_batch.quality_scores, dtype=torch.float32),
-                    feature_names=("bag_variance",),
-                )
             va_tokens = self._token_builder.build(
                 predictions=_clf_entropy(va_batch.predictions), descriptors=va_batch.descriptors,
                 full_expert_id=va_batch.full_expert_id, support_encoding=va_enc,
-                geometric_obs=va_gora, quality_encoding=va_quality,
+                geometric_obs=va_gora,
+                quality_encoding=_make_quality_encoding(va_batch.quality_scores),
             )
 
             token_dim = va_tokens.tokens.shape[-1]
@@ -457,17 +460,11 @@ class GraphDrone:
                     n_rows=matrix.shape[0], descriptors=batch.descriptors
                 )
                 gora_obs = self._compute_gora_obs(matrix, batch.descriptors)
-                # Include quality encoding (bagged variance) when available
-                predict_quality = None
-                if batch.quality_scores is not None:
-                    predict_quality = QualityEncoding(
-                        tensor=torch.tensor(batch.quality_scores, dtype=torch.float32),
-                        feature_names=("bag_variance",),
-                    )
                 tokens = self._token_builder.build(
                     predictions=_clf_entropy(batch.predictions), descriptors=batch.descriptors,
                     full_expert_id=batch.full_expert_id, support_encoding=support_enc,
-                    geometric_obs=gora_obs, quality_encoding=predict_quality,
+                    geometric_obs=gora_obs,
+                    quality_encoding=_make_quality_encoding(batch.quality_scores),
                 )
                 self._router.eval()
                 with torch.no_grad():

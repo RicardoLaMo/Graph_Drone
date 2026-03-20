@@ -400,8 +400,14 @@ def compute_elo(df: pd.DataFrame, metric_map: dict[str, str],
     return result
 
 
-def _win_rate(df: pd.DataFrame, metric: str, challenger: str, baselines: list[str]) -> pd.DataFrame:
-    """Per-dataset win rate: fraction of folds where challenger > baseline."""
+def _win_rate(
+    df: pd.DataFrame, metric: str, challenger: str, baselines: list[str],
+    lower_is_better: bool = False,
+) -> pd.DataFrame:
+    """Per-dataset win rate: fraction of folds where challenger beats baseline.
+
+    When lower_is_better=True (e.g. log_loss), a win is ch < bl; otherwise ch > bl.
+    """
     rows = []
     for ds, grp in df.groupby("dataset"):
         for bl in baselines:
@@ -410,12 +416,15 @@ def _win_rate(df: pd.DataFrame, metric: str, challenger: str, baselines: list[st
             n = min(len(bl_vals), len(ch_vals))
             if n == 0:
                 continue
-            wins = int(np.sum(ch_vals[:n] > bl_vals[:n]))
+            wins = int(np.sum(ch_vals[:n] < bl_vals[:n]) if lower_is_better
+                       else np.sum(ch_vals[:n] > bl_vals[:n]))
             rows.append({"dataset": ds, "vs": bl, "wins": wins, "total": n,
                          "win_rate": wins / n,
                          f"{challenger}_{metric}_mean": float(np.mean(ch_vals)),
                          f"{bl}_{metric}_mean": float(np.mean(bl_vals)),
-                         f"delta_{metric}": float(np.mean(ch_vals) - np.mean(bl_vals))})
+                         f"delta_{metric}": float(np.mean(bl_vals) - np.mean(ch_vals))
+                                            if lower_is_better else
+                                            float(np.mean(ch_vals) - np.mean(bl_vals))})
     return pd.DataFrame(rows)
 
 
@@ -477,27 +486,14 @@ def build_report(all_rows: list[dict], output_dir: Path):
                 index=False, float_format="{:.3f}".format))
             lines.append("")
 
-        # log_loss win-rate (lower is better → GD wins when gd < tabpfn)
+        # log_loss win-rate (lower is better)
         if "log_loss" in clf_ok.columns:
-            ll_rows = []
-            for ds, grp in clf_ok.groupby("dataset"):
-                bl_vals = grp[grp["method"] == "tabpfn"]["log_loss"].dropna().values
-                ch_vals = grp[grp["method"] == "graphdrone"]["log_loss"].dropna().values
-                n = min(len(bl_vals), len(ch_vals))
-                if n == 0:
-                    continue
-                wins = int(np.sum(ch_vals[:n] < bl_vals[:n]))
-                ll_rows.append({
-                    "dataset": ds, "wins": wins, "total": n, "win_rate": wins / n,
-                    "gd_log_loss_mean": float(np.mean(ch_vals)),
-                    "tpf_log_loss_mean": float(np.mean(bl_vals)),
-                    "delta_log_loss": float(np.mean(bl_vals) - np.mean(ch_vals)),
-                })
-            if ll_rows:
-                wr_ll = pd.DataFrame(ll_rows)
+            wr_ll = _win_rate(clf_ok, "log_loss", "graphdrone", ["tabpfn"], lower_is_better=True)
+            if not wr_ll.empty:
                 lines.append("Win-rate (GraphDrone log_loss < TabPFN, per dataset per fold)")
                 lines.append(wr_ll[["dataset", "wins", "win_rate",
-                                    "gd_log_loss_mean", "tpf_log_loss_mean", "delta_log_loss"]].to_string(
+                                    "graphdrone_log_loss_mean", "tabpfn_log_loss_mean",
+                                    "delta_log_loss"]].to_string(
                     index=False, float_format="{:.4f}".format))
                 lines.append("")
 

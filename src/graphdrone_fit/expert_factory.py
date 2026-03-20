@@ -95,21 +95,22 @@ class BaggedClassifierPredictor:
     def __init__(self, models: list):
         self._models = models
 
+    def _get_bag_preds(self, X: np.ndarray) -> np.ndarray:
+        """Stack bag predictions. Shape [B, N, C]. Called once per inference."""
+        return np.stack([m.predict_proba(X) for m in self._models], axis=0)
+
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
         """Mean probability across bags. Shape [N, C]."""
-        preds = np.stack([m.predict_proba(X) for m in self._models], axis=0)  # [B, N, C]
-        return preds.mean(axis=0).astype(np.float32)
+        return self._get_bag_preds(X).mean(axis=0).astype(np.float32)
 
-    def predict_variance(self, X: np.ndarray) -> np.ndarray:
-        """
-        Mean class-probability variance across bags. Shape [N].
+    def predict_proba_with_variance(self, X: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Single forward pass returning (mean_proba [N,C], variance [N]).
 
-        Variance is computed class-wise then averaged, giving a scalar uncertainty
-        estimate per sample. High variance = bags disagree = expert is uncertain.
+        Variance is mean class-probability variance across bags — high value means
+        bags disagree, i.e. the expert is uncertain on this sample.
         """
-        preds = np.stack([m.predict_proba(X) for m in self._models], axis=0)  # [B, N, C]
-        # Var over bags for each class, then mean over classes → [N]
-        return preds.var(axis=0).mean(axis=-1).astype(np.float32)
+        preds = self._get_bag_preds(X)  # [B, N, C]
+        return preds.mean(axis=0).astype(np.float32), preds.var(axis=0).mean(axis=-1).astype(np.float32)
 
 
 class PortfolioExpertFactory:
@@ -121,10 +122,25 @@ class PortfolioExpertFactory:
         self.full_index = self.expert_ids.index(self.full_expert_id)
 
     def predict_all(self, X: np.ndarray) -> ExpertPredictionBatch:
-        preds = [
-            self.portfolio.experts[expert_id].predict(X)
-            for expert_id in self.expert_ids
-        ]
+        preds: list[np.ndarray] = []
+        vars_list: list[np.ndarray] = []
+        any_bagged = False
+
+        for expert_id in self.expert_ids:
+            expert = self.portfolio.experts[expert_id]
+            if isinstance(expert.predictor, BaggedClassifierPredictor):
+                any_bagged = True
+                # Single forward pass: get mean prediction and variance together,
+                # avoiding the double bag-prediction cost of separate calls.
+                adapter = expert.input_adapter or (lambda x: x)
+                X_view = adapter(X)
+                mean_pred, variance = expert.predictor.predict_proba_with_variance(X_view)
+                preds.append(mean_pred)
+                vars_list.append(variance)
+            else:
+                preds.append(expert.predict(X))
+                vars_list.append(np.zeros(len(X), dtype=np.float32))
+
         # Regression: each pred is [N] → column_stack → [N, E]
         # Classification: each pred is [N, C] → stack on axis=1 → [N, E, C]
         if preds[0].ndim == 1:
@@ -132,25 +148,10 @@ class PortfolioExpertFactory:
         else:
             stacked = np.stack(preds, axis=1).astype(np.float32)  # [N, E, C]
 
-        # Compute quality scores (variance) when using BaggedClassifierPredictor
-        quality_scores = None
-        has_bagged = any(
-            isinstance(self.portfolio.experts[eid].predictor, BaggedClassifierPredictor)
-            for eid in self.expert_ids
+        quality_scores = (
+            np.stack(vars_list, axis=1)[:, :, np.newaxis].astype(np.float32)
+            if any_bagged else None
         )
-        if has_bagged:
-            vars_per_expert = []
-            for expert_id in self.expert_ids:
-                predictor = self.portfolio.experts[expert_id].predictor
-                adapter = self.portfolio.experts[expert_id].input_adapter
-                X_view = adapter(X) if callable(adapter) else X
-                if isinstance(predictor, BaggedClassifierPredictor):
-                    v = predictor.predict_variance(X_view)   # [N]
-                else:
-                    v = np.zeros(len(X), dtype=np.float32)  # non-bagged experts get 0 variance
-                vars_per_expert.append(v)
-            # Stack → [N, E, 1]
-            quality_scores = np.stack(vars_per_expert, axis=1)[:, :, np.newaxis].astype(np.float32)
 
         return ExpertPredictionBatch(
             expert_ids=self.expert_ids,
