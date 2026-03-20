@@ -37,7 +37,7 @@ import torch
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import (
     r2_score, mean_squared_error, mean_absolute_error,
-    f1_score, roc_auc_score, average_precision_score,
+    f1_score, roc_auc_score, average_precision_score, log_loss,
 )
 from sklearn.preprocessing import OrdinalEncoder, label_binarize
 
@@ -63,12 +63,16 @@ REGRESSION_DATASETS = {
 }
 
 CLASSIFICATION_DATASETS = {
-    "segment":       {"openml_id": 40984, "type": "classification"},
-    "mfeat_factors": {"openml_id": 12,    "type": "classification"},
-    "pendigits":     {"openml_id": 32,    "type": "classification"},
-    "optdigits":     {"openml_id": 28,    "type": "classification"},
-    "diabetes":      {"openml_id": 37,    "type": "classification"},
-    "credit_g":      {"openml_id": 31,    "type": "classification"},
+    "segment":              {"openml_id": 40984, "type": "classification"},
+    "mfeat_factors":        {"openml_id": 12,    "type": "classification"},
+    "pendigits":            {"openml_id": 32,    "type": "classification"},
+    "optdigits":            {"openml_id": 28,    "type": "classification"},
+    "diabetes":             {"openml_id": 37,    "type": "classification"},
+    "credit_g":             {"openml_id": 31,    "type": "classification"},
+    # Low-dim multiclass datasets — TabArena loss cases for Phase 1 validation
+    "maternal_health_risk": {"openml_id": 46600, "type": "classification"},  # 7f, 3-class
+    "website_phishing":     {"openml_id": 46963, "type": "classification"},  # 10f, 3-class
+    "SDSS17":               {"openml_id": 46955, "type": "classification"},  # 12f, 3-class
 }
 
 ALL_DATASETS = {**REGRESSION_DATASETS, **CLASSIFICATION_DATASETS}
@@ -79,7 +83,7 @@ QUICK_DATASETS = {
     "pendigits":     CLASSIFICATION_DATASETS["pendigits"],
 }
 
-GRAPHDRONE_VERSION = "2026.03.19-clf-multiclass-win-v1"  # bump when model changes to invalidate cache
+GRAPHDRONE_VERSION = "2026.03.19-clf-mc-lowdim-policy-v2"  # bump when model changes to invalidate cache
 
 
 # ---------------------------------------------------------------------------
@@ -171,7 +175,11 @@ def classification_metrics(y_true, y_pred_proba, y_pred_labels) -> dict:
     except Exception:
         auc = float("nan")
         pr  = float("nan")
-    return {"f1_macro": f1, "auc_roc": auc, "pr_auc": pr}
+    try:
+        ll = float(log_loss(y_true, y_pred_proba))
+    except Exception:
+        ll = float("nan")
+    return {"f1_macro": f1, "auc_roc": auc, "pr_auc": pr, "log_loss": ll}
 
 
 # ---------------------------------------------------------------------------
@@ -453,19 +461,45 @@ def build_report(all_rows: list[dict], output_dir: Path):
     if not clf.empty:
         lines.append("CLASSIFICATION  (mean over folds)")
         lines.append("-" * 80)
+        clf_metric_cols = [c for c in ["f1_macro", "auc_roc", "pr_auc", "log_loss"] if c in clf.columns]
         pivot_c = clf.pivot_table(
             index="dataset", columns="method",
-            values=["f1_macro", "auc_roc", "pr_auc"], aggfunc="mean",
+            values=clf_metric_cols, aggfunc="mean",
         )
         lines.append(pivot_c.to_string(float_format="{:.4f}".format))
         lines.append("")
 
-        wr_c = _win_rate(df[df["task_type"] == "classification"], "f1_macro", "graphdrone", ["tabpfn"])
+        clf_ok = df[df["task_type"] == "classification"]
+        wr_c = _win_rate(clf_ok, "f1_macro", "graphdrone", ["tabpfn"])
         if not wr_c.empty:
             lines.append("Win-rate (GraphDrone F1 > TabPFN default, per dataset per fold)")
             lines.append(wr_c[["dataset", "vs", "win_rate", "delta_f1_macro"]].to_string(
                 index=False, float_format="{:.3f}".format))
             lines.append("")
+
+        # log_loss win-rate (lower is better → GD wins when gd < tabpfn)
+        if "log_loss" in clf_ok.columns:
+            ll_rows = []
+            for ds, grp in clf_ok.groupby("dataset"):
+                bl_vals = grp[grp["method"] == "tabpfn"]["log_loss"].dropna().values
+                ch_vals = grp[grp["method"] == "graphdrone"]["log_loss"].dropna().values
+                n = min(len(bl_vals), len(ch_vals))
+                if n == 0:
+                    continue
+                wins = int(np.sum(ch_vals[:n] < bl_vals[:n]))
+                ll_rows.append({
+                    "dataset": ds, "wins": wins, "total": n, "win_rate": wins / n,
+                    "gd_log_loss_mean": float(np.mean(ch_vals)),
+                    "tpf_log_loss_mean": float(np.mean(bl_vals)),
+                    "delta_log_loss": float(np.mean(bl_vals) - np.mean(ch_vals)),
+                })
+            if ll_rows:
+                wr_ll = pd.DataFrame(ll_rows)
+                lines.append("Win-rate (GraphDrone log_loss < TabPFN, per dataset per fold)")
+                lines.append(wr_ll[["dataset", "wins", "win_rate",
+                                    "gd_log_loss_mean", "tpf_log_loss_mean", "delta_log_loss"]].to_string(
+                    index=False, float_format="{:.4f}".format))
+                lines.append("")
 
     # ELO ranking (combined regression + classification)
     ok_df = df[df["status"].isin(["ok", "cached"])].copy()

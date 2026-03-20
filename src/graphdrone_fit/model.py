@@ -147,7 +147,19 @@ class GraphDrone:
                     if is_binary and matrix.shape[1] < 25:
                         sub_specs_config = [(0, 0.5)]
                     else:
-                        sub_specs_config = [(0, 0.8), (1, 0.85), (2, 0.9)]
+                        n_features = matrix.shape[1]
+                        if n_features <= 10:
+                            # SUBs at 80-90% retain 8-9/10 features — near-identical to FULL,
+                            # adding noise not diversity.  FULL-only is best for low-dim multiclass.
+                            # Covers: maternal_health_risk (7f), website_phishing (10f).
+                            sub_specs_config = []
+                        elif n_features <= 14:
+                            # 1 SUB at 60% gives meaningful feature dropout (e.g. 7/12 for SDSS17).
+                            # Threshold ≤14 (not ≤20) avoids regressing pendigits (16f)/segment (19f)
+                            # which benefit from the 3-SUB high-frac portfolio.
+                            sub_specs_config = [(0, 0.6)]
+                        else:
+                            sub_specs_config = [(0, 0.8), (1, 0.85), (2, 0.9)]
 
                     for sub_seed, sub_frac in sub_specs_config:
                         rng_i = np.random.RandomState(sub_seed)
