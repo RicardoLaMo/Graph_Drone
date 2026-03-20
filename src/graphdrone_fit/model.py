@@ -10,7 +10,7 @@ from .expert_factory import ExpertBuildSpec, ExpertPredictionBatch, PortfolioExp
 from .portfolio_loader import LoadedPortfolio, load_portfolio
 from .set_router import build_set_router
 from .support_encoder import MomentSupportEncoder, SupportEncoding
-from .token_builder import UniversalTokenBuilder, TokenBatch
+from .token_builder import UniversalTokenBuilder, TokenBatch, QualityEncoding
 from .view_descriptor import ViewDescriptor
 from .geo_ensemble import anchor_geo_poe_blend, learned_geo_poe_blend, learned_geo_poe_blend_torch
 
@@ -128,7 +128,10 @@ class GraphDrone:
             skip_subs = is_binary and (len(matrix) < 500 and matrix.shape[1] < 25)
 
             if is_classification:
-                model_kind = "foundation_classifier"
+                # Binary path: use bagged fitting to produce real variance tokens.
+                # 4× TabPFNClassifier(n_estimators=2) — same budget as n_estimators=8
+                # but yields predictive variance as a quality signal for the router.
+                model_kind = "foundation_classifier_bagged" if is_binary else "foundation_classifier"
                 full_spec = ExpertBuildSpec(
                     descriptor=ViewDescriptor(
                         expert_id=self.config.full_expert_id, family="FULL",
@@ -285,10 +288,18 @@ class GraphDrone:
 
             # Token builder expects scalar predictions [N, E]; for classification
             # use per-expert Shannon entropy as the routing signal (high H → uncertain).
+            # Include quality encoding (bagged variance) when available — gives the router
+            # a genuine per-expert uncertainty signal beyond entropy alone.
+            va_quality = None
+            if va_batch.quality_scores is not None:
+                va_quality = QualityEncoding(
+                    tensor=torch.tensor(va_batch.quality_scores, dtype=torch.float32),
+                    feature_names=("bag_variance",),
+                )
             va_tokens = self._token_builder.build(
                 predictions=_clf_entropy(va_batch.predictions), descriptors=va_batch.descriptors,
                 full_expert_id=va_batch.full_expert_id, support_encoding=va_enc,
-                geometric_obs=va_gora,
+                geometric_obs=va_gora, quality_encoding=va_quality,
             )
 
             token_dim = va_tokens.tokens.shape[-1]
@@ -446,10 +457,17 @@ class GraphDrone:
                     n_rows=matrix.shape[0], descriptors=batch.descriptors
                 )
                 gora_obs = self._compute_gora_obs(matrix, batch.descriptors)
+                # Include quality encoding (bagged variance) when available
+                predict_quality = None
+                if batch.quality_scores is not None:
+                    predict_quality = QualityEncoding(
+                        tensor=torch.tensor(batch.quality_scores, dtype=torch.float32),
+                        feature_names=("bag_variance",),
+                    )
                 tokens = self._token_builder.build(
                     predictions=_clf_entropy(batch.predictions), descriptors=batch.descriptors,
                     full_expert_id=batch.full_expert_id, support_encoding=support_enc,
-                    geometric_obs=gora_obs,
+                    geometric_obs=gora_obs, quality_encoding=predict_quality,
                 )
                 self._router.eval()
                 with torch.no_grad():

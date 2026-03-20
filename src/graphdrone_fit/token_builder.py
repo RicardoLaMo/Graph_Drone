@@ -33,6 +33,7 @@ class UniversalTokenBuilder:
         neural_support: Optional[torch.Tensor] = None,
         prior_alignment: Optional[torch.Tensor] = None,
         geometric_obs: Optional[torch.Tensor] = None,
+        quality_encoding: Optional["QualityEncoding"] = None,
     ) -> TokenBatch:
         pred_tensor = torch.as_tensor(predictions, dtype=torch.float32)
         device = pred_tensor.device
@@ -87,6 +88,12 @@ class UniversalTokenBuilder:
         if geometric_obs is not None:
             support_fields.append(geometric_obs.to(device))
             support_names_list.extend(["kappa", "lid"])
+
+        # 5b. Quality Encoding (bagged variance — real uncertainty signal)
+        if quality_encoding is not None:
+            q_tensor = quality_encoding.tensor.to(device)  # [N, E, D_q]
+            support_fields.append(q_tensor)
+            support_names_list.extend(quality_encoding.feature_names)
 
         # 6. Static Descriptors
         descriptor_tensor, descriptor_names = self._build_descriptor_tensor(descriptors)
