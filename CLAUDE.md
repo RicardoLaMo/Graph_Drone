@@ -1,23 +1,26 @@
 # GraphDrone — Developer Guide for Claude
 
-## Current best ELO (2026-03-19, v1.19.0) — **BOTH ENGINES WIN**
+## Current best ELO (2026-03-19, v1.20.0) — **BOTH ENGINES WIN**
 
 | Engine | GD ELO | TabPFN ELO | Benchmark | Tasks |
 |---|---|---|---|---|
 | **Regression** | **1523.2** | 1476.8 | geopoe, v1-geopoe-2026.03.19c | 36/36 |
-| **Classification** | **1502.2** | 1497.8 | smart benchmark, 2026.03.19-clf-multiclass-win-v1 | 36/36 |
+| **Classification** | **1503.3** | 1496.7 | smart benchmark, 2026.03.19-clf-mc-v1.20 | 54/54 |
 
 Both engines are in `main`. One `GraphDrone` class dispatches via `_detect_problem_type(y)`.
 
-### Classification per-dataset (v1.19, smart benchmark)
-| Dataset | GD F1 | TPF F1 | Result |
-|---|---|---|---|
-| diabetes (binary) | 0.7549 | 0.7320 | **GD wins +0.023** |
-| credit_g (binary) | 0.6787 | 0.6937 | Gap closed: was −0.054, now −0.015 |
-| segment (7-class) | 0.9474 | 0.9474 | Tie |
-| mfeat_factors (10-class) | 0.9861 | 0.9826 | **GD wins +0.004** |
-| pendigits (10-class) | 0.9949 | 0.9959 | Near-saturation |
-| optdigits (10-class) | 0.9930 | 0.9924 | **GD wins +0.001** |
+### Classification per-dataset (v1.20, smart benchmark — 9 datasets × 3 folds)
+| Dataset | GD F1 | TPF F1 | GD log_loss | TPF log_loss | Result |
+|---|---|---|---|---|---|
+| diabetes (binary) | 0.7394 | 0.7320 | 0.4748 | 0.4736 | **GD wins F1 +0.007** |
+| credit_g (binary) | 0.6897 | 0.6937 | 0.4836 | 0.4760 | Gap: −0.004 F1 |
+| segment (7-class) | 0.9474 | 0.9474 | 0.1383 | 0.1442 | Tie F1, **GD wins log_loss** |
+| mfeat_factors (10-class) | 0.9843 | 0.9826 | 0.0386 | 0.0442 | **GD wins both** |
+| pendigits (10-class) | 0.9949 | 0.9959 | 0.0268 | 0.0261 | Near-saturation |
+| optdigits (10-class) | 0.9927 | 0.9924 | 0.0260 | 0.0262 | **GD wins F1** |
+| maternal_health_risk (3-class, 7f) | 0.8644 | 0.8609 | 0.3968 | 0.3893 | **GD wins F1** |
+| website_phishing (3-class, 10f) | 0.9230 | 0.9239 | 0.1865 | 0.1876 | GD wins log_loss |
+| SDSS17 (3-class, 12f) | 0.9674 | 0.9672 | 0.0920 | 0.0951 | **GD wins both** |
 
 ---
 
@@ -37,10 +40,14 @@ Both engines are in `main`. One `GraphDrone` class dispatches via `_detect_probl
 - **Router**: `noise_gate_router` — learned OOF NLL router with GORA
 - **OOF split**: 20% holdout when n≤1500, 10% otherwise; **stratified** (credit_g fix)
 - **OOF experts**: CPU-offloaded (`device="cpu"`, `n_jobs=1`) to avoid 8-model GPU OOM
+- **Quality tokens**: `BaggedClassifierPredictor` (4× `TabPFNClassifier(n_estimators=2)`) provides per-expert prediction variance for router signal (v1.20)
 
 ### Classification engine — multiclass path (`n_classes > 2`)
 
-- **Portfolio**: FULL + 3×SUB (fracs 0.8/0.85/0.9) — all `foundation_classifier` (TabPFN)
+- **Portfolio**: feature-count-dependent (v1.20):
+  - ≤10 features → FULL only (SUBs at 80-90% have no diversity on 6-10 features)
+  - ≤14 features → FULL + 1×SUB @ 60% (meaningful feature dropout)
+  - >14 features → FULL + 3×SUB @ 0.8/0.85/0.9 (unchanged for high-dim)
 - **Router**: `bootstrap_full_only` → static `anchor_geo_poe_blend(anchor_weight=5.0)`
 - **No router training** — zero NLL overhead, valid probability output guaranteed
 
@@ -87,7 +94,7 @@ PYTHONPATH=src python scripts/run_smart_benchmark.py --quick --folds 0
 
 - **Bump `GRAPHDRONE_VERSION`** in the relevant script after any model code change, or stale cached results will be used.
 - Current regression version: `v1-geopoe-2026.03.19c`
-- Current classification version: `2026.03.19-clf-multiclass-win-v1`
+- Current classification version: `2026.03.19-clf-mc-v1.20`
 
 ---
 
@@ -100,14 +107,15 @@ PYTHONPATH=src python scripts/run_smart_benchmark.py --quick --folds 0
 | 2026-03-19 | v1-geopoe-2026.03.19a | — | 1479.5 | Static GeoPOE clf. FULL+3×SUB. anchor_weight=3.0. |
 | 2026-03-19 | v1-geopoe-2026.03.19b | 1482.3 | — | Multi-view reg, no residual penalty. Diamonds collapse (defer=1.0). |
 | 2026-03-19 | v1-geopoe-2026.03.19c | **1523.2** | — | Residual penalty added. GD beats TabPFN on regression. v1.18.0. |
-| **2026-03-19** | **v1.19.0** | **1523.2** | **1502.2** | **← current main**. Binary/multiclass split. Both engines win. |
+| 2026-03-19 | v1.19.0 | 1523.2 | 1502.2 | Binary/multiclass split. Both engines win. |
+| **2026-03-19** | **v1.20.0** | **1523.2** | **1503.3** | **← current main**. Feature-count portfolio + bagged quality tokens. 9 datasets. |
 
 ---
 
 ## Known gaps (future work)
 
-1. **`quality_scores` in tokens** — `portfolio_loader.py` has a `pass` stub. All quality tokens are zero. Real bagged-estimator variance would give the router better uncertainty signal for binary classification.
+1. **credit_g still lags TabPFN** (−0.004 F1). Root cause: 20 features × 3 SUBs at 70-80% provides minimal diversity; OOF holdout ~160 rows. Further improvement: Latin square permutations (Idea E in `research/tabicl_inspiration.md`).
 
-2. **credit_g still lags TabPFN** (−0.015). Root cause: 20 features × 3 SUBs at 70-80% provides minimal diversity; OOF holdout ~160 rows even after stratify fix. Further improvement: Latin square permutations (Idea E in `research/tabicl_inspiration.md`).
+2. **Multiclass log_loss on low-dim** (maternal_health_risk, SDSS17 below TabPFN). Static GeoPOE at anchor_weight=5.0 is well-calibrated for F1 but slightly over-confident. ScalarGatingAdapter (Phase 3) was designed to learn this but had a bug (`use_learned` path exclusion); fixed in `exp/clf-mc-scalar-gating` but not yet benchmarked successfully.
 
-3. **TabICL-inspired ideas** (`research/tabicl-inspiration`) — class shift + YJ view + temperature bundle tested: net −4.3 ELO on smart benchmark. YJ 5th expert drags segment. Ablation roadmap in `research/tabicl_inspiration.md`. Class-shift-only is promising for 10-class datasets.
+3. **TabICL-inspired ideas** (`research/tabicl-inspiration`) — class shift + YJ view + temperature bundle tested: net −4.3 ELO on smart benchmark. YJ 5th expert drags segment. Class-shift-only is promising for 10-class datasets.

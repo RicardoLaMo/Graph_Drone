@@ -75,9 +75,12 @@ class LoadedExpert:
         adapter = self.input_adapter or _default_input_adapter(self.descriptor)
         view_matrix = adapter(X)
 
-        if hasattr(self.predictor, "predict_proba") and self.artifact_kind == "foundation_classifier":
+        if hasattr(self.predictor, "predict_proba") and self.artifact_kind in (
+            "foundation_classifier", "foundation_classifier_bagged"
+        ):
             # Always return full [N, C] probability matrix for GeoPOE blending.
             # Binary case (C=2) is kept as-is — GeoPOE handles it uniformly.
+            # BaggedClassifierPredictor.predict_proba returns the mean across bags.
             pred = np.asarray(self.predictor.predict_proba(view_matrix), dtype=np.float32)
         else:
             pred = np.asarray(self.predictor.predict(view_matrix), dtype=np.float32)

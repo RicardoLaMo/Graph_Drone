@@ -17,6 +17,7 @@ class ExpertPredictionBatch:
     predictions: np.ndarray
     full_expert_id: str
     full_index: int
+    quality_scores: "np.ndarray | None" = None  # [N, E, 1] variance across bags; None if not bagged
 
 
 class InputAdapterProtocol(Protocol):
@@ -80,6 +81,37 @@ class ExpertBuildSpec:
     model_params: dict[str, object] = field(default_factory=dict)
 
 
+class BaggedClassifierPredictor:
+    """
+    Bagged TabPFN: fits ``bag_n`` TabPFNClassifier(n_estimators=nest_each) and
+    exposes both mean predictions and per-sample variance as a quality signal.
+
+    Why: a single TabPFNClassifier(n_estimators=8) gives a single prediction per
+    expert.  4×(n_estimators=2) with the same total budget lets us estimate
+    predictive variance across independently seeded bags — giving the router a
+    genuine uncertainty signal rather than always-zero quality tokens.
+    """
+
+    def __init__(self, models: list):
+        self._models = models
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        """Mean probability across bags. Shape [N, C]."""
+        preds = np.stack([m.predict_proba(X) for m in self._models], axis=0)  # [B, N, C]
+        return preds.mean(axis=0).astype(np.float32)
+
+    def predict_variance(self, X: np.ndarray) -> np.ndarray:
+        """
+        Mean class-probability variance across bags. Shape [N].
+
+        Variance is computed class-wise then averaged, giving a scalar uncertainty
+        estimate per sample. High variance = bags disagree = expert is uncertain.
+        """
+        preds = np.stack([m.predict_proba(X) for m in self._models], axis=0)  # [B, N, C]
+        # Var over bags for each class, then mean over classes → [N]
+        return preds.var(axis=0).mean(axis=-1).astype(np.float32)
+
+
 class PortfolioExpertFactory:
     def __init__(self, portfolio: LoadedPortfolio) -> None:
         self.portfolio = portfolio.validate()
@@ -99,12 +131,34 @@ class PortfolioExpertFactory:
             stacked = np.column_stack(preds).astype(np.float32)   # [N, E]
         else:
             stacked = np.stack(preds, axis=1).astype(np.float32)  # [N, E, C]
+
+        # Compute quality scores (variance) when using BaggedClassifierPredictor
+        quality_scores = None
+        has_bagged = any(
+            isinstance(self.portfolio.experts[eid].predictor, BaggedClassifierPredictor)
+            for eid in self.expert_ids
+        )
+        if has_bagged:
+            vars_per_expert = []
+            for expert_id in self.expert_ids:
+                predictor = self.portfolio.experts[expert_id].predictor
+                adapter = self.portfolio.experts[expert_id].input_adapter
+                X_view = adapter(X) if callable(adapter) else X
+                if isinstance(predictor, BaggedClassifierPredictor):
+                    v = predictor.predict_variance(X_view)   # [N]
+                else:
+                    v = np.zeros(len(X), dtype=np.float32)  # non-bagged experts get 0 variance
+                vars_per_expert.append(v)
+            # Stack → [N, E, 1]
+            quality_scores = np.stack(vars_per_expert, axis=1)[:, :, np.newaxis].astype(np.float32)
+
         return ExpertPredictionBatch(
             expert_ids=self.expert_ids,
             descriptors=self.descriptors,
             predictions=stacked,
             full_expert_id=self.full_expert_id,
             full_index=self.full_index,
+            quality_scores=quality_scores,
         )
 
 
@@ -191,5 +245,25 @@ def _fit_predictor(
         )
         model.fit(X_view, y_train)
         return model
+
+    if model_kind == "foundation_classifier_bagged":
+        # 4× TabPFNClassifier(n_estimators=2) — same total estimator budget as n_estimators=8
+        # but produces predictive variance across independently seeded bags.
+        from tabpfn import TabPFNClassifier
+        bag_n = int(model_params.get("bag_n", 4))
+        nest_each = int(model_params.get("n_estimators", 8)) // bag_n
+        nest_each = max(nest_each, 1)
+        models = []
+        for bag_seed in range(bag_n):
+            m = TabPFNClassifier(
+                n_estimators=nest_each,
+                random_state=int(model_params.get("random_state", 42)) + bag_seed,
+                device=model_params.get("device", "auto"),
+                ignore_pretraining_limits=bool(model_params.get("ignore_pretraining_limits", len(X_view) > 1000)),
+                n_preprocessing_jobs=int(model_params.get("n_preprocessing_jobs", 1)),
+            )
+            m.fit(X_view, y_train)
+            models.append(m)
+        return BaggedClassifierPredictor(models)
 
     raise ValueError(f"Unsupported model_kind={model_kind!r}")
