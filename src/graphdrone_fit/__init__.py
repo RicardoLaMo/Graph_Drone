@@ -1,5 +1,10 @@
 from .model import GraphDrone, GraphDronePredictResult
-from .config import GraphDroneConfig, SetRouterConfig
+from .config import (
+    GraphDroneConfig,
+    HyperbolicDescriptorConfig,
+    LegitimacyGateConfig,
+    SetRouterConfig,
+)
 from .view_descriptor import ViewDescriptor
 from .expert_factory import ExpertBuildSpec, IdentitySelectorAdapter
 
@@ -8,6 +13,8 @@ __all__ = [
     "GraphDrone",
     "GraphDronePredictResult",
     "GraphDroneConfig",
+    "LegitimacyGateConfig",
+    "HyperbolicDescriptorConfig",
     "SetRouterConfig",
     "ViewDescriptor",
     "ExpertBuildSpec",

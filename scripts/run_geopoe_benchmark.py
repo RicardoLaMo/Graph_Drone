@@ -25,6 +25,7 @@ import sys
 import json
 import hashlib
 import argparse
+import os
 import traceback
 import time
 from pathlib import Path
@@ -45,7 +46,12 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from graphdrone_fit.model import GraphDrone
-from graphdrone_fit.config import GraphDroneConfig, SetRouterConfig
+from graphdrone_fit.config import (
+    GraphDroneConfig,
+    HyperbolicDescriptorConfig,
+    LegitimacyGateConfig,
+    SetRouterConfig,
+)
 from graphdrone_fit.expert_factory import ExpertBuildSpec, IdentitySelectorAdapter
 from graphdrone_fit.view_descriptor import ViewDescriptor
 
@@ -79,7 +85,46 @@ QUICK_DATASETS = {
     "pendigits":     CLASSIFICATION_DATASETS["pendigits"],
 }
 
-GRAPHDRONE_VERSION = "v1-geopoe-2026.03.19c"  # reg: FULL+3xSUB TabPFN + GORA + residual-protected router
+GRAPHDRONE_VERSION = "v1-geopoe-2026.03.22-afc-wave1"
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    return float(raw) if raw is not None else default
+
+
+def _router_config_from_env(default_kind: str) -> SetRouterConfig:
+    return SetRouterConfig(
+        kind=os.getenv("GRAPHDRONE_ROUTER_KIND", default_kind),
+        alignment_lambda=_env_float("GRAPHDRONE_ALIGNMENT_LAMBDA", 0.1),
+        ot_prototype_count=int(os.getenv("GRAPHDRONE_OT_PROTOTYPE_COUNT", "32")),
+        ot_epsilon=_env_float("GRAPHDRONE_OT_EPSILON", 0.05),
+        ot_max_iter=int(os.getenv("GRAPHDRONE_OT_MAX_ITER", "50")),
+        ot_alpha=_env_float("GRAPHDRONE_OT_ALPHA", 6.0),
+        ot_threshold=_env_float("GRAPHDRONE_OT_THRESHOLD", 0.25),
+    )
+
+
+def _graphdrone_config(*, n_classes: int = 1, default_router_kind: str) -> GraphDroneConfig:
+    return GraphDroneConfig(
+        n_classes=n_classes,
+        router=_router_config_from_env(default_router_kind),
+        legitimacy_gate=LegitimacyGateConfig(
+            enabled=_env_flag("GRAPHDRONE_ENABLE_LEGITIMACY_GATE", True),
+            classification_entropy_threshold=_env_float("GRAPHDRONE_GATE_ENTROPY_THRESHOLD", 0.15),
+            regression_variance_threshold=_env_float("GRAPHDRONE_GATE_VARIANCE_THRESHOLD", 0.005),
+        ),
+        hyperbolic_descriptors=HyperbolicDescriptorConfig(
+            enabled=_env_flag("GRAPHDRONE_ENABLE_HYPERBOLIC_DESCRIPTORS", False),
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -246,7 +291,7 @@ def run_graphdrone(X_tr, y_tr, X_te, task_type: str, seed: int = 42, n_classes: 
                 model_params=params_fp,
             ))
         specs = (full_spec, *sub_specs)
-        cfg = GraphDroneConfig(router=SetRouterConfig(kind="contextual_transformer"))
+        cfg = _graphdrone_config(default_router_kind="contextual_transformer")
     else:
         # GeoPOE classification: multi-view SUB portfolio + static anchor-boosted GeoPOE
         # 3 SUB views with different seeds/subspace sizes → richer ensemble diversity
@@ -278,10 +323,7 @@ def run_graphdrone(X_tr, y_tr, X_te, task_type: str, seed: int = 42, n_classes: 
                 model_params=params_fp,
             ))
         specs = (full_spec, *sub_specs)
-        cfg = GraphDroneConfig(
-            n_classes=n_classes,
-            router=SetRouterConfig(kind="bootstrap_full_only"),
-        )
+        cfg = _graphdrone_config(n_classes=n_classes, default_router_kind="bootstrap_full_only")
 
     gd = GraphDrone(cfg)
     # Pass problem_type explicitly so integer-valued regression targets (e.g. cpu_act)

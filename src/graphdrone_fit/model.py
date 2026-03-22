@@ -1,26 +1,32 @@
 from __future__ import annotations
+
 from dataclasses import dataclass
-import numpy as np
-import torch
 from typing import Optional, Union
 
+import numpy as np
+import torch
+
 from .config import GraphDroneConfig, SetRouterConfig
-from .defer_integrator import IntegrationOutputs, integrate_predictions
-from .expert_factory import ExpertBuildSpec, ExpertPredictionBatch, PortfolioExpertFactory, fit_portfolio_from_specs, IdentitySelectorAdapter
-from .portfolio_loader import LoadedPortfolio, load_portfolio
-from .set_router import build_set_router
-from .support_encoder import MomentSupportEncoder, SupportEncoding
-from .token_builder import UniversalTokenBuilder, TokenBatch, QualityEncoding
-from .view_descriptor import ViewDescriptor
+from .defer_integrator import integrate_predictions
+from .expert_factory import (
+    ExpertBuildSpec,
+    ExpertPredictionBatch,
+    IdentitySelectorAdapter,
+    PortfolioExpertFactory,
+    fit_portfolio_from_specs,
+)
 from .geo_ensemble import anchor_geo_poe_blend, learned_geo_poe_blend, learned_geo_poe_blend_torch
+from .set_router import LegitimacyGate, LegitimacyGateDecision, build_set_router
+from .support_encoder import MomentSupportEncoder
+from .token_builder import QualityEncoding, UniversalTokenBuilder
+from .view_descriptor import ViewDescriptor
 
 
-def _make_quality_encoding(quality_scores: "np.ndarray | None") -> "QualityEncoding | None":
-    """Wrap quality_scores array into a QualityEncoding, or return None."""
+def _make_quality_encoding(quality_scores: np.ndarray | None) -> QualityEncoding | None:
     if quality_scores is None:
         return None
     return QualityEncoding(
-        tensor=torch.as_tensor(quality_scores),  # already float32 from expert_factory
+        tensor=torch.as_tensor(quality_scores),
         feature_names=("bag_variance",),
     )
 
@@ -33,11 +39,6 @@ class GraphDronePredictResult:
 
 
 def _clf_entropy(predictions: np.ndarray) -> np.ndarray:
-    """
-    Convert [N, E, C] class probability array to [N, E] Shannon entropy scalars.
-    Used to give the token builder a scalar signal per expert — high entropy means
-    an uncertain expert, which the router should weight differently.
-    """
     p = np.clip(predictions, 1e-9, 1.0)
     return -np.sum(p * np.log(p), axis=-1).astype(np.float32)
 
@@ -49,43 +50,37 @@ def _coerce_matrix(X: np.ndarray) -> np.ndarray:
     return matrix
 
 
-def _detect_problem_type(y: np.ndarray, config: GraphDroneConfig):
-    """
-    Returns (problem_type, n_classes).
-
-    Priority:
-    1. config.n_classes > 1  → classification, use that n_classes
-    2. Auto-detect from y:
-       - float targets with non-integer values → regression
-       - ≤ 50 unique integer-valued targets → classification
-       - otherwise → regression
-    """
+def _detect_problem_type(y: np.ndarray, config: GraphDroneConfig) -> tuple[str, int]:
     if config.n_classes > 1:
         return "classification", config.n_classes
 
     unique_y = np.unique(y)
     is_float_target = np.issubdtype(y.dtype, np.floating) and not np.all(np.mod(y, 1) == 0)
-
     if not is_float_target and len(unique_y) < 50:
         return "classification", int(unique_y.max() + 1)
-
     return "regression", 1
 
 
-class GraphDrone:
-    """
-    GraphDrone v1-width + GeoPOE multiclass extension.
+def _slice_prediction_batch(batch: ExpertPredictionBatch, mask: np.ndarray) -> ExpertPredictionBatch:
+    quality_scores = None if batch.quality_scores is None else batch.quality_scores[mask]
+    return ExpertPredictionBatch(
+        expert_ids=batch.expert_ids,
+        descriptors=batch.descriptors,
+        predictions=batch.predictions[mask],
+        full_expert_id=batch.full_expert_id,
+        full_index=batch.full_index,
+        quality_scores=quality_scores,
+    )
 
-    Regression path:  unchanged from v1-width (100% data, GORA, static anchor router).
-    Classification path: 100% data + Geometric Product-of-Experts blending — no router
-                         training required, no NLL loss, valid probability output guaranteed.
-    """
+
+class GraphDrone:
     def __init__(self, config: GraphDroneConfig) -> None:
         self.config = config.validate()
         self._expert_factory: Optional[PortfolioExpertFactory] = None
-        self._token_builder = UniversalTokenBuilder()
+        self._token_builder = UniversalTokenBuilder(self.config.hyperbolic_descriptors)
         self._support_encoder = MomentSupportEncoder()
         self._router: Optional[torch.nn.Module] = None
+        self._legitimacy_gate = LegitimacyGate(self.config.legitimacy_gate)
         self._train_views: dict[str, np.ndarray] = {}
         self._problem_type: str = "regression"
         self._n_classes: int = 1
@@ -99,13 +94,10 @@ class GraphDrone:
         expert_specs: Optional[tuple[ExpertBuildSpec, ...]] = None,
         problem_type: Optional[str] = None,
     ) -> "GraphDrone":
-        X = np.asarray(X, dtype=np.float32)
-        matrix = _coerce_matrix(X)
+        matrix = _coerce_matrix(np.asarray(X, dtype=np.float32))
         self.n_features_in_ = matrix.shape[1]
 
-        # Detect problem type -----------------------------------------------
         if problem_type is not None:
-            # Legacy explicit override from benchmark script
             if problem_type in ("binary", "classification"):
                 n_classes = self.config.n_classes if self.config.n_classes > 1 else int(len(np.unique(y)))
                 self._problem_type = "classification"
@@ -114,314 +106,270 @@ class GraphDrone:
                 self._problem_type = "regression"
                 self._n_classes = 1
         else:
-            self._problem_type, self._n_classes = _detect_problem_type(
-                np.asarray(y), self.config
-            )
+            self._problem_type, self._n_classes = _detect_problem_type(np.asarray(y), self.config)
 
-        is_classification = (self._problem_type == "classification")
-        is_binary = is_classification and (self._n_classes == 2)
+        is_classification = self._problem_type == "classification"
+        is_binary = is_classification and self._n_classes == 2
+        y_array = np.asarray(y, dtype=np.int64 if is_classification else np.float32)
 
-        # Cast y appropriately
-        if is_classification:
-            y = np.asarray(y, dtype=np.int64)
-        else:
-            y = np.asarray(y, dtype=np.float32)
-
-        # Build default specs if not supplied --------------------------------
         if expert_specs is None:
-            full_idx = tuple(range(matrix.shape[1]))
-            params = {"n_estimators": 8, "device": self.device}
-            rng = np.random.RandomState(42)
-            
-            # Lead 4: Anchor-only fallback for very small binary datasets.
-            # Scaling router training on < 500 rows is noisy; better to trust the FULL anchor.
-            skip_subs = is_binary and (len(matrix) < 500 and matrix.shape[1] < 25)
+            expert_specs = self._build_default_specs(matrix, is_classification=is_classification, is_binary=is_binary)
 
-            if is_classification:
-                # Binary path: use bagged fitting to produce real variance tokens.
-                # 4× TabPFNClassifier(n_estimators=2) — same budget as n_estimators=8
-                # but yields predictive variance as a quality signal for the router.
-                model_kind = "foundation_classifier_bagged" if is_binary else "foundation_classifier"
-                full_spec = ExpertBuildSpec(
-                    descriptor=ViewDescriptor(
-                        expert_id=self.config.full_expert_id, family="FULL",
-                        view_name="Foundation Full", is_anchor=True,
-                        input_dim=matrix.shape[1], input_indices=full_idx,
-                    ),
-                    model_kind=model_kind,
-                    input_adapter=IdentitySelectorAdapter(indices=full_idx),
-                    model_params=params,
-                )
-                
-                sub_specs = []
-                if not skip_subs:
-                    # Lead 1: For low-dim binary datasets, use 1 SUB at 50% features.
-                    # Higher dimensionality can support more specialists.
-                    if is_binary and matrix.shape[1] < 25:
-                        sub_specs_config = [(0, 0.5)]
-                    else:
-                        n_features = matrix.shape[1]
-                        if n_features <= 10:
-                            # SUBs at 80-90% retain 8-9/10 features — near-identical to FULL,
-                            # adding noise not diversity.  FULL-only is best for low-dim multiclass.
-                            # Covers: maternal_health_risk (7f), website_phishing (10f).
-                            sub_specs_config = []
-                        elif n_features <= 14:
-                            # 1 SUB at 60% gives meaningful feature dropout (e.g. 7/12 for SDSS17).
-                            # Threshold ≤14 (not ≤20) avoids regressing pendigits (16f)/segment (19f)
-                            # which benefit from the 3-SUB high-frac portfolio.
-                            sub_specs_config = [(0, 0.6)]
-                        else:
-                            sub_specs_config = [(0, 0.8), (1, 0.85), (2, 0.9)]
-
-                    for sub_seed, sub_frac in sub_specs_config:
-                        rng_i = np.random.RandomState(sub_seed)
-                        sz_i = max(1, int(matrix.shape[1] * sub_frac))
-                        idx_i = tuple(sorted(rng_i.choice(matrix.shape[1], sz_i, replace=False).tolist()))
-                        sub_specs.append(ExpertBuildSpec(
-                            descriptor=ViewDescriptor(
-                                expert_id=f"SUB{sub_seed}", family="structural_subspace",
-                                view_name=f"Foundation Sub {sub_seed}",
-                                input_dim=sz_i, input_indices=idx_i,
-                            ),
-                            model_kind=model_kind,
-                            input_adapter=IdentitySelectorAdapter(indices=idx_i),
-                            model_params=params,
-                        ))
-                expert_specs = (full_spec, *sub_specs)
-            else:
-                expert_specs = (
-                    ExpertBuildSpec(
-                        descriptor=ViewDescriptor(
-                            expert_id=self.config.full_expert_id, family="FULL",
-                            view_name="Foundation Full", is_anchor=True,
-                            input_dim=matrix.shape[1], input_indices=full_idx,
-                        ),
-                        model_kind="foundation_regressor",
-                        input_adapter=IdentitySelectorAdapter(indices=full_idx),
-                        model_params=params,
-                    ),
-                )
-
-        print(f"  -> Fitting GraphDrone ({self._problem_type}, n_classes={self._n_classes}) on {len(X)} samples...")
-
-        # 1. Fit experts (100% data utilization — v1-width strength) ---------
+        print(f"  -> Fitting GraphDrone ({self._problem_type}, n_classes={self._n_classes}) on {len(matrix)} samples...")
         self._portfolio = fit_portfolio_from_specs(
-            X_train=matrix, y_train=y, specs=expert_specs,
+            X_train=matrix,
+            y_train=y_array,
+            specs=expert_specs,
             full_expert_id=self.config.full_expert_id,
         )
         self._expert_factory = PortfolioExpertFactory(self._portfolio)
 
-        # Classification path ------------------------------------------------
-        if is_classification:
-            # Always populate _train_views — needed by _compute_gora_obs in predict()
-            for spec in expert_specs:
-                fitted_adapter = spec.input_adapter.fit(matrix)
-                self._train_views[spec.descriptor.expert_id] = fitted_adapter.transform(matrix)
-
-            # Binary: always use the learned router (OOF NLL + GORA) — the static GeoPOE
-            # blending that works for multiclass is too blunt for binary where the FULL
-            # expert is already well-calibrated.  The learned router can reject bad SUBs.
-            # Multiclass: static anchor GeoPOE (effective; avoids OOF overhead per class).
-            use_learned = is_binary or (
-                self.config.use_learned_router_for_classification
-                and self.config.router.kind != "bootstrap_full_only"
-            )
-
-            if not use_learned:
-                print(f"  -> Classification (multiclass): using static Geometric PoE blending.")
-                return self
-
-            if is_binary and self.config.router.kind == "bootstrap_full_only":
-                # Override to noise_gate_router for binary — bootstrap_full_only has no
-                # trainable parameters and would skip optimization entirely.
-                _binary_router_config = SetRouterConfig(kind="noise_gate_router")
-            else:
-                _binary_router_config = None
-
-            # --- OOF Router Training -------------------------------------------
-            # Experts are already fit on 100% data (self._portfolio).
-            # To avoid optimism bias, train the router on genuinely held-out expert
-            # predictions: fit a temporary 80-90% portfolio, generate OOF predictions
-            # on the 10-20% holdout, train router there, then restore 100% inference setup.
-            from sklearn.model_selection import train_test_split as _tts
-            import torch.nn.functional as F
-
-            n_all = len(matrix)
-            # Lead 2: Increase OOF holdout size for small binary datasets
-            # 10% of 1000 is only 100 rows; 25% (250 rows) provides better signal for router.
-            oof_test_size = 0.25 if n_all <= 1500 else 0.1
-            idx_tr90, idx_va = _tts(np.arange(n_all), test_size=oof_test_size, random_state=42, stratify=y)
-            X_tr90, X_va = matrix[idx_tr90], matrix[idx_va]
-            y_tr90, y_va = y[idx_tr90], y[idx_va]
-
-            # OOF experts are fitted on CPU to avoid GPU OOM when the 100% portfolio
-            # is already resident in GPU memory.  The OOF portfolio is a temporary
-            # artefact used only to generate held-out predictions for router training;
-            # it is discarded after this block.  CPU TabPFN adds ~3-5s per expert
-            # but eliminates the 4(100%)+4(OOF)=8-model GPU contention entirely.
-            # A Data-DAG / multi-GPU scheme would be equivalent but far more complex.
-            oof_specs = tuple(
-                ExpertBuildSpec(
-                    descriptor=spec.descriptor,
-                    model_kind=spec.model_kind,
-                    input_adapter=spec.input_adapter,
-                    model_params={**spec.model_params, "device": "cpu"},
-                )
-                for spec in expert_specs
-            )
-            torch.cuda.empty_cache()   # release cached allocations before OOF fit
-
-            print(f"  -> OOF router training: fitting temporary experts on CPU ({len(X_tr90)} rows)...")
-            oof_portfolio = fit_portfolio_from_specs(
-                X_train=X_tr90, y_train=y_tr90, specs=oof_specs,
-                full_expert_id=self.config.full_expert_id,
-                n_jobs=1,   # sequential — CPU TabPFN; avoids process-fork races
-            )
-            oof_factory = PortfolioExpertFactory(oof_portfolio)
-
-            # Build OOF train views (90% slice) — needed for GORA computation on val rows
-            oof_train_views: dict[str, np.ndarray] = {}
-            for spec in expert_specs:
-                fitted_adapter = spec.input_adapter.fit(X_tr90)
-                oof_train_views[spec.descriptor.expert_id] = fitted_adapter.transform(X_tr90)
-
-            # Generate OOF predictions on the 10% holdout using 90%-trained experts
-            va_batch = oof_factory.predict_all(X_va)
-            va_enc = self._support_encoder.encode(n_rows=len(X_va), descriptors=va_batch.descriptors)
-
-            # Temporarily swap to OOF train views for GORA (restores after)
-            saved_train_views = self._train_views
-            self._train_views = oof_train_views
-            va_gora = self._compute_gora_obs(X_va, va_batch.descriptors)
-            self._train_views = saved_train_views                        # restore 100% views
-
-            # Token builder expects scalar predictions [N, E]; for classification
-            # use per-expert Shannon entropy as the routing signal (high H → uncertain).
-            va_tokens = self._token_builder.build(
-                predictions=_clf_entropy(va_batch.predictions), descriptors=va_batch.descriptors,
-                full_expert_id=va_batch.full_expert_id, support_encoding=va_enc,
-                geometric_obs=va_gora,
-                quality_encoding=_make_quality_encoding(va_batch.quality_scores),
-            )
-
-            token_dim = va_tokens.tokens.shape[-1]
-            router_cfg = _binary_router_config if _binary_router_config is not None else self.config.router
-            self._router = build_set_router(router_cfg, token_dim=token_dim).to(self.device)
-            trainable_params = list(self._router.parameters())
-            if not trainable_params:
-                print("  -> Classification Router has no trainable parameters, skipping optimization.")
-                return self
-
-            y_va_t = torch.tensor(y_va, dtype=torch.long).to(self.device)
-            # va_batch.predictions: [N, E, C] OOF class probabilities (genuinely held-out)
-            log_p = torch.log(
-                torch.tensor(np.clip(va_batch.predictions, 1e-9, 1.0), dtype=torch.float32).to(self.device)
-            )  # [N, E, C]
-            v_tokens_t = va_tokens.tokens.to(self.device)
-
-            # Anchor NLL is a constant baseline computed on OOF expert predictions
-            with torch.no_grad():
-                log_p_anchor = log_p[:, va_batch.full_index, :]         # [N, C]
-                anchor_nll_val = F.nll_loss(
-                    F.log_softmax(log_p_anchor, dim=-1), y_va_t
-                ).item()
-
-            optimizer = torch.optim.Adam(trainable_params, lr=1e-3)
-            best_loss = float("inf")
-            patience, wait = 25, 0
-            print(f"  -> Optimizing Classification Router on {self.device} "
-                  f"(Patience={patience}, NLL+ResidualPenalty, OOF anchor_nll={anchor_nll_val:.4f})...")
-
-            for _ in range(500):
-                self._router.train()
-                optimizer.zero_grad()
-                out = self._router(v_tokens_t, full_index=va_batch.full_index)
-                log_q = learned_geo_poe_blend_torch(
-                    log_p, out.defer_prob, out.specialist_weights, va_batch.full_index
-                )  # [N, C]
-                blend_nll = F.nll_loss(F.log_softmax(log_q, dim=-1), y_va_t)
-                loss = blend_nll + 2.0 * F.relu(blend_nll - anchor_nll_val)
-                loss.backward()
-                optimizer.step()
-                # Fix 2: early-stop on protected objective, not raw blend_nll alone
-                if loss.item() < best_loss:
-                    best_loss = loss.item()
-                    wait = 0
-                else:
-                    wait += 1
-                    if wait >= patience:
-                        break
-
-            with torch.no_grad():
-                out_final = self._router(v_tokens_t, full_index=va_batch.full_index)
-                log_q_final = learned_geo_poe_blend_torch(
-                    log_p, out_final.defer_prob, out_final.specialist_weights, va_batch.full_index
-                )
-                final_blend_nll = F.nll_loss(F.log_softmax(log_q_final, dim=-1), y_va_t).item()
-                mean_defer = float(out_final.defer_prob.mean().item())
-                frac_better = float((F.nll_loss(F.log_softmax(log_q_final, dim=-1), y_va_t, reduction="none")
-                                     < F.nll_loss(F.log_softmax(log_p_anchor, dim=-1), y_va_t, reduction="none")
-                                    ).float().mean().item())
-            print(f"  -> Classification Router trained. "
-                  f"blend_nll={final_blend_nll:.4f}  anchor_nll={anchor_nll_val:.4f}  "
-                  f"mean_defer={mean_defer:.3f}  frac_rows_blend_wins={frac_better:.2f}")
-
-            self._clf_uses_learned_router = True
-            return self
-
-        # Regression path: GORA + static router (v1-width unchanged) --------
         for spec in expert_specs:
             fitted_adapter = spec.input_adapter.fit(matrix)
             self._train_views[spec.descriptor.expert_id] = fitted_adapter.transform(matrix)
 
-        from sklearn.model_selection import train_test_split
-        _, X_va, _, y_va = train_test_split(X, y, test_size=0.1, random_state=42)
+        if is_classification:
+            self._fit_classification_router(matrix, y_array, expert_specs, is_binary=is_binary)
+        else:
+            self._fit_regression_router(matrix, y_array)
+        return self
 
-        va_batch = self._expert_factory.predict_all(X_va)
-        va_enc = self._support_encoder.encode(n_rows=len(X_va), descriptors=va_batch.descriptors)
-        va_gora = self._compute_gora_obs(X_va, va_batch.descriptors)
+    def _build_default_specs(
+        self,
+        matrix: np.ndarray,
+        *,
+        is_classification: bool,
+        is_binary: bool,
+    ) -> tuple[ExpertBuildSpec, ...]:
+        full_idx = tuple(range(matrix.shape[1]))
+        params = {"n_estimators": 8, "device": self.device}
+        rng = np.random.RandomState(42)
 
-        va_tokens = self._token_builder.build(
-            predictions=va_batch.predictions, descriptors=va_batch.descriptors,
-            full_expert_id=va_batch.full_expert_id, support_encoding=va_enc,
-            geometric_obs=va_gora,
+        if is_classification:
+            model_kind = "foundation_classifier_bagged" if is_binary else "foundation_classifier"
+            skip_subs = is_binary and (len(matrix) < 500 and matrix.shape[1] < 25)
+            full_spec = ExpertBuildSpec(
+                descriptor=ViewDescriptor(
+                    expert_id=self.config.full_expert_id,
+                    family="FULL",
+                    view_name="Foundation Full",
+                    is_anchor=True,
+                    input_dim=matrix.shape[1],
+                    input_indices=full_idx,
+                ),
+                model_kind=model_kind,
+                input_adapter=IdentitySelectorAdapter(indices=full_idx),
+                model_params=params,
+            )
+            sub_specs: list[ExpertBuildSpec] = []
+            if not skip_subs:
+                if is_binary and matrix.shape[1] < 25:
+                    sub_specs_config = [(0, 0.5)]
+                else:
+                    n_features = matrix.shape[1]
+                    if n_features <= 10:
+                        sub_specs_config = []
+                    elif n_features <= 14:
+                        sub_specs_config = [(0, 0.6)]
+                    else:
+                        sub_specs_config = [(0, 0.8), (1, 0.85), (2, 0.9)]
+
+                for sub_seed, sub_frac in sub_specs_config:
+                    rng_i = np.random.RandomState(sub_seed)
+                    sz_i = max(1, int(matrix.shape[1] * sub_frac))
+                    idx_i = tuple(sorted(rng_i.choice(matrix.shape[1], sz_i, replace=False).tolist()))
+                    sub_specs.append(
+                        ExpertBuildSpec(
+                            descriptor=ViewDescriptor(
+                                expert_id=f"SUB{sub_seed}",
+                                family="structural_subspace",
+                                view_name=f"Foundation Sub {sub_seed}",
+                                input_dim=sz_i,
+                                input_indices=idx_i,
+                            ),
+                            model_kind=model_kind,
+                            input_adapter=IdentitySelectorAdapter(indices=idx_i),
+                            model_params=params,
+                        )
+                    )
+            return (full_spec, *sub_specs)
+
+        return (
+            ExpertBuildSpec(
+                descriptor=ViewDescriptor(
+                    expert_id=self.config.full_expert_id,
+                    family="FULL",
+                    view_name="Foundation Full",
+                    is_anchor=True,
+                    input_dim=matrix.shape[1],
+                    input_indices=full_idx,
+                ),
+                model_kind="foundation_regressor",
+                input_adapter=IdentitySelectorAdapter(indices=full_idx),
+                model_params=params,
+            ),
         )
 
+    def _classification_router_config(self, *, is_binary: bool) -> tuple[bool, SetRouterConfig | None]:
+        use_learned = is_binary
+        if not use_learned:
+            return False, None
+        if is_binary and self.config.router.kind == "bootstrap_full_only":
+            return True, SetRouterConfig(kind="noise_gate_router")
+        return True, self.config.router
+
+    def _trainable_params(self) -> list[torch.nn.Parameter]:
+        params = list(self._token_builder.trainable_parameters())
+        if self._router is not None:
+            params.extend(list(self._router.parameters()))
+        return params
+
+    def _post_optimizer_step(self) -> None:
+        self._token_builder.project_hyperbolic_parameters_()
+
+    def _sample_aux_rows(self, matrix: np.ndarray, max_rows: int = 1024) -> np.ndarray:
+        if len(matrix) <= max_rows:
+            return matrix
+        rng = np.random.RandomState(42)
+        indices = np.sort(rng.choice(len(matrix), size=max_rows, replace=False))
+        return matrix[indices]
+
+    def _build_classification_tokens(
+        self,
+        X: np.ndarray,
+        batch: ExpertPredictionBatch,
+        *,
+        support_train_views: dict[str, np.ndarray] | None = None,
+    ):
+        support_enc = self._support_encoder.encode(n_rows=len(X), descriptors=batch.descriptors)
+        saved_train_views = self._train_views
+        if support_train_views is not None:
+            self._train_views = support_train_views
+        try:
+            gora_obs = self._compute_gora_obs(X, batch.descriptors)
+        finally:
+            self._train_views = saved_train_views
+        return self._token_builder.build(
+            predictions=_clf_entropy(batch.predictions),
+            descriptors=batch.descriptors,
+            full_expert_id=batch.full_expert_id,
+            support_encoding=support_enc,
+            geometric_obs=gora_obs,
+            quality_encoding=_make_quality_encoding(batch.quality_scores),
+        )
+
+    def _build_regression_tokens(self, X: np.ndarray, batch: ExpertPredictionBatch):
+        support_enc = self._support_encoder.encode(n_rows=len(X), descriptors=batch.descriptors)
+        gora_obs = self._compute_gora_obs(X, batch.descriptors)
+        return self._token_builder.build(
+            predictions=batch.predictions,
+            descriptors=batch.descriptors,
+            full_expert_id=batch.full_expert_id,
+            support_encoding=support_enc,
+            geometric_obs=gora_obs,
+            quality_encoding=_make_quality_encoding(batch.quality_scores),
+        )
+
+    def _fit_classification_router(
+        self,
+        matrix: np.ndarray,
+        y: np.ndarray,
+        expert_specs: tuple[ExpertBuildSpec, ...],
+        *,
+        is_binary: bool,
+    ) -> None:
+        use_learned, router_cfg = self._classification_router_config(is_binary=is_binary)
+        self._clf_uses_learned_router = use_learned
+        if not use_learned:
+            print("  -> Classification (multiclass): using static Geometric PoE blending.")
+            return
+
+        from sklearn.model_selection import train_test_split as _tts
+        import torch.nn.functional as F
+
+        n_all = len(matrix)
+        oof_test_size = 0.25 if n_all <= 1500 else 0.1
+        idx_tr90, idx_va = _tts(np.arange(n_all), test_size=oof_test_size, random_state=42, stratify=y)
+        X_tr90, X_va = matrix[idx_tr90], matrix[idx_va]
+        y_tr90, y_va = y[idx_tr90], y[idx_va]
+
+        oof_specs = tuple(
+            ExpertBuildSpec(
+                descriptor=spec.descriptor,
+                model_kind=spec.model_kind,
+                input_adapter=spec.input_adapter,
+                model_params={**spec.model_params, "device": "cpu"},
+            )
+            for spec in expert_specs
+        )
+        torch.cuda.empty_cache()
+        print(f"  -> OOF router training: fitting temporary experts on CPU ({len(X_tr90)} rows)...")
+        oof_portfolio = fit_portfolio_from_specs(
+            X_train=X_tr90,
+            y_train=y_tr90,
+            specs=oof_specs,
+            full_expert_id=self.config.full_expert_id,
+            n_jobs=1,
+        )
+        oof_factory = PortfolioExpertFactory(oof_portfolio)
+
+        oof_train_views: dict[str, np.ndarray] = {}
+        for spec in expert_specs:
+            fitted_adapter = spec.input_adapter.fit(X_tr90)
+            oof_train_views[spec.descriptor.expert_id] = fitted_adapter.transform(X_tr90)
+
+        va_batch = oof_factory.predict_all(X_va)
+        va_tokens = self._build_classification_tokens(X_va, va_batch, support_train_views=oof_train_views)
+        if va_tokens.tokens.shape[1] <= 1:
+            print("  -> Classification router skipped: anchor-only portfolio leaves nothing to route.")
+            self._clf_uses_learned_router = False
+            self._router = None
+            return
         token_dim = va_tokens.tokens.shape[-1]
-        self._router = build_set_router(self.config.router, token_dim=token_dim).to(self.device)
-        trainable_params = list(self._router.parameters())
+        self._router = build_set_router(router_cfg, token_dim=token_dim, n_experts=va_tokens.tokens.shape[1]).to(self.device)
+
+        aux_X = self._sample_aux_rows(X_tr90)
+        aux_batch = oof_factory.predict_all(aux_X)
+        aux_tokens = self._build_classification_tokens(aux_X, aux_batch, support_train_views=oof_train_views)
+        if hasattr(self._router, "fit_auxiliary_state"):
+            self._router.fit_auxiliary_state(aux_tokens.tokens.to(self.device), full_index=aux_batch.full_index)
+
+        trainable_params = self._trainable_params()
         if not trainable_params:
-            print("  -> Router has no trainable parameters (BootstrapFullRouter), skipping optimization.")
-            return self
+            print("  -> Classification Router has no trainable parameters, skipping optimization.")
+            return
+
+        y_va_t = torch.tensor(y_va, dtype=torch.long, device=self.device)
+        log_p = torch.log(torch.tensor(np.clip(va_batch.predictions, 1e-9, 1.0), dtype=torch.float32, device=self.device))
+        v_tokens_t = va_tokens.tokens.to(self.device)
+
+        with torch.no_grad():
+            log_p_anchor = log_p[:, va_batch.full_index, :]
+            anchor_nll_val = F.nll_loss(F.log_softmax(log_p_anchor, dim=-1), y_va_t).item()
 
         optimizer = torch.optim.Adam(trainable_params, lr=1e-3)
         best_loss = float("inf")
         patience, wait = 25, 0
-        y_va_t = torch.tensor(y_va).float().to(self.device)
-        v_preds_t = torch.tensor(va_batch.predictions).float().to(self.device)
-        v_tokens_t = va_tokens.tokens.to(self.device)
+        print(
+            f"  -> Optimizing Classification Router on {self.device} "
+            f"(Patience={patience}, NLL+ResidualPenalty, OOF anchor_nll={anchor_nll_val:.4f})..."
+        )
 
-        import torch.nn.functional as F
-        with torch.no_grad():
-            anchor_mse_val = F.mse_loss(
-                v_preds_t[:, va_batch.full_index], y_va_t
-            ).item()
-        print(f"  -> Optimizing Router on {self.device} "
-              f"(Patience={patience}, MSE+ResidualPenalty, anchor_mse={anchor_mse_val:.6f})...")
-
+        autocast_enabled = self.device == "cuda"
         for _ in range(500):
             self._router.train()
             optimizer.zero_grad()
-            out = self._router(v_tokens_t, full_index=va_batch.full_index)
-            integ = (
-                (1 - out.defer_prob) * v_preds_t[:, va_batch.full_index : va_batch.full_index + 1]
-                + out.defer_prob * (out.specialist_weights * v_preds_t).sum(dim=1, keepdim=True)
-            )
-            mse = F.mse_loss(integ.squeeze(), y_va_t)
-            loss = mse + 2.0 * F.relu(mse - anchor_mse_val)
+            with torch.amp.autocast("cuda", enabled=autocast_enabled):
+                out = self._router(v_tokens_t, full_index=va_batch.full_index)
+                log_q = learned_geo_poe_blend_torch(
+                    log_p, out.defer_prob, out.specialist_weights, va_batch.full_index
+                )
+                blend_nll = F.nll_loss(F.log_softmax(log_q, dim=-1), y_va_t)
+                aux_loss = out.aux_loss if out.aux_loss is not None else blend_nll.new_zeros(())
+                loss = blend_nll + 2.0 * F.relu(blend_nll - anchor_nll_val) + aux_loss
             loss.backward()
             optimizer.step()
+            self._post_optimizer_step()
             if loss.item() < best_loss:
                 best_loss = loss.item()
                 wait = 0
@@ -429,107 +377,236 @@ class GraphDrone:
                 wait += 1
                 if wait >= patience:
                     break
-        return self
+
+        with torch.no_grad():
+            out_final = self._router(v_tokens_t, full_index=va_batch.full_index)
+            log_q_final = learned_geo_poe_blend_torch(
+                log_p, out_final.defer_prob, out_final.specialist_weights, va_batch.full_index
+            )
+            final_blend_nll = F.nll_loss(F.log_softmax(log_q_final, dim=-1), y_va_t).item()
+            mean_defer = float(out_final.defer_prob.mean().item())
+        print(
+            f"  -> Classification Router trained. "
+            f"blend_nll={final_blend_nll:.4f}  anchor_nll={anchor_nll_val:.4f}  mean_defer={mean_defer:.3f}"
+        )
+
+    def _fit_regression_router(self, matrix: np.ndarray, y: np.ndarray) -> None:
+        from sklearn.model_selection import train_test_split
+        import torch.nn.functional as F
+
+        X_tr, X_va, _, y_va = train_test_split(matrix, y, test_size=0.1, random_state=42)
+        va_batch = self._expert_factory.predict_all(X_va)
+        va_tokens = self._build_regression_tokens(X_va, va_batch)
+        token_dim = va_tokens.tokens.shape[-1]
+        self._router = build_set_router(
+            self.config.router,
+            token_dim=token_dim,
+            n_experts=va_tokens.tokens.shape[1],
+        ).to(self.device)
+
+        aux_X = self._sample_aux_rows(X_tr)
+        aux_batch = self._expert_factory.predict_all(aux_X)
+        aux_tokens = self._build_regression_tokens(aux_X, aux_batch)
+        if hasattr(self._router, "fit_auxiliary_state"):
+            self._router.fit_auxiliary_state(aux_tokens.tokens.to(self.device), full_index=aux_batch.full_index)
+
+        trainable_params = self._trainable_params()
+        if not trainable_params:
+            print("  -> Router has no trainable parameters (BootstrapFullRouter), skipping optimization.")
+            return
+
+        optimizer = torch.optim.Adam(trainable_params, lr=1e-3)
+        best_loss = float("inf")
+        patience, wait = 25, 0
+        y_va_t = torch.tensor(y_va, dtype=torch.float32, device=self.device)
+        v_preds_t = torch.tensor(va_batch.predictions, dtype=torch.float32, device=self.device)
+        v_tokens_t = va_tokens.tokens.to(self.device)
+
+        with torch.no_grad():
+            anchor_mse_val = F.mse_loss(v_preds_t[:, va_batch.full_index], y_va_t).item()
+        print(
+            f"  -> Optimizing Router on {self.device} "
+            f"(Patience={patience}, MSE+ResidualPenalty, anchor_mse={anchor_mse_val:.6f})..."
+        )
+
+        autocast_enabled = self.device == "cuda"
+        for _ in range(500):
+            self._router.train()
+            optimizer.zero_grad()
+            with torch.amp.autocast("cuda", enabled=autocast_enabled):
+                out = self._router(v_tokens_t, full_index=va_batch.full_index)
+                integ = (
+                    (1 - out.defer_prob) * v_preds_t[:, va_batch.full_index : va_batch.full_index + 1]
+                    + out.defer_prob * (out.specialist_weights * v_preds_t).sum(dim=1, keepdim=True)
+                )
+                mse = F.mse_loss(integ.squeeze(), y_va_t)
+                aux_loss = out.aux_loss if out.aux_loss is not None else mse.new_zeros(())
+                loss = mse + 2.0 * F.relu(mse - anchor_mse_val) + aux_loss
+            loss.backward()
+            optimizer.step()
+            self._post_optimizer_step()
+            if loss.item() < best_loss:
+                best_loss = loss.item()
+                wait = 0
+            else:
+                wait += 1
+                if wait >= patience:
+                    break
 
     def _compute_gora_obs(self, X: np.ndarray, descriptors: tuple[ViewDescriptor, ...]) -> torch.Tensor:
         from sklearn.neighbors import NearestNeighbors
         from .observers import calculate_kappa, calculate_lid
 
         all_obs = []
-        for d in descriptors:
-            X_tr_v = self._train_views[d.expert_id]
-            X_v = X[:, list(d.input_indices)] if d.input_indices else X
-            knn = NearestNeighbors(n_neighbors=d.preferred_k).fit(X_tr_v)
+        for descriptor in descriptors:
+            X_tr_v = self._train_views[descriptor.expert_id]
+            X_v = X[:, list(descriptor.input_indices)] if descriptor.input_indices else X
+            knn = NearestNeighbors(n_neighbors=descriptor.preferred_k).fit(X_tr_v)
             dists, indices = knn.kneighbors(X_v)
             kappa = calculate_kappa(X_tr_v, indices).reshape(-1, 1)
             lid = calculate_lid(dists).reshape(-1, 1)
             all_obs.append(np.concatenate([kappa, lid], axis=1))
-
         return torch.tensor(np.stack(all_obs, axis=1), dtype=torch.float32)
 
-    def predict(self, X: np.ndarray, return_diagnostics: bool = False) -> Union[np.ndarray, GraphDronePredictResult]:
-        X = np.asarray(X, dtype=np.float32)
-        matrix = _coerce_matrix(X)
-        batch = self._expert_factory.predict_all(matrix)
-
-        # --- Classification path --------------------------------------------
-        if self._problem_type == "classification":
-            if self._clf_uses_learned_router and self._router is not None:
-                # Learned anchor-protective router path
-                support_enc = self._support_encoder.encode(
-                    n_rows=matrix.shape[0], descriptors=batch.descriptors
-                )
-                gora_obs = self._compute_gora_obs(matrix, batch.descriptors)
-                tokens = self._token_builder.build(
-                    predictions=_clf_entropy(batch.predictions), descriptors=batch.descriptors,
-                    full_expert_id=batch.full_expert_id, support_encoding=support_enc,
-                    geometric_obs=gora_obs,
-                    quality_encoding=_make_quality_encoding(batch.quality_scores),
-                )
-                self._router.eval()
-                with torch.no_grad():
-                    token_tensor = tokens.tokens.to(self.device)
-                    router_out = self._router(token_tensor, full_index=batch.full_index)
-
-                preds = learned_geo_poe_blend(
-                    batch.predictions,
-                    router_out.defer_prob,
-                    router_out.specialist_weights,
-                    batch.full_index,
-                )
-                diagnostics = {
-                    "router_kind": router_out.router_kind,
-                    "mean_defer_prob": float(router_out.defer_prob.mean().item()),
-                }
-            else:
-                # Static anchor-boosted GeoPOE.
-                # anchor_weight=5.0: FULL gets 62.5% weight vs 50% at 3.0 (4 experts,
-                # confidence-flat regime).  Larger SUB fracs (0.8/0.85/0.9) further
-                # reduce per-SUB noise, especially on low-dim datasets (pendigits, segment).
-                preds = anchor_geo_poe_blend(
-                    batch.predictions,
-                    anchor_idx=batch.full_index,
-                    anchor_weight=5.0,
-                )
-                diagnostics = {
-                    "router_kind": "geo_poe",
-                    "mean_defer_prob": float("nan"),
-                }
-
-            if return_diagnostics:
-                return GraphDronePredictResult(
-                    predictions=preds,
-                    expert_ids=batch.expert_ids,
-                    diagnostics=diagnostics,
-                )
-            return preds
-
-        # --- Regression path: GORA + static router (v1-width) ---------------
-        support_enc = self._support_encoder.encode(
-            n_rows=matrix.shape[0], descriptors=batch.descriptors
-        )
-        gora_obs = self._compute_gora_obs(matrix, batch.descriptors)
-
-        tokens = self._token_builder.build(
-            predictions=batch.predictions,
-            descriptors=batch.descriptors,
-            full_expert_id=batch.full_expert_id,
-            support_encoding=support_enc,
-            geometric_obs=gora_obs,
+    def _legitimacy_decision(self, batch: ExpertPredictionBatch) -> LegitimacyGateDecision | None:
+        if not self.config.legitimacy_gate.enabled:
+            return None
+        anchor_predictions = batch.predictions[:, batch.full_index] if batch.predictions.ndim == 2 else batch.predictions[:, batch.full_index, :]
+        return self._legitimacy_gate.evaluate(
+            problem_type=self._problem_type,
+            anchor_predictions=anchor_predictions,
+            expert_predictions=batch.predictions,
+            quality_scores=batch.quality_scores,
         )
 
+    def _legitimacy_diagnostics(self, decision: LegitimacyGateDecision | None, *, router_skipped: bool) -> dict[str, object]:
+        if decision is None:
+            return {
+                "early_exit": False,
+                "exit_frac": 0.0,
+                "legitimacy_metric": "disabled",
+                "legitimacy_threshold": float("nan"),
+                "legitimacy_score_mean": float("nan"),
+                "router_skipped": router_skipped,
+            }
+        return {
+            "early_exit": bool(np.any(decision.exit_mask)),
+            "exit_frac": float(np.mean(decision.exit_mask)),
+            "legitimacy_metric": decision.metric,
+            "legitimacy_threshold": float(decision.threshold),
+            "legitimacy_score_mean": float(np.mean(decision.scores)),
+            "router_skipped": router_skipped,
+        }
+
+    def _classification_predictions(
+        self,
+        matrix: np.ndarray,
+        batch: ExpertPredictionBatch,
+    ) -> tuple[np.ndarray, dict[str, object]]:
+        decision = self._legitimacy_decision(batch)
+        anchor_preds = np.asarray(batch.predictions[:, batch.full_index, :], dtype=np.float32)
+        gate_mask = decision.exit_mask if decision is not None else np.zeros(len(matrix), dtype=bool)
+
+        if gate_mask.all():
+            diagnostics = {
+                "router_kind": "legitimacy_gate_anchor_only",
+                "mean_defer_prob": 0.0,
+            }
+            diagnostics.update(self._legitimacy_diagnostics(decision, router_skipped=True))
+            return anchor_preds, diagnostics
+
+        active_mask = ~gate_mask
+        active_batch = batch if active_mask.all() else _slice_prediction_batch(batch, active_mask)
+        active_matrix = matrix if active_mask.all() else matrix[active_mask]
+
+        if self._clf_uses_learned_router and self._router is not None:
+            tokens = self._build_classification_tokens(active_matrix, active_batch)
+            self._router.eval()
+            with torch.no_grad():
+                token_tensor = tokens.tokens.to(self.device)
+                router_out = self._router(token_tensor, full_index=active_batch.full_index)
+            active_preds = learned_geo_poe_blend(
+                active_batch.predictions,
+                router_out.defer_prob,
+                router_out.specialist_weights,
+                active_batch.full_index,
+            )
+            diagnostics = {
+                "router_kind": router_out.router_kind,
+                "mean_defer_prob": float(router_out.defer_prob.mean().item()),
+            }
+            if router_out.ot_costs is not None:
+                diagnostics["mean_ot_cost"] = float(router_out.ot_costs.mean().item())
+            if router_out.aux_loss is not None:
+                diagnostics["alignment_aux_loss"] = float(router_out.aux_loss.detach().cpu().item())
+        else:
+            active_preds = anchor_geo_poe_blend(
+                active_batch.predictions,
+                anchor_idx=active_batch.full_index,
+                anchor_weight=5.0,
+            )
+            diagnostics = {
+                "router_kind": "geo_poe",
+                "mean_defer_prob": float("nan"),
+            }
+
+        preds = anchor_preds.copy()
+        preds[active_mask] = np.asarray(active_preds, dtype=np.float32)
+        diagnostics.update(self._legitimacy_diagnostics(decision, router_skipped=False))
+        return preds.astype(np.float32), diagnostics
+
+    def _regression_predictions(
+        self,
+        matrix: np.ndarray,
+        batch: ExpertPredictionBatch,
+    ) -> tuple[np.ndarray, dict[str, object]]:
+        decision = self._legitimacy_decision(batch)
+        anchor_preds = np.asarray(batch.predictions[:, batch.full_index], dtype=np.float32)
+        gate_mask = decision.exit_mask if decision is not None else np.zeros(len(matrix), dtype=bool)
+
+        if gate_mask.all():
+            diagnostics = {
+                "router_kind": "legitimacy_gate_anchor_only",
+                "mean_defer_prob": 0.0,
+                "full_index": int(batch.full_index),
+            }
+            diagnostics.update(self._legitimacy_diagnostics(decision, router_skipped=True))
+            return anchor_preds, diagnostics
+
+        active_mask = ~gate_mask
+        active_batch = batch if active_mask.all() else _slice_prediction_batch(batch, active_mask)
+        active_matrix = matrix if active_mask.all() else matrix[active_mask]
+
+        tokens = self._build_regression_tokens(active_matrix, active_batch)
         self._router.eval()
         with torch.no_grad():
             token_tensor = tokens.tokens.to(self.device)
-            router_out = self._router(token_tensor, full_index=batch.full_index)
-            integration = integrate_predictions(
-                expert_predictions=batch.predictions, router_outputs=router_out
-            )
+            router_out = self._router(token_tensor, full_index=active_batch.full_index)
+            integration = integrate_predictions(expert_predictions=active_batch.predictions, router_outputs=router_out)
+
+        preds = anchor_preds.copy()
+        preds[active_mask] = integration.predictions
+        diagnostics = dict(integration.diagnostics)
+        if router_out.ot_costs is not None:
+            diagnostics["mean_ot_cost"] = float(router_out.ot_costs.mean().item())
+        if router_out.aux_loss is not None:
+            diagnostics["alignment_aux_loss"] = float(router_out.aux_loss.detach().cpu().item())
+        diagnostics.update(self._legitimacy_diagnostics(decision, router_skipped=False))
+        return preds.astype(np.float32), diagnostics
+
+    def predict(self, X: np.ndarray, return_diagnostics: bool = False) -> Union[np.ndarray, GraphDronePredictResult]:
+        matrix = _coerce_matrix(np.asarray(X, dtype=np.float32))
+        batch = self._expert_factory.predict_all(matrix)
+
+        if self._problem_type == "classification":
+            preds, diagnostics = self._classification_predictions(matrix, batch)
+        else:
+            preds, diagnostics = self._regression_predictions(matrix, batch)
 
         if return_diagnostics:
             return GraphDronePredictResult(
-                predictions=integration.predictions,
+                predictions=preds,
                 expert_ids=batch.expert_ids,
-                diagnostics=integration.diagnostics,
+                diagnostics=diagnostics,
             )
-        return integration.predictions
+        return preds
