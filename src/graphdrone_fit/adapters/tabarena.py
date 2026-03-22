@@ -39,6 +39,9 @@ class GraphDroneTabArenaAdapter(AbstractExecModel):
         use_gora: bool = True,
         use_hybrid_prior: bool = False,
         legitimacy_gate: bool = True,
+        gate_regression: bool = True,
+        gate_binary: bool = False,
+        gate_multiclass: bool = False,
         legitimacy_entropy_threshold: float = 0.15,
         legitimacy_variance_threshold: float = 0.005,
         use_hyperbolic_descriptors: bool = False,
@@ -58,6 +61,9 @@ class GraphDroneTabArenaAdapter(AbstractExecModel):
         self.use_gora = use_gora
         self.use_hybrid_prior = use_hybrid_prior
         self.legitimacy_gate = legitimacy_gate
+        self.gate_regression = gate_regression
+        self.gate_binary = gate_binary
+        self.gate_multiclass = gate_multiclass
         self.legitimacy_entropy_threshold = legitimacy_entropy_threshold
         self.legitimacy_variance_threshold = legitimacy_variance_threshold
         self.use_hyperbolic_descriptors = use_hyperbolic_descriptors
@@ -127,6 +133,9 @@ class GraphDroneTabArenaAdapter(AbstractExecModel):
             ),
             legitimacy_gate=LegitimacyGateConfig(
                 enabled=self.legitimacy_gate,
+                regression_enabled=self.gate_regression,
+                binary_enabled=self.gate_binary,
+                multiclass_enabled=self.gate_multiclass,
                 classification_entropy_threshold=self.legitimacy_entropy_threshold,
                 regression_variance_threshold=self.legitimacy_variance_threshold,
             ),

@@ -74,6 +74,9 @@ class SetRouterConfig:
 @dataclass(frozen=True)
 class LegitimacyGateConfig:
     enabled: bool = True
+    regression_enabled: bool = True
+    binary_enabled: bool = False
+    multiclass_enabled: bool = False
     classification_entropy_threshold: float = 0.15
     regression_variance_threshold: float = 0.005
 

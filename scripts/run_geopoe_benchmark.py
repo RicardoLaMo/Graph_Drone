@@ -85,7 +85,7 @@ QUICK_DATASETS = {
     "pendigits":     CLASSIFICATION_DATASETS["pendigits"],
 }
 
-GRAPHDRONE_VERSION = "v1-geopoe-2026.03.22-afc-wave1"
+GRAPHDRONE_VERSION = "v1-geopoe-2026.03.22-afc-d-regonly-v1"
 
 
 def _env_flag(name: str, default: bool) -> bool:
@@ -118,6 +118,9 @@ def _graphdrone_config(*, n_classes: int = 1, default_router_kind: str) -> Graph
         router=_router_config_from_env(default_router_kind),
         legitimacy_gate=LegitimacyGateConfig(
             enabled=_env_flag("GRAPHDRONE_ENABLE_LEGITIMACY_GATE", True),
+            regression_enabled=_env_flag("GRAPHDRONE_ENABLE_GATE_REGRESSION", True),
+            binary_enabled=_env_flag("GRAPHDRONE_ENABLE_GATE_BINARY", False),
+            multiclass_enabled=_env_flag("GRAPHDRONE_ENABLE_GATE_MULTICLASS", False),
             classification_entropy_threshold=_env_float("GRAPHDRONE_GATE_ENTROPY_THRESHOLD", 0.15),
             regression_variance_threshold=_env_float("GRAPHDRONE_GATE_VARIANCE_THRESHOLD", 0.005),
         ),

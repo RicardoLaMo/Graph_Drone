@@ -469,7 +469,14 @@ class GraphDrone:
         return torch.tensor(np.stack(all_obs, axis=1), dtype=torch.float32)
 
     def _legitimacy_decision(self, batch: ExpertPredictionBatch) -> LegitimacyGateDecision | None:
-        if not self.config.legitimacy_gate.enabled:
+        gate_config = self.config.legitimacy_gate
+        if not gate_config.enabled:
+            return None
+        if self._problem_type == "regression" and not gate_config.regression_enabled:
+            return None
+        if self._problem_type == "classification" and self._n_classes == 2 and not gate_config.binary_enabled:
+            return None
+        if self._problem_type == "classification" and self._n_classes > 2 and not gate_config.multiclass_enabled:
             return None
         anchor_predictions = batch.predictions[:, batch.full_index] if batch.predictions.ndim == 2 else batch.predictions[:, batch.full_index, :]
         return self._legitimacy_gate.evaluate(
