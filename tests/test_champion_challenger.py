@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import pandas as pd
+import torch
 
 from graphdrone_fit.champion_challenger import (
     build_dataset_summary,
     build_paired_task_table,
     evaluate_promotion,
 )
+from graphdrone_fit.model import _seed_torch_generators
 from graphdrone_fit.presets import build_graphdrone_config_from_preset
+from graphdrone_fit.set_router import build_set_router
 
 
 def _frame(rows: list[dict]) -> pd.DataFrame:
@@ -21,8 +24,41 @@ def test_v120_champion_preset_disables_afc_features():
         default_router_kind="noise_gate_router",
     )
     assert config.router.kind == "noise_gate_router"
+    assert config.router.router_seed == 42
     assert config.legitimacy_gate.enabled is False
     assert config.hyperbolic_descriptors.enabled is False
+
+
+def test_afc_preset_respects_router_seed_env(monkeypatch):
+    monkeypatch.setenv("GRAPHDRONE_ROUTER_SEED", "123")
+    config = build_graphdrone_config_from_preset(
+        preset="afc_candidate",
+        n_classes=1,
+        default_router_kind="contextual_transformer",
+    )
+    assert config.router.router_seed == 123
+
+
+def test_router_seed_makes_initialization_reproducible():
+    _seed_torch_generators(7)
+    router_a = build_set_router(build_graphdrone_config_from_preset(
+        preset="afc_candidate",
+        n_classes=1,
+        default_router_kind="contextual_transformer",
+    ).router, token_dim=8, n_experts=4)
+    params_a = [param.detach().clone() for param in router_a.parameters()]
+
+    _seed_torch_generators(7)
+    router_b = build_set_router(build_graphdrone_config_from_preset(
+        preset="afc_candidate",
+        n_classes=1,
+        default_router_kind="contextual_transformer",
+    ).router, token_dim=8, n_experts=4)
+    params_b = [param.detach().clone() for param in router_b.parameters()]
+
+    assert len(params_a) == len(params_b)
+    for left, right in zip(params_a, params_b):
+        assert torch.allclose(left, right)
 
 
 def test_build_paired_task_table_computes_expected_signs():

@@ -6,6 +6,7 @@ Branch lineage:
 - branch: `exp/afc-b-cayley-rotor`
 - code commit used for final interpretation: `284ebca991a00341e32e371cf0b8b0d880004e93`
 - earlier evaluation harness commit on same branch: `d9e066a73809b84a112c2eab055476d197513dbf`
+- follow-up research hygiene fix: explicit router seed was added after this review so future challenger runs are less confounded by router init noise
 
 Experiment tracker records:
 - design: `output/experiments/designs/20260323_011330Z_afc-phase-b-claim-first-mini-full.md`
@@ -90,7 +91,7 @@ This looks less like "the rotor math is wrong" and more like "the current object
 
 ## Better research assessment flow
 
-Use a 3-layer assessment instead of a single pass/fail benchmark:
+Use a 4-layer assessment instead of a single pass/fail benchmark:
 
 1. Component truth
    Ask: did the proposed mechanism move in the intended direction?
@@ -107,6 +108,10 @@ Use a 3-layer assessment instead of a single pass/fail benchmark:
    Regression: RMSE, MAE, R2.
    Classification: separate ranking/calibration from thresholded decisions.
    Keep F1, but pair it with log-loss, PR-AUC, and a threshold sweep.
+
+4. Reproducibility control
+   Ask: could the observed difference be explained by random router initialization rather than the intervention?
+   Keep router seed fixed, log it in run provenance, and avoid interpreting a one-off challenger delta as a mechanism result.
 
 ## Recommended next questions
 

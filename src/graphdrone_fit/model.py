@@ -73,6 +73,12 @@ def _slice_prediction_batch(batch: ExpertPredictionBatch, mask: np.ndarray) -> E
     )
 
 
+def _seed_torch_generators(seed: int) -> None:
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
 class GraphDrone:
     def __init__(self, config: GraphDroneConfig) -> None:
         self.config = config.validate()
@@ -210,6 +216,9 @@ class GraphDrone:
             ),
         )
 
+    def _seed_router_training(self) -> None:
+        _seed_torch_generators(self.config.router.router_seed)
+
     def _classification_router_config(self, *, is_binary: bool) -> tuple[bool, SetRouterConfig | None]:
         use_learned = is_binary
         if not use_learned:
@@ -326,6 +335,7 @@ class GraphDrone:
             self._router = None
             return
         token_dim = va_tokens.tokens.shape[-1]
+        self._seed_router_training()
         self._router = build_set_router(router_cfg, token_dim=token_dim, n_experts=va_tokens.tokens.shape[1]).to(self.device)
 
         aux_X = self._sample_aux_rows(X_tr90)
@@ -398,6 +408,7 @@ class GraphDrone:
         va_batch = self._expert_factory.predict_all(X_va)
         va_tokens = self._build_regression_tokens(X_va, va_batch)
         token_dim = va_tokens.tokens.shape[-1]
+        self._seed_router_training()
         self._router = build_set_router(
             self.config.router,
             token_dim=token_dim,

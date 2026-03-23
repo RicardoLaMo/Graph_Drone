@@ -91,6 +91,7 @@ def start_run_ledger(
                 "CUDA_VISIBLE_DEVICES",
                 "GRAPHDRONE_PRESET",
                 "GRAPHDRONE_VERSION_OVERRIDE",
+                "GRAPHDRONE_ROUTER_SEED",
                 "PYTHONPATH",
             ]
         },

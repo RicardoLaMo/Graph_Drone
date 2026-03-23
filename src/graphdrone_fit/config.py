@@ -45,6 +45,7 @@ class SetRouterConfig:
     ] = "bootstrap_full_only"
     sparse_top_k: int = 1
     alignment_lambda: float = 0.0
+    router_seed: int = 42
     ot_prototype_count: int = 32
     ot_epsilon: float = 0.05
     ot_max_iter: int = 50
@@ -62,6 +63,8 @@ class SetRouterConfig:
             raise ValueError(f"sparse_top_k must be positive, got {self.sparse_top_k}")
         if self.alignment_lambda < 0:
             raise ValueError(f"alignment_lambda must be non-negative, got {self.alignment_lambda}")
+        if self.router_seed < 0:
+            raise ValueError(f"router_seed must be non-negative, got {self.router_seed}")
         if self.ot_prototype_count < 1:
             raise ValueError(f"ot_prototype_count must be positive, got {self.ot_prototype_count}")
         if self.ot_epsilon <= 0:
