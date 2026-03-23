@@ -76,6 +76,44 @@ def _feature_row(row: pd.Series) -> tuple[list[float], list[str]]:
     return values, names
 
 
+def build_task_context_frame_from_router_tokens(
+    *,
+    tokens: torch.Tensor | Any,
+    descriptors: Sequence[Any],
+    dataset_name: str = "__query__",
+    task_type: str = "classification",
+    bootstrap_id: int = 0,
+) -> pd.DataFrame:
+    token_tensor = torch.as_tensor(tokens, dtype=torch.float32).detach().cpu()
+    if token_tensor.ndim != 3:
+        raise ValueError(f"tokens must have shape [B, E, D], got {tuple(token_tensor.shape)}")
+    if token_tensor.shape[1] != len(descriptors):
+        raise ValueError(
+            f"descriptor count {len(descriptors)} does not match token expert dim {token_tensor.shape[1]}"
+        )
+    rows: list[dict[str, Any]] = []
+    for expert_idx, descriptor in enumerate(descriptors):
+        expert_tokens = token_tensor[:, expert_idx, :]
+        token_norms = expert_tokens.norm(dim=-1)
+        rows.append(
+            {
+                "dataset": dataset_name,
+                "task_type": task_type,
+                "bootstrap_id": bootstrap_id,
+                "expert_id": str(descriptor.expert_id),
+                "family": str(descriptor.family),
+                "projection_kind": str(getattr(descriptor, "projection_kind", "identity_subselect")),
+                "input_dim": int(getattr(descriptor, "input_dim", 0)),
+                "preferred_k": int(getattr(descriptor, "preferred_k", 15)),
+                "is_anchor": int(bool(getattr(descriptor, "is_anchor", False))),
+                "mean_norm": float(token_norms.mean().item()),
+                "std_norm": float(token_norms.std(unbiased=False).item()),
+                "mean_token_json": json.dumps(expert_tokens.mean(dim=0).tolist()),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def build_task_context_batch(task_context_df: pd.DataFrame) -> TaskContextBatch:
     required = {"dataset", "bootstrap_id", "expert_id", "family", "projection_kind", "input_dim", "preferred_k", "is_anchor", "mean_norm", "std_norm", "mean_token_json"}
     missing = required - set(task_context_df.columns)
@@ -468,3 +506,56 @@ class TaskContextSequenceAutoencoder(nn.Module):
         embedding = self.encoder(sequences)
         recon = self.decoder(embedding).view(sequences.shape[0], self.seq_len, self.input_dim)
         return recon, embedding
+
+
+def build_task_context_encoder(encoder_kind: str, input_dim: int, hidden_dim: int):
+    if encoder_kind == "transformer":
+        return TaskContextTransformerEncoder(input_dim=input_dim, hidden_dim=hidden_dim)
+    if encoder_kind == "gru":
+        return TaskContextGRUEncoder(input_dim=input_dim, hidden_dim=hidden_dim)
+    raise ValueError(f"Unsupported encoder_kind={encoder_kind!r}")
+
+
+def compute_task_prior_from_bank(
+    *,
+    bank_dir: str | Path,
+    task_context_df: pd.DataFrame,
+    encoder_kind: str = "transformer",
+    device: str = "cpu",
+    query_dataset: str = "__query__",
+    top_k: int = 3,
+) -> dict[str, Any]:
+    bank_root = Path(bank_dir)
+    bank = load_task_prototype_bank(bank_root / f"{encoder_kind}_prototype_bank.json")
+    checkpoint = torch.load(bank_root / f"{encoder_kind}_encoder_state.pt", map_location="cpu")
+    batch = build_task_context_batch(task_context_df)
+    working_batch = batch
+    if bank.normalize_features and bank.normalization is not None:
+        working_batch = apply_task_context_normalization(working_batch, bank.normalization)
+    encoder = build_task_context_encoder(
+        encoder_kind=str(checkpoint["encoder_kind"]),
+        input_dim=working_batch.sequences.shape[-1],
+        hidden_dim=int(checkpoint["hidden_dim"]),
+    ).to(device)
+    encoder.load_state_dict(checkpoint["state_dict"])
+    encoder.eval()
+    with torch.no_grad():
+        embedding = encoder(working_batch.sequences.to(device))
+        embedding = F.normalize(embedding, dim=-1).cpu()
+    query_result = query_task_prototype_bank(bank, embedding, query_dataset=query_dataset, top_k=top_k)
+    centroid_names = sorted(bank.centroids.keys())
+    centroid_matrix = torch.stack([bank.centroids[name] for name in centroid_names], dim=0)
+    similarities = embedding @ centroid_matrix.T
+    probs = torch.softmax(similarities, dim=-1).mean(dim=0)
+    probs = probs / probs.sum()
+    prior_vector = (probs.unsqueeze(-1) * centroid_matrix).sum(dim=0)
+    prior_vector = F.normalize(prior_vector.unsqueeze(0), dim=-1).squeeze(0)
+    return {
+        "bank": bank,
+        "query_batch": working_batch,
+        "query_embedding": embedding.squeeze(0),
+        "query_result": query_result,
+        "prior_vector": prior_vector,
+        "training_objective": bank.training_objective,
+        "encoder_kind": encoder_kind,
+    }

@@ -47,6 +47,14 @@ def _env_int(name: str, default: int) -> int:
     return int(raw) if raw is not None else default
 
 
+def _env_str(name: str, default: str | None = None) -> str | None:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = raw.strip()
+    return value or default
+
+
 def build_graphdrone_config_from_preset(
     *,
     preset: str,
@@ -81,6 +89,9 @@ def build_graphdrone_config_from_preset(
             ot_max_iter=_env_int("GRAPHDRONE_OT_MAX_ITER", 50),
             ot_alpha=_env_float("GRAPHDRONE_OT_ALPHA", 6.0),
             ot_threshold=_env_float("GRAPHDRONE_OT_THRESHOLD", 0.25),
+            task_prior_bank_dir=_env_str("GRAPHDRONE_TASK_PRIOR_BANK_DIR", None),
+            task_prior_encoder_kind=_env_str("GRAPHDRONE_TASK_PRIOR_ENCODER_KIND", "transformer") or "transformer",
+            task_prior_strength=_env_float("GRAPHDRONE_TASK_PRIOR_STRENGTH", 0.5),
         ),
         legitimacy_gate=LegitimacyGateConfig(
             enabled=_env_flag("GRAPHDRONE_ENABLE_LEGITIMACY_GATE", True),

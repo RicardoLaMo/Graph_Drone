@@ -53,6 +53,9 @@ class SetRouterConfig:
     ot_max_iter: int = 50
     ot_alpha: float = 6.0
     ot_threshold: float = 0.25
+    task_prior_bank_dir: str | None = None
+    task_prior_encoder_kind: Literal["transformer", "gru"] = "transformer"
+    task_prior_strength: float = 0.5
 
     def validate(self) -> "SetRouterConfig":
         normalized_kind = ROUTER_KIND_ALIASES.get(self.kind, self.kind)
@@ -77,6 +80,10 @@ class SetRouterConfig:
             raise ValueError(f"ot_epsilon must be positive, got {self.ot_epsilon}")
         if self.ot_max_iter < 1:
             raise ValueError(f"ot_max_iter must be positive, got {self.ot_max_iter}")
+        if self.task_prior_strength < 0:
+            raise ValueError(f"task_prior_strength must be non-negative, got {self.task_prior_strength}")
+        if self.task_prior_bank_dir is not None and not str(self.task_prior_bank_dir).strip():
+            raise ValueError("task_prior_bank_dir must be non-empty when provided")
         return replace(self, kind=normalized_kind)
 
 

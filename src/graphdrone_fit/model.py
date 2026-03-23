@@ -20,9 +20,11 @@ from .set_router import (
     LegitimacyGate,
     LegitimacyGateDecision,
     RotorAlignedRouter,
+    TaskConditionedRouter,
     build_set_router,
 )
 from .support_encoder import MomentSupportEncoder
+from .task_conditioned_prior import build_task_context_frame_from_router_tokens, compute_task_prior_from_bank
 from .token_builder import QualityEncoding, UniversalTokenBuilder
 from .view_descriptor import ViewDescriptor
 
@@ -97,6 +99,7 @@ class GraphDrone:
         self._n_classes: int = 1
         self._clf_uses_learned_router: bool = False
         self._router_fit_diagnostics: dict[str, float] = {}
+        self._task_prior_diagnostics: dict[str, object] = {}
         self._router_training_force_anchor_only: bool = False
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -130,6 +133,7 @@ class GraphDrone:
 
         print(f"  -> Fitting GraphDrone ({self._problem_type}, n_classes={self._n_classes}) on {len(matrix)} samples...")
         self._router_fit_diagnostics = {}
+        self._task_prior_diagnostics = {}
         self._router_training_force_anchor_only = False
         self._portfolio = fit_portfolio_from_specs(
             X_train=matrix,
@@ -233,7 +237,7 @@ class GraphDrone:
         if not use_learned:
             return False, None
         if is_binary and self.config.router.kind == "bootstrap_full_only":
-            return True, SetRouterConfig(kind="noise_gate_router")
+            return True, replace(self.config.router, kind="noise_gate_router")
         return True, self.config.router
 
     def _trainable_params(self) -> list[torch.nn.Parameter]:
@@ -603,6 +607,13 @@ class GraphDrone:
         token_dim = va_tokens.tokens.shape[-1]
         self._seed_router_training()
         self._router = build_set_router(router_cfg, token_dim=token_dim, n_experts=va_tokens.tokens.shape[1]).to(self.device)
+        self._router = self._maybe_attach_task_prior_router(
+            router=self._router,
+            router_cfg=router_cfg,
+            tokens=va_tokens.tokens,
+            descriptors=va_batch.descriptors,
+            task_type="classification",
+        )
 
         aux_X = self._sample_aux_rows(X_tr90)
         aux_batch = oof_factory.predict_all(aux_X)
@@ -665,6 +676,52 @@ class GraphDrone:
             f"  -> Classification Router trained. "
             f"blend_nll={final_blend_nll:.4f}  anchor_nll={anchor_nll_val:.4f}  mean_defer={mean_defer:.3f}"
         )
+
+    def _maybe_attach_task_prior_router(
+        self,
+        *,
+        router: torch.nn.Module,
+        router_cfg: SetRouterConfig | None,
+        tokens: torch.Tensor,
+        descriptors: tuple[ViewDescriptor, ...],
+        task_type: str,
+    ) -> torch.nn.Module:
+        if router_cfg is None or router_cfg.task_prior_bank_dir is None:
+            self._task_prior_diagnostics = {}
+            return router
+        task_context_df = build_task_context_frame_from_router_tokens(
+            tokens=tokens,
+            descriptors=descriptors,
+            dataset_name="__current__",
+            task_type=task_type,
+        )
+        prior_bundle = compute_task_prior_from_bank(
+            bank_dir=router_cfg.task_prior_bank_dir,
+            task_context_df=task_context_df,
+            encoder_kind=router_cfg.task_prior_encoder_kind,
+            device=self.device,
+            query_dataset="__current__",
+            top_k=3,
+        )
+        conditioned = TaskConditionedRouter(
+            token_dim=tokens.shape[-1],
+            prior_dim=prior_bundle["prior_vector"].shape[0],
+            base_router=router,
+            strength=router_cfg.task_prior_strength,
+            router_kind=f"{getattr(router, 'router_kind', router_cfg.kind)}_task_prior",
+        ).to(self.device)
+        conditioned.set_task_prior_context(prior_bundle["prior_vector"].to(self.device))
+        query_result = prior_bundle["query_result"]
+        top_neighbors = query_result.get("top_neighbors", [])
+        self._task_prior_diagnostics = {
+            "task_prior_training_objective": str(prior_bundle["training_objective"]),
+            "task_prior_encoder_kind": str(prior_bundle["encoder_kind"]),
+            "task_prior_top_neighbor": top_neighbors[0]["dataset"] if top_neighbors else "",
+            "task_prior_top_neighbor_prob": float(top_neighbors[0]["probability"]) if top_neighbors else float("nan"),
+            "task_prior_entropy": float(query_result.get("soft_neighbor_entropy", float("nan"))),
+            "task_prior_exact_reuse_available": bool(query_result.get("exact_reuse_available", False)),
+        }
+        return conditioned
 
     def _fit_regression_router(self, matrix: np.ndarray, y: np.ndarray) -> None:
         from sklearn.model_selection import train_test_split
@@ -866,6 +923,7 @@ class GraphDrone:
                 diagnostics["alignment_aux_loss"] = float(router_out.aux_loss.detach().cpu().item())
             if router_out.extra_diagnostics:
                 diagnostics.update(router_out.extra_diagnostics)
+            diagnostics.update(self._task_prior_diagnostics)
             diagnostics.update(
                 self._attention_diagnostics(
                     expert_ids=active_batch.expert_ids,

@@ -1,0 +1,24 @@
+from __future__ import annotations
+
+from graphdrone_fit.config import GraphDroneConfig, SetRouterConfig
+from graphdrone_fit.model import GraphDrone
+
+
+def test_binary_classification_router_config_preserves_task_prior_fields() -> None:
+    model = GraphDrone(
+        GraphDroneConfig(
+            router=SetRouterConfig(
+                kind="bootstrap_full_only",
+                task_prior_bank_dir="/tmp/task-bank",
+                task_prior_encoder_kind="transformer",
+                task_prior_strength=0.7,
+            )
+        )
+    )
+    use_learned, cfg = model._classification_router_config(is_binary=True)
+    assert use_learned is True
+    assert cfg is not None
+    assert cfg.kind == "noise_gate_router"
+    assert cfg.task_prior_bank_dir == "/tmp/task-bank"
+    assert cfg.task_prior_encoder_kind == "transformer"
+    assert cfg.task_prior_strength == 0.7

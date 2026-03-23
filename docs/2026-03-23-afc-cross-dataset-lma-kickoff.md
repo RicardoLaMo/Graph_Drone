@@ -713,6 +713,94 @@ Current recommendation:
 - keep the contrastive term, but no longer by itself
 - next work should expand the dataset bank and test whether this objective remains stable when more near-neighbor datasets are added
 
+## First live classification router-conditioning prototype
+
+After the metadata-guided bank became the best offline prior, the next step tried a minimal live integration:
+- classification only
+- dataset-level prior vector only
+- inject the prior into the learned router anchor token
+- keep the rest of GraphDrone unchanged
+
+New support:
+- `TaskConditionedRouter` in `src/graphdrone_fit/set_router.py`
+- task-prior bank loading and query helpers in `src/graphdrone_fit/task_conditioned_prior.py`
+- classification router attachment in `src/graphdrone_fit/model.py`
+- env/preset plumbing in `src/graphdrone_fit/presets.py`
+
+Important wiring bug found and fixed:
+- in binary classification, `_classification_router_config()` used to replace
+  `bootstrap_full_only` with a fresh `SetRouterConfig(kind="noise_gate_router")`
+- that silently dropped all task-prior fields
+- this is now fixed by preserving the original config and only replacing the kind
+
+Unit coverage:
+- `tests/test_model_task_prior_config.py`
+
+### Live six-dataset classification contract
+
+```bash
+GRAPHDRONE_TASK_PRIOR_BANK_DIR=eval/afc_task_prototype_bank_cls_taxonomy_v1 \
+GRAPHDRONE_TASK_PRIOR_ENCODER_KIND=transformer \
+GRAPHDRONE_TASK_PRIOR_STRENGTH=0.5 \
+PYTHONPATH=src python scripts/run_champion_challenger.py \
+  --task classification \
+  --datasets credit_g diabetes mfeat_factors optdigits pendigits segment \
+  --folds 0 \
+  --max-samples 384 \
+  --champion-version champion-cls-no-prior \
+  --challenger-version challenger-cls-task-prior-v1 \
+  --output-dir eval/afc_live_task_prior_cls_v1
+```
+
+Result:
+- exact tie vs champion
+- challenger granular report showed `router_kind=geo_poe` for all six datasets
+- no `task_prior_*` diagnostics appeared
+
+Interpretation:
+- the task prior code did not fail silently
+- the benchmark contract never provided a live learned-router surface for it to act on
+- multiclass datasets still use static GeoPOE by design
+- the binary datasets did not expose a usable learned router on that contract
+
+### Live binary-only rerun after the config fix
+
+```bash
+GRAPHDRONE_TASK_PRIOR_BANK_DIR=eval/afc_task_prototype_bank_cls_taxonomy_v1 \
+GRAPHDRONE_TASK_PRIOR_ENCODER_KIND=transformer \
+GRAPHDRONE_TASK_PRIOR_STRENGTH=0.5 \
+PYTHONPATH=src python scripts/run_champion_challenger.py \
+  --task classification \
+  --datasets credit_g diabetes \
+  --folds 0 \
+  --max-samples 384 \
+  --champion-version champion-bin-no-prior \
+  --challenger-version challenger-bin-task-prior-v2 \
+  --output-dir eval/afc_live_task_prior_binary_v2
+```
+
+Result:
+- exact tie again
+- both binary datasets still printed:
+  - `Classification router skipped: anchor-only portfolio leaves nothing to route`
+
+Interpretation:
+- after the config-preservation fix, the remaining blocker is structural
+- the OOF binary portfolio still collapses to anchor-only before any learned routing stage exists
+- so the task-prior mechanism is now ready, but the current benchmark contract still does not expose a place for it to act
+
+Current conclusion:
+- this branch has crossed from “offline prior only” into “live conditioning prototype”
+- the task-prior mechanism is now wired correctly
+- but GraphDrone’s current classification architecture does not yet provide a stable activation surface for it
+- the next scale question is no longer “does the prior bank exist?”
+- it is “where should a real cross-dataset hyper-router live, given that multiclass is static and binary OOF routing can collapse before conditioning?”
+
+Current recommendation:
+- do not spend more time trying to prove the prior through the current static multiclass path
+- next work should build a small explicit hyper-router prototype on a classification subproblem where routing is guaranteed to exist
+- alternatively, redesign the binary OOF classification portfolio so the learned router stage reliably survives
+
 ## Initial analysis questions
 
 1. Do anchor views from different datasets cluster more tightly than random view pairs?

@@ -9,6 +9,7 @@ from graphdrone_fit.task_conditioned_prior import (
     TaskContextSequenceAutoencoder,
     TaskContextGRUEncoder,
     apply_task_context_normalization,
+    build_task_context_frame_from_router_tokens,
     build_task_prototype_bank,
     embedding_neighbor_distribution,
     fit_task_context_normalization,
@@ -187,3 +188,20 @@ def test_neighborhood_consistency_loss_is_finite() -> None:
     pred = embedding_neighbor_distribution(embeddings, batch, temperature=0.1)
     assert torch.isfinite(loss)
     assert pred.shape == targets.shape
+
+
+def test_build_task_context_frame_from_router_tokens_uses_descriptors_not_names() -> None:
+    batch = build_task_context_batch(_task_context_frame())
+    frame = build_task_context_frame_from_router_tokens(
+        tokens=batch.sequences[:1],
+        descriptors=[
+            type("D", (), {"expert_id": "FULL", "family": "FULL", "projection_kind": "identity_subselect", "input_dim": 8, "preferred_k": 15, "is_anchor": True})(),
+            type("D", (), {"expert_id": "SUB0", "family": "structural_subspace", "projection_kind": "identity_subselect", "input_dim": 4, "preferred_k": 15, "is_anchor": False})(),
+            type("D", (), {"expert_id": "SUB1", "family": "structural_subspace", "projection_kind": "identity_subselect", "input_dim": 4, "preferred_k": 15, "is_anchor": False})(),
+        ],
+        dataset_name="opaque_dataset_name",
+        task_type="classification",
+    )
+    assert list(frame["dataset"].unique()) == ["opaque_dataset_name"]
+    assert set(frame["expert_id"]) == {"FULL", "SUB0", "SUB1"}
+    assert "mean_token_json" in frame.columns
