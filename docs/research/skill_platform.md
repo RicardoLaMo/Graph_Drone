@@ -35,7 +35,7 @@ The placeholder skill at `doc/layered-research-orchestrator/layered-research-orc
 
 ## GraphDrone-Specific Skill Suite
 
-To close that gap, the repo now carries three project skills under `skills/`:
+To close that gap, the repo now carries four project skills under `skills/`:
 
 1. `graphdrone-research-ops`
    top-level operating skill for branch hygiene, benchmark contract control, evidence capture, and durable finding updates
@@ -46,7 +46,44 @@ To close that gap, the repo now carries three project skills under `skills/`:
 3. `graphdrone-research-memory`
    project-memory skill for turning runs and notes into durable claim knowledge
 
+4. `graphdrone-benchmark-governance`
+   benchmark-contract and evidence-governance skill for champion/challenger fairness, version discipline, and cache/provenance boundaries
+
 These are designed to sit on top of the existing generic skills, not replace them.
+
+## Scope Of These Skills
+
+There are two scopes at once:
+
+1. Project-level source of truth
+   The authoritative versions live in this repo under `skills/`. That makes them reviewable, branchable, and tied to GraphDrone methodology.
+
+2. User-level installation
+   After running `python scripts/sync_graphdrone_skills.py`, copies are installed into `~/.codex/skills/` for this user account, which makes them callable across sessions.
+
+That means the skills are both:
+- project-native in design and maintenance
+- user-level in runtime availability
+
+## Can They Be Carried To Another Project?
+
+Yes, but not all at the same level of portability.
+
+- High portability:
+  - the methodology shape in `graphdrone-mechanism-diagnosis`
+  - the memory-layer separation in `graphdrone-research-memory`
+  - the top-level research operating model in `graphdrone-research-ops`
+
+- Medium portability:
+  - `graphdrone-benchmark-governance`, if the new project also uses explicit champion/challenger runners, versioned cache keys, and artifact-grade evaluation outputs
+
+- Low portability without adaptation:
+  - any references to GraphDrone-specific files like `docs/research/findings.jsonl`, `claim_report.json`, `promotion_decision.json`, `run_ledger.json`, or `scripts/run_champion_challenger.py`
+
+So the right framing is:
+- these are reusable patterns
+- but they are currently specialized to GraphDrone’s artifact model
+- for another project, either adapt the references and names, or extract a more generic parent skill and keep GraphDrone as one specialization
 
 ## Why This Is Better Than A Metric-Only Loop
 
