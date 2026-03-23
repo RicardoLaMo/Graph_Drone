@@ -24,6 +24,10 @@ This repo now keeps research memory in three layers:
   - generated current view
   - latest state per claim id, grouped by `cleared`, `partially_causal`, `open`, `confounded`, `falsified`
 
+- `skill_platform.md`
+  - GraphDrone-specific research-operations skill layer
+  - explains how the repo’s run lineage, notes, and durable claim memory map into reusable project skills
+
 ## Recording a new finding
 
 Use:
