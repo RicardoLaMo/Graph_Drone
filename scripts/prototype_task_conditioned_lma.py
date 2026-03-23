@@ -24,6 +24,8 @@ from graphdrone_fit.task_conditioned_prior import (
     build_task_context_batch,
     fit_task_context_normalization,
     load_task_prototype_bank,
+    metadata_neighbor_targets,
+    neighborhood_consistency_loss,
     query_task_prototype_bank,
     save_task_prototype_bank,
     slice_batch_by_datasets,
@@ -321,6 +323,67 @@ def _fit_contrastive_similarity_encoder(
     return model, history
 
 
+def _fit_taxonomy_consistent_similarity_encoder(
+    encoder_kind: str,
+    batch,
+    epochs: int,
+    lr: float,
+    weight_decay: float,
+    device: str,
+    contrastive_temperature: float,
+    reconstruction_weight: float,
+    neighbor_weight: float,
+    metadata_temperature: float,
+    embedding_neighbor_temperature: float,
+):
+    encoder = _build_encoder(encoder_kind, input_dim=batch.sequences.shape[-1], hidden_dim=64)
+    model = TaskContextSequenceAutoencoder(
+        encoder=encoder,
+        hidden_dim=64,
+        seq_len=batch.sequences.shape[1],
+        input_dim=batch.sequences.shape[2],
+    ).to(device)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+    sequences = batch.sequences.to(device)
+    labels = batch.labels.to(device)
+    target_neighbors = metadata_neighbor_targets(batch, temperature=metadata_temperature).to(device)
+    history = []
+    for epoch in range(epochs):
+        model.train()
+        optimizer.zero_grad()
+        recon, embedding = model(sequences)
+        recon_loss = F.mse_loss(recon, sequences)
+        contrastive_loss = supervised_contrastive_loss(embedding, labels, temperature=contrastive_temperature)
+        neighbor_loss = neighborhood_consistency_loss(
+            embedding,
+            batch=batch,
+            target_distributions=target_neighbors,
+            temperature=embedding_neighbor_temperature,
+        )
+        loss = contrastive_loss + reconstruction_weight * recon_loss + neighbor_weight * neighbor_loss
+        loss.backward()
+        optimizer.step()
+        with torch.no_grad():
+            z = F.normalize(embedding, dim=-1)
+            sims = z @ z.T
+            same = labels.unsqueeze(0) == labels.unsqueeze(1)
+            non_self = ~torch.eye(labels.shape[0], device=labels.device, dtype=torch.bool)
+            pos = sims[same & non_self]
+            neg = sims[(~same) & non_self]
+            history.append(
+                {
+                    "epoch": epoch + 1,
+                    "loss": float(loss.item()),
+                    "contrastive_loss": float(contrastive_loss.item()),
+                    "reconstruction_loss": float(recon_loss.item()),
+                    "neighbor_loss": float(neighbor_loss.item()),
+                    "positive_similarity": float(pos.mean().item()),
+                    "negative_similarity": float(neg.mean().item()),
+                }
+            )
+    return model, history
+
+
 def _run_fit_prototype_bank(
     encoder_kind: str,
     batch,
@@ -448,6 +511,87 @@ def _run_fit_contrastive_prototype_bank(
     }
 
 
+def _run_fit_taxonomy_consistent_prototype_bank(
+    encoder_kind: str,
+    batch,
+    epochs: int,
+    lr: float,
+    weight_decay: float,
+    device: str,
+    normalize_features: bool,
+    output_dir: Path,
+    contrastive_temperature: float,
+    reconstruction_weight: float,
+    neighbor_weight: float,
+    metadata_temperature: float,
+    embedding_neighbor_temperature: float,
+) -> dict:
+    normalization = None
+    working_batch = batch
+    if normalize_features:
+        normalization = fit_task_context_normalization(batch)
+        working_batch = apply_task_context_normalization(batch, normalization)
+    model, history = _fit_taxonomy_consistent_similarity_encoder(
+        encoder_kind=encoder_kind,
+        batch=working_batch,
+        epochs=epochs,
+        lr=lr,
+        weight_decay=weight_decay,
+        device=device,
+        contrastive_temperature=contrastive_temperature,
+        reconstruction_weight=reconstruction_weight,
+        neighbor_weight=neighbor_weight,
+        metadata_temperature=metadata_temperature,
+        embedding_neighbor_temperature=embedding_neighbor_temperature,
+    )
+    with torch.no_grad():
+        model.eval()
+        _, embedding = model(working_batch.sequences.to(device))
+        embedding = F.normalize(embedding, dim=-1).cpu()
+    bank = build_task_prototype_bank(
+        embeddings=embedding,
+        batch=working_batch,
+        encoder_kind=encoder_kind,
+        hidden_dim=64,
+        normalize_features=normalize_features,
+        training_objective="contrastive_reconstruction_metadata",
+        normalization=normalization,
+    )
+    bank_path = output_dir / f"{encoder_kind}_prototype_bank.json"
+    checkpoint_path = output_dir / f"{encoder_kind}_encoder_state.pt"
+    save_task_prototype_bank(bank, bank_path)
+    torch.save(
+        {
+            "encoder_kind": encoder_kind,
+            "hidden_dim": 64,
+            "state_dict": model.encoder.state_dict(),
+            "training_objective": "contrastive_reconstruction_metadata",
+            "contrastive_temperature": contrastive_temperature,
+            "reconstruction_weight": reconstruction_weight,
+            "neighbor_weight": neighbor_weight,
+            "metadata_temperature": metadata_temperature,
+            "embedding_neighbor_temperature": embedding_neighbor_temperature,
+        },
+        checkpoint_path,
+    )
+    return {
+        "encoder_kind": encoder_kind,
+        "normalize_features": normalize_features,
+        "prototype_bank_path": str(bank_path),
+        "encoder_checkpoint_path": str(checkpoint_path),
+        "training_objective": "contrastive_reconstruction_metadata",
+        "contrastive_temperature": contrastive_temperature,
+        "reconstruction_weight": reconstruction_weight,
+        "neighbor_weight": neighbor_weight,
+        "metadata_temperature": metadata_temperature,
+        "embedding_neighbor_temperature": embedding_neighbor_temperature,
+        "n_datasets": len(bank.dataset_names),
+        "dataset_names": list(bank.dataset_names),
+        "counts": bank.counts,
+        "history_tail": history[-5:],
+    }
+
+
 def _run_query_prototype_bank(
     encoder_kind: str,
     batch,
@@ -503,6 +647,7 @@ def main() -> None:
             "leave_one_dataset_out_similarity",
             "fit_prototype_bank",
             "fit_contrastive_prototype_bank",
+            "fit_taxonomy_consistent_prototype_bank",
             "query_prototype_bank",
         ],
         default="dataset_id",
@@ -515,6 +660,9 @@ def main() -> None:
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--contrastive-temperature", type=float, default=0.1)
     parser.add_argument("--reconstruction-weight", type=float, default=0.25)
+    parser.add_argument("--neighbor-weight", type=float, default=0.5)
+    parser.add_argument("--metadata-temperature", type=float, default=0.2)
+    parser.add_argument("--embedding-neighbor-temperature", type=float, default=0.1)
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
 
@@ -588,6 +736,23 @@ def main() -> None:
                 output_dir=args.output_dir,
                 contrastive_temperature=args.contrastive_temperature,
                 reconstruction_weight=args.reconstruction_weight,
+            )
+            summary["results"].append(result)
+        elif args.mode == "fit_taxonomy_consistent_prototype_bank":
+            result = _run_fit_taxonomy_consistent_prototype_bank(
+                encoder_kind,
+                batch=batch,
+                epochs=args.epochs,
+                lr=args.lr,
+                weight_decay=args.weight_decay,
+                device=device,
+                normalize_features=args.normalize_features,
+                output_dir=args.output_dir,
+                contrastive_temperature=args.contrastive_temperature,
+                reconstruction_weight=args.reconstruction_weight,
+                neighbor_weight=args.neighbor_weight,
+                metadata_temperature=args.metadata_temperature,
+                embedding_neighbor_temperature=args.embedding_neighbor_temperature,
             )
             summary["results"].append(result)
         else:

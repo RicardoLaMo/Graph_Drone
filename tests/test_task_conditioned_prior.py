@@ -10,7 +10,10 @@ from graphdrone_fit.task_conditioned_prior import (
     TaskContextGRUEncoder,
     apply_task_context_normalization,
     build_task_prototype_bank,
+    embedding_neighbor_distribution,
     fit_task_context_normalization,
+    metadata_neighbor_targets,
+    neighborhood_consistency_loss,
     TaskContextTransformerEncoder,
     build_task_context_batch,
     load_task_prototype_bank,
@@ -158,3 +161,29 @@ def test_supervised_contrastive_loss_prefers_grouped_embeddings() -> None:
     grouped_loss = supervised_contrastive_loss(grouped, labels, temperature=0.1)
     mixed_loss = supervised_contrastive_loss(mixed, labels, temperature=0.1)
     assert grouped_loss < mixed_loss
+
+
+def test_metadata_neighbor_targets_form_probability_rows() -> None:
+    batch = build_task_context_batch(_task_context_frame())
+    targets = metadata_neighbor_targets(batch, temperature=0.2)
+    assert targets.shape == (2, 2)
+    assert torch.allclose(targets.sum(dim=-1), torch.ones(2))
+    assert torch.allclose(torch.diag(targets), torch.zeros(2))
+
+
+def test_neighborhood_consistency_loss_is_finite() -> None:
+    batch = build_task_context_batch(_task_context_frame())
+    embeddings = torch.tensor(
+        [
+            [1.0, 0.0],
+            [0.9, 0.1],
+            [0.0, 1.0],
+            [0.1, 0.9],
+        ],
+        dtype=torch.float32,
+    )
+    targets = metadata_neighbor_targets(batch, temperature=0.2)
+    loss = neighborhood_consistency_loss(embeddings, batch, target_distributions=targets, temperature=0.1)
+    pred = embedding_neighbor_distribution(embeddings, batch, temperature=0.1)
+    assert torch.isfinite(loss)
+    assert pred.shape == targets.shape

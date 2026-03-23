@@ -54,6 +54,13 @@ class TaskPrototypeBank:
     normalization: TaskContextNormalization | None = None
 
 
+def _dataset_indices(batch: TaskContextBatch) -> dict[str, list[int]]:
+    return {
+        dataset: [idx for idx, name in enumerate(batch.example_datasets) if name == dataset]
+        for dataset in batch.dataset_names
+    }
+
+
 def _feature_row(row: pd.Series) -> tuple[list[float], list[str]]:
     mean_token = json.loads(row["mean_token_json"])
     values: list[float] = [float(row["is_anchor"]), float(row["input_dim"]), float(row["preferred_k"]), float(row["mean_norm"]), float(row["std_norm"])]
@@ -189,6 +196,59 @@ def normalized_centroids(
         centroid = embeddings[idx].mean(dim=0)
         centroids[str(dataset)] = F.normalize(centroid.unsqueeze(0), dim=-1).squeeze(0).cpu()
     return centroids
+
+
+def dataset_signatures_from_sequences(batch: TaskContextBatch) -> torch.Tensor:
+    signatures = []
+    indices_by_dataset = _dataset_indices(batch)
+    for dataset in batch.dataset_names:
+        idx = indices_by_dataset[dataset]
+        dataset_seq = batch.sequences[idx]
+        signatures.append(dataset_seq.mean(dim=0).reshape(-1))
+    return torch.stack(signatures, dim=0)
+
+
+def metadata_neighbor_targets(batch: TaskContextBatch, temperature: float = 0.2) -> torch.Tensor:
+    signatures = F.normalize(dataset_signatures_from_sequences(batch), dim=-1)
+    sims = signatures @ signatures.T
+    mask = torch.eye(sims.shape[0], device=sims.device, dtype=torch.bool)
+    logits = sims / temperature
+    logits = logits.masked_fill(mask, float("-inf"))
+    targets = torch.softmax(logits, dim=-1)
+    targets = torch.nan_to_num(targets, nan=0.0, posinf=0.0, neginf=0.0)
+    return targets
+
+
+def embedding_neighbor_distribution(embeddings: torch.Tensor, batch: TaskContextBatch, temperature: float = 0.1) -> torch.Tensor:
+    centroids = []
+    indices_by_dataset = _dataset_indices(batch)
+    for dataset in batch.dataset_names:
+        idx = indices_by_dataset[dataset]
+        centroid = embeddings[idx].mean(dim=0)
+        centroids.append(F.normalize(centroid.unsqueeze(0), dim=-1).squeeze(0))
+    centroid_matrix = torch.stack(centroids, dim=0)
+    sims = centroid_matrix @ centroid_matrix.T
+    mask = torch.eye(sims.shape[0], device=sims.device, dtype=torch.bool)
+    logits = (sims / temperature).masked_fill(mask, float("-inf"))
+    probs = torch.softmax(logits, dim=-1)
+    probs = torch.nan_to_num(probs, nan=0.0, posinf=0.0, neginf=0.0)
+    return probs
+
+
+def neighborhood_consistency_loss(
+    embeddings: torch.Tensor,
+    batch: TaskContextBatch,
+    *,
+    target_distributions: torch.Tensor,
+    temperature: float = 0.1,
+) -> torch.Tensor:
+    predicted = embedding_neighbor_distribution(embeddings, batch=batch, temperature=temperature)
+    target = target_distributions.to(predicted.device)
+    valid = target.sum(dim=-1) > 0
+    if not torch.any(valid):
+        raise ValueError("target_distributions must contain at least one non-empty row")
+    loss = target[valid] * (torch.log(target[valid].clamp_min(1e-12)) - torch.log(predicted[valid].clamp_min(1e-12)))
+    return loss.sum(dim=-1).mean()
 
 
 def build_task_prototype_bank(

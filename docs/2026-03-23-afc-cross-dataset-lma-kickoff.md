@@ -606,6 +606,113 @@ Current recommendation:
 - do not yet claim that the learned task neighborhoods are semantically aligned
 - next work should add explicit neighborhood supervision or taxonomy-aware metric structure before using this bank to drive a live hyper-router
 
+## Metadata-driven neighborhood consistency
+
+To avoid hardcoded task families, the next step added a metadata-driven neighborhood-consistency loss.
+
+Important constraint:
+- this does **not** use dataset-name rules
+- neighborhood targets are derived algorithmically from each dataset's own task-context signatures
+- the fixed dataset names seen in tests and notes are only experiment fixtures and reporting examples, not production routing logic
+
+New support:
+- `metadata_neighbor_targets` in `src/graphdrone_fit/task_conditioned_prior.py`
+- `neighborhood_consistency_loss` in `src/graphdrone_fit/task_conditioned_prior.py`
+- `fit_taxonomy_consistent_prototype_bank` in `scripts/prototype_task_conditioned_lma.py`
+
+The target neighborhood matrix is built from the extracted task-context sequences:
+- aggregate each dataset into a dataset signature
+- compute dataset-to-dataset cosine similarities
+- convert that into a soft neighborhood target distribution
+- train the learned embedding neighborhoods to match that target while still keeping contrastive and reconstruction terms
+
+Training contract:
+
+```bash
+PYTHONPATH=src python scripts/prototype_task_conditioned_lma.py \
+  --analysis-dir eval/afc_cross_dataset_lma_classification_bootstrap_v2 \
+  --mode fit_taxonomy_consistent_prototype_bank \
+  --encoder transformer \
+  --normalize-features \
+  --epochs 120 \
+  --contrastive-temperature 0.1 \
+  --reconstruction-weight 0.25 \
+  --neighbor-weight 0.5 \
+  --metadata-temperature 0.2 \
+  --embedding-neighbor-temperature 0.1 \
+  --output-dir eval/afc_task_prototype_bank_cls_taxonomy_v1
+```
+
+Observed training tail:
+- neighbor loss fell to about `0.0042`
+- positive similarity stayed high at about `0.947`
+- negative similarity stayed positive but controlled at about `0.123`
+
+Read:
+- the learned bank is now matching the metadata-derived neighborhood targets closely
+- this is less aggressive than contrastive-only separation
+- but it is more grounded in derived task characteristics
+
+Known-dataset query under metadata-guided training:
+- exact matches remain strong, around `0.994-0.997`
+- neighborhood entropy is higher than contrastive-only, roughly `1.71-1.73`
+
+Interpretation:
+- this objective gives up some confidence to preserve more neighbor structure
+- that is expected if the goal is semantically useful transfer rather than maximum self-separation
+
+Unseen `segment` query with metadata guidance:
+
+```bash
+PYTHONPATH=src python scripts/prototype_task_conditioned_lma.py \
+  --analysis-dir eval/afc_cross_dataset_lma_classification_bootstrap_v2_minus_segment \
+  --mode fit_taxonomy_consistent_prototype_bank \
+  --encoder transformer \
+  --normalize-features \
+  --epochs 120 \
+  --contrastive-temperature 0.1 \
+  --reconstruction-weight 0.25 \
+  --neighbor-weight 0.5 \
+  --metadata-temperature 0.2 \
+  --embedding-neighbor-temperature 0.1 \
+  --output-dir eval/afc_task_prototype_bank_cls_minus_segment_taxonomy_v1
+
+PYTHONPATH=src python scripts/prototype_task_conditioned_lma.py \
+  --analysis-dir eval/afc_cross_dataset_lma_classification_bootstrap_v2 \
+  --mode query_prototype_bank \
+  --encoder transformer \
+  --bank-dir eval/afc_task_prototype_bank_cls_minus_segment_taxonomy_v1 \
+  --query-datasets segment \
+  --output-dir eval/afc_task_prototype_bank_query_segment_taxonomy_v1
+```
+
+Observed `segment` neighbors:
+- `pendigits`: probability `0.3060`, mean similarity `0.8082`
+- `credit_g`: probability `0.2287`, mean similarity `0.5162`
+- `diabetes`: probability `0.2014`, mean similarity `0.3903`
+- soft-neighbor entropy: `1.5561`
+
+Comparison across the three bank variants for unseen `segment`:
+- reconstruction bank:
+  - top neighbor `pendigits`
+  - entropy `1.5667`
+- contrastive bank:
+  - top neighbor `credit_g`
+  - entropy `1.5166`
+- metadata-guided bank:
+  - top neighbor `pendigits`
+  - entropy `1.5561`
+
+Interpretation:
+- metadata guidance recovered a more plausible top neighbor while staying sharper than the reconstruction-only bank
+- this is the best tradeoff so far between decisiveness and semantic plausibility
+- the bank is still not a true taxonomy, but it now behaves more like a learned task-family prior and less like arbitrary confident separation
+
+Current recommendation:
+- use metadata-guided neighborhood consistency as the leading task-bank objective
+- keep the contrastive term, but no longer by itself
+- next work should expand the dataset bank and test whether this objective remains stable when more near-neighbor datasets are added
+
 ## Initial analysis questions
 
 1. Do anchor views from different datasets cluster more tightly than random view pairs?
