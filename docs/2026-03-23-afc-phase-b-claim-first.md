@@ -134,3 +134,68 @@ Do not promote Phase B as-is.
 But the reason is now clearer:
 - the rotor mechanism itself is not falsified
 - the current GraphDrone training/routing design does not reliably translate that mechanism into better end-task performance
+
+## External critique
+
+Outside-in packet:
+- packet dir: `.claude-analysis/20260323T030438Z/`
+- task: `.claude-analysis/20260323T030438Z/task.md`
+- evidence: `.claude-analysis/20260323T030438Z/evidence.md`
+- external output: `.claude-analysis/20260323T030438Z/analysis.claude.txt`
+
+Strongest external conclusion:
+- the broad claim "translation failure" is directionally right, but too vague
+- the regression path has a more specific architectural asymmetry: `defer_integrator.py` mixes the anchor inside the so-called specialist blend, while binary `geo_ensemble.py` explicitly excludes anchor mass from the specialist distribution
+- this makes the regression defer scalar an interpolation between anchor-only and an all-expert mixture that still contains the anchor, rather than a clean anchor-vs-specialist switch
+
+Why that matters:
+- Phase B rotor rotates specialists toward the anchor frame
+- if the regression specialist blend already contains anchor mass, then making specialists more anchor-like can collapse useful diversity without giving the defer circuit a clean way to exploit specialist residual signal
+- that is a circuit-design issue, not simply "rotor math failed"
+
+The external critique also sharpened two secondary points:
+- the current rotor loss is anchor-similarity maximizing, not residual-usefulness maximizing
+- binary evaluation is probably seeing calibration gains more than threshold gains, so `log_loss` is a better near-term read than fixed-threshold `F1`
+
+## Revised best interpretation
+
+The current best interpretation is:
+- `implementation_asymmetry` on regression is the leading hypothesis
+- `mechanism_supported_but_misintegrated` remains true at the broader level
+- `metric_mismatch` is likely part of the binary story, but not the primary regression failure
+
+This is a better causal ordering than the earlier note:
+1. Rotor alignment gain is real on activated rows.
+2. The regression circuit does not expose a clean specialist-only path because anchor mass remains inside the deferred mixture.
+3. The rotor loss also pushes toward anchor similarity rather than label-residual usefulness, which can further blunt specialist value.
+
+## Ranked next checks
+
+1. Patch regression defer integration to exclude anchor mass from the specialist mixture, mirroring `learned_geo_poe_blend_torch()`, then rerun the smallest regression challenger contract.
+   This is the highest-signal falsification test for the asymmetry hypothesis.
+
+2. Add policy-coupling diagnostics before further hyperparameter tuning.
+   Most useful additions:
+   - mean anchor attention weight
+   - non-anchor attention entropy
+   - per-expert mass shifts
+   Without these, `defer_delta` alone is too blunt.
+
+3. Check whether rotor improves prediction-space residual usefulness rather than only token-space cosine.
+   A better specialist diagnostic is whether `(specialist_pred - anchor_pred)` aligns better with `(y - anchor_pred)` after rotation.
+
+4. Investigate why `diamonds` and `house_prices` produce non-finite rotor diagnostics.
+   Those rows currently weaken any aggregate regression interpretation.
+
+5. Treat binary `log_loss` as the primary Phase B read until a threshold sweep or PR-AUC check is added.
+
+## Workflow note
+
+To make this repeatable beyond this one branch, a local Codex skill was created:
+- skill: `raphael-research-loop`
+- path: `/home/wliu23/.codex/skills/raphael-research-loop/`
+
+The loop is:
+- inside-out: component truth -> circuit coupling -> outcome translation -> reproducibility
+- outside-in: external critique on the exact branch/artifact packet
+- persistence: repo note plus packet artifacts, rather than chat-only reasoning
