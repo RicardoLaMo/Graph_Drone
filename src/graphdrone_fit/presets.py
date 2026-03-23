@@ -13,7 +13,7 @@ from .config import (
 _PRESET_ALIASES = {
     "current_env": "afc_candidate",
 }
-_VALID_PRESETS = frozenset({"v1_20_champion", "afc_candidate"})
+_VALID_PRESETS = frozenset({"v1_20_champion", "afc_candidate", "v1_3_phase1"})
 
 
 def available_graphdrone_presets() -> tuple[str, ...]:
@@ -59,6 +59,24 @@ def build_graphdrone_config_from_preset(
         return GraphDroneConfig(
             n_classes=n_classes,
             router=SetRouterConfig(kind=default_router_kind, router_seed=42),
+            legitimacy_gate=LegitimacyGateConfig(
+                enabled=False,
+                regression_enabled=False,
+                binary_enabled=False,
+                multiclass_enabled=False,
+            ),
+            hyperbolic_descriptors=HyperbolicDescriptorConfig(enabled=False),
+        )
+
+    if resolved_preset == "v1_3_phase1":
+        return GraphDroneConfig(
+            n_classes=n_classes,
+            router=SetRouterConfig(
+                kind=default_router_kind,
+                router_seed=42,
+                defer_penalty_lambda=_env_float("GRAPHDRONE_DEFER_PENALTY_LAMBDA", 0.5),
+                defer_target=_env_float("GRAPHDRONE_DEFER_TARGET", 0.8),
+            ),
             legitimacy_gate=LegitimacyGateConfig(
                 enabled=False,
                 regression_enabled=False,

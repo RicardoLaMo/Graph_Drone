@@ -559,6 +559,8 @@ class GraphDrone:
         )
 
         autocast_enabled = self.device == "cuda"
+        defer_penalty_lambda = float(router_cfg.defer_penalty_lambda)
+        defer_target = float(router_cfg.defer_target)
         for _ in range(500):
             self._router.train()
             optimizer.zero_grad()
@@ -570,6 +572,9 @@ class GraphDrone:
                 blend_nll = F.nll_loss(F.log_softmax(log_q, dim=-1), y_va_t)
                 aux_loss = out.aux_loss if out.aux_loss is not None else blend_nll.new_zeros(())
                 loss = blend_nll + 2.0 * F.relu(blend_nll - anchor_nll_val) + aux_loss
+                if defer_penalty_lambda > 0:
+                    mean_defer = out.defer_prob.mean()
+                    loss = loss + defer_penalty_lambda * (mean_defer - defer_target) ** 2
             loss.backward()
             optimizer.step()
             self._post_optimizer_step()

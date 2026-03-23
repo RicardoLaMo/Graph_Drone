@@ -87,8 +87,8 @@ QUICK_DATASETS = {
     "pendigits":     CLASSIFICATION_DATASETS["pendigits"],
 }
 
-GRAPHDRONE_VERSION = os.getenv("GRAPHDRONE_VERSION_OVERRIDE", "2026.03.22-clf-afc-d-regonly-v1")
-GRAPHDRONE_PRESET = os.getenv("GRAPHDRONE_PRESET", "afc_candidate")
+GRAPHDRONE_VERSION = os.getenv("GRAPHDRONE_VERSION_OVERRIDE", "2026.03.23-clf-v1.3-phase1")
+GRAPHDRONE_PRESET = os.getenv("GRAPHDRONE_PRESET", "v1_3_phase1")
 
 
 def _graphdrone_config(*, n_classes: int = 1, default_router_kind: str) -> GraphDroneConfig:

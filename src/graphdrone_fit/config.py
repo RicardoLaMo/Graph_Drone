@@ -52,6 +52,11 @@ class SetRouterConfig:
     ot_max_iter: int = 50
     ot_alpha: float = 6.0
     ot_threshold: float = 0.25
+    # Defer regularization: quadratic penalty (mean_defer - defer_target)^2
+    # applied during binary classification router training to prevent defer saturation.
+    # Set defer_penalty_lambda=0.0 (default) to disable (no change to existing behavior).
+    defer_penalty_lambda: float = 0.0
+    defer_target: float = 0.8
 
     def validate(self) -> "SetRouterConfig":
         normalized_kind = ROUTER_KIND_ALIASES.get(self.kind, self.kind)
@@ -72,6 +77,10 @@ class SetRouterConfig:
             raise ValueError(f"ot_epsilon must be positive, got {self.ot_epsilon}")
         if self.ot_max_iter < 1:
             raise ValueError(f"ot_max_iter must be positive, got {self.ot_max_iter}")
+        if self.defer_penalty_lambda < 0:
+            raise ValueError(f"defer_penalty_lambda must be non-negative, got {self.defer_penalty_lambda}")
+        if not 0.0 <= self.defer_target <= 1.0:
+            raise ValueError(f"defer_target must be in [0, 1], got {self.defer_target}")
         return replace(self, kind=normalized_kind)
 
 
