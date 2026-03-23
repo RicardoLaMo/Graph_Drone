@@ -3,7 +3,7 @@
 This file is generated from `docs/research/findings.jsonl`.
 It is the current research surface for scaling decisions, not an append-only history.
 
-Updated: 2026-03-23T19:43:50.595054+00:00
+Updated: 2026-03-23T19:49:37.217408+00:00
 
 ## How To Read This
 
@@ -23,6 +23,7 @@ Updated: 2026-03-23T19:43:50.595054+00:00
 
 | Claim ID | Topic | Conclusion | Branch | Note |
 |---|---|---|---|---|
+| `afc-framework-binary-threshold-sensitivity` | `afc_framework` | Partially. On diabetes the new route is a clean calibration improvement with unchanged F1 across threshold sweeps, while on credit_g it improves the default operating point used by the benchmark but still trails the champion's best-threshold F1 ceiling. This means the current architecture is improving probability quality and default-threshold behavior more reliably than it improves the full ranking surface. | `exp/afc-cross-dataset-lma` | `2026-03-23-afc-cross-dataset-lma-kickoff.md` |
 | `afc-framework-contrastive-task-bank-sharpening` | `afc_framework` | Partially. The contrastive bank materially sharpened exact dataset reuse and lowered unseen-task neighborhood entropy, but the unseen segment neighbor ordering shifted rather than converging to an obviously cleaner taxonomy. The bank became more decisive faster than it became more semantically trustworthy. | `exp/afc-cross-dataset-lma` | `2026-03-23-afc-cross-dataset-lma-kickoff.md` |
 | `afc-framework-feedback-updated-task-bank-loop` | `afc_framework` | Yes, partially. The task bank can now ingest champion/challenger outcome feedback and change future prior lookup, but the current live GraphDrone route still queries the bank as an anonymous task, so the benefit mainly propagates through similarity-weighted feedback rather than full exact task reuse. | `exp/afc-cross-dataset-lma` | `2026-03-23-afc-cross-dataset-lma-kickoff.md` |
 | `afc-framework-live-task-exact-reuse` | `afc_framework` | Partially. Live GraphDrone now uses the real task key and exact-reuse blending on known datasets, which removes anonymous-query limitations and slightly improves the mean log-loss guardrail, but the routing policy still saturates defer and does not translate the stronger prior into a broad classification win. | `exp/afc-cross-dataset-lma` | `2026-03-23-afc-cross-dataset-lma-kickoff.md` |
@@ -62,6 +63,7 @@ Updated: 2026-03-23T19:43:50.595054+00:00
 
 | Timestamp | Claim ID | Status | Summary |
 |---|---|---|---|
+| `2026-03-23T19:49:37.217034+00:00` | `afc-framework-binary-threshold-sensitivity` | `partially_causal` | Threshold-sensitivity analysis showed that defer-regularized task priors improve calibration consistently on the binary slice, but only partially improve the broader threshold landscape. The next bottleneck has shifted from defer saturation to score ordering and threshold geometry. |
 | `2026-03-23T19:43:50.594637+00:00` | `afc-framework-task-prior-defer-regularization` | `partially_causal` | Once task-bank identity and exact reuse were live, the remaining blocker proved to be defer saturation rather than prior availability. A task-prior-aware defer penalty moved mean defer out of the ~0.999 regime, and a mild setting produced the first promoted binary slice on this branch. |
 | `2026-03-23T19:27:38.270058+00:00` | `afc-framework-live-task-exact-reuse` | `partially_causal` | Persistent task identity and exact-reuse blending are now active on the live binary route. That clears the bank/query identity bottleneck, but the remaining limiter is the binary defer policy rather than task-prior availability. |
 | `2026-03-23T19:14:46.203797+00:00` | `afc-framework-feedback-updated-task-bank-loop` | `partially_causal` | The first feedback-updated bank iteration changed task-prior lookup and slightly improved the mean log-loss guardrail on the binary live rerun, but F1 stayed flat and defer remained saturated. This establishes a real closed loop without yet solving the live routing policy. |
@@ -73,5 +75,4 @@ Updated: 2026-03-23T19:43:50.595054+00:00
 | `2026-03-23T17:32:05.358173+00:00` | `afc-framework-task-similarity-transfer-space` | `open` | The task-conditioned prior now looks more like a hard prototype assigner than a useful similar-task transfer space. The next bottleneck is representation collapse, so the next work should target normalization and metric learning rather than only encoder choice. |
 | `2026-03-23T17:25:43.001231+00:00` | `afc-framework-task-context-heldout-generalization` | `open` | The task-conditioned prior is learnable but not yet robustly transferable: held-out reconstruction remains fragile and is dominated by the optdigits outlier, so the next work should target feature normalization and dataset mismatch before claiming encoder-level wins. |
 | `2026-03-23T17:19:23.203285+00:00` | `afc-framework-task-context-prototype-learnability` | `open` | The classification-first task-context prototype is learnable. Both encoders reached 100% accuracy on the current bootstrap dataset-identification task, with the transformer showing better final loss, so transformer should be the default baseline for the next stricter generalization check. |
-| `2026-03-23T17:11:56.304425+00:00` | `afc-framework-task-conditioned-lma-prior` | `partially_causal` | The cross-dataset token-bank results now support a task-conditioned or hierarchical LMA prior: classification geometry is much more coherent than regression, so a flat universal prior is less defensible than a regime-aware transformer/GRU-style conditioning layer. |
 

@@ -1086,3 +1086,44 @@ Next checks:
 - expand from `credit_g` and `diabetes` to a broader binary slice
 - inspect threshold sensitivity so the F1/log-loss tradeoff is explicit
 - test whether the same regularizer remains beneficial when exact reuse is unavailable and only neighborhood prior is present
+
+## Threshold-sensitivity read
+
+The binary slice was then rerun with per-row probability capture enabled, and a threshold sweep was computed from the saved cache predictions.
+
+Artifacts:
+- `eval/afc_live_task_prior_binary_deferpen_l02_v11pred/comparison/promotion_decision.json`
+- `eval/afc_live_task_prior_binary_deferpen_l02_v11pred/threshold_analysis/threshold_summary.csv`
+- `eval/afc_live_task_prior_binary_deferpen_l02_v11pred/threshold_analysis/threshold_summary.json`
+
+Read by dataset:
+
+- `diabetes`
+  - default-F1 delta: `0.0000`
+  - best-F1 delta: `0.0000`
+  - log-loss delta: `-0.00619`
+  - brier delta: `-0.00198`
+  - interpretation:
+    - the new route is a calibration-quality improvement, not a threshold/F1 improvement
+    - the defer-regularized task prior improves probability quality while leaving the decision surface effectively unchanged
+
+- `credit_g`
+  - default-F1 delta: `+0.01243`
+  - best-F1 delta: `-0.03918`
+  - best-threshold shift: challenger `0.55` vs champion `0.80`
+  - log-loss delta: `+0.00084`
+  - brier delta: `-0.00187`
+  - interpretation:
+    - the challenger improves the default operating point used by the benchmark
+    - but the champion still has a stronger best-threshold ceiling on this dataset
+    - that means the new route changed the score distribution usefully for the default threshold, without yet dominating the full ranking/threshold landscape
+
+Branch-level read:
+- the binary defer regularizer is not a simple “better everywhere” change
+- it improves calibration consistently on this slice
+- it improves fixed-threshold performance enough to clear the current guardrails
+- but at least on `credit_g`, the remaining gap is now about score ordering / threshold geometry rather than pure calibration
+
+This matters for the next architecture step:
+- if the goal is better default GraphDrone decisions, the current result is already meaningful
+- if the goal is a stronger latent task prior that improves the whole ranking surface, the next work should target pairwise ordering or threshold-aware routing objectives rather than defer magnitude alone
