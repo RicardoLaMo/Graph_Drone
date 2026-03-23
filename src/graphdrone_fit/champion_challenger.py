@@ -30,6 +30,12 @@ OPTIONAL_DELTA_COLUMNS = (
     "alignment_cosine_post",
     "alignment_cosine_gain",
     "non_anchor_attention_entropy",
+    "validation_best_specialist_advantage_score",
+    "validation_weighted_specialist_advantage_score",
+    "validation_defer_weighted_specialist_advantage_score",
+    "validation_top_specialist_advantage_score",
+    "validation_positive_specialist_mass",
+    "validation_top_specialist_positive_rate",
 )
 
 

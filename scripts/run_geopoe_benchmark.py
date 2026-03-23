@@ -233,6 +233,12 @@ def _diagnostic_payload(diagnostics: dict[str, object]) -> dict[str, object]:
         "alignment_cosine_pre",
         "alignment_cosine_post",
         "alignment_cosine_gain",
+        "validation_best_specialist_advantage_score",
+        "validation_weighted_specialist_advantage_score",
+        "validation_defer_weighted_specialist_advantage_score",
+        "validation_top_specialist_advantage_score",
+        "validation_positive_specialist_mass",
+        "validation_top_specialist_positive_rate",
     )
     payload: dict[str, object] = {}
     for key in keep_keys:
@@ -250,7 +256,11 @@ def _diagnostic_payload(diagnostics: dict[str, object]) -> dict[str, object]:
     for key, value in diagnostics.items():
         if key in payload:
             continue
-        if not (key.startswith("mean_attention_") or key == "non_anchor_attention_entropy"):
+        if not (
+            key.startswith("mean_attention_")
+            or key == "non_anchor_attention_entropy"
+            or key.startswith("validation_")
+        ):
             continue
         if isinstance(value, (np.floating, float)):
             payload[key] = float(value)

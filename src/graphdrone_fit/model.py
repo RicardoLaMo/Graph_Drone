@@ -7,7 +7,7 @@ import numpy as np
 import torch
 
 from .config import GraphDroneConfig, SetRouterConfig
-from .defer_integrator import blend_predictions_torch, integrate_predictions
+from .defer_integrator import blend_predictions_torch, integrate_predictions, normalize_non_anchor_weights
 from .expert_factory import (
     ExpertBuildSpec,
     ExpertPredictionBatch,
@@ -96,6 +96,7 @@ class GraphDrone:
         self._problem_type: str = "regression"
         self._n_classes: int = 1
         self._clf_uses_learned_router: bool = False
+        self._router_fit_diagnostics: dict[str, float] = {}
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
     def fit(
@@ -127,6 +128,7 @@ class GraphDrone:
             expert_specs = self._build_default_specs(matrix, is_classification=is_classification, is_binary=is_binary)
 
         print(f"  -> Fitting GraphDrone ({self._problem_type}, n_classes={self._n_classes}) on {len(matrix)} samples...")
+        self._router_fit_diagnostics = {}
         self._portfolio = fit_portfolio_from_specs(
             X_train=matrix,
             y_train=y_array,
@@ -279,6 +281,61 @@ class GraphDrone:
         entropy = -(normalized.clamp(min=1e-9) * normalized.clamp(min=1e-9).log()).sum(dim=-1)
         diagnostics["non_anchor_attention_entropy"] = float(entropy.mean().item())
         return diagnostics
+
+    @staticmethod
+    def _regression_residual_usefulness_diagnostics(
+        *,
+        expert_predictions: torch.Tensor,
+        y_true: torch.Tensor,
+        specialist_weights: torch.Tensor,
+        defer_prob: torch.Tensor,
+        full_index: int,
+    ) -> dict[str, float]:
+        if expert_predictions.ndim != 2:
+            raise ValueError(f"Expected [N, E] expert predictions, got shape {tuple(expert_predictions.shape)}")
+
+        non_anchor_mask = torch.ones(expert_predictions.shape[1], dtype=torch.bool, device=expert_predictions.device)
+        non_anchor_mask[full_index] = False
+        if int(non_anchor_mask.sum().item()) == 0:
+            return {}
+
+        anchor_pred = expert_predictions[:, full_index]
+        anchor_abs_err = (y_true - anchor_pred).abs().unsqueeze(1)
+        specialist_abs_err = (y_true.unsqueeze(1) - expert_predictions[:, non_anchor_mask]).abs()
+        denom = anchor_abs_err + specialist_abs_err + 1e-6
+        advantage = (anchor_abs_err - specialist_abs_err) / denom
+
+        normalized_weights, specialist_mass = normalize_non_anchor_weights(
+            specialist_weights,
+            full_index=full_index,
+        )
+        specialist_weights_only = normalized_weights[:, non_anchor_mask]
+        has_specialist_mass = specialist_mass.squeeze(1) > 0
+        if not bool(has_specialist_mass.any().item()):
+            return {}
+
+        effective_defer = torch.where(
+            specialist_mass > 0,
+            defer_prob,
+            torch.zeros_like(defer_prob),
+        ).squeeze(1)
+        weighted_advantage = (specialist_weights_only * advantage).sum(dim=1)
+        best_advantage = advantage.max(dim=1).values
+        positive_mass = (specialist_weights_only * (advantage > 0).float()).sum(dim=1)
+        top_indices = specialist_weights_only.argmax(dim=1, keepdim=True)
+        top_advantage = advantage.gather(1, top_indices).squeeze(1)
+
+        active = has_specialist_mass
+        return {
+            "validation_best_specialist_advantage_score": float(best_advantage[active].mean().item()),
+            "validation_weighted_specialist_advantage_score": float(weighted_advantage[active].mean().item()),
+            "validation_defer_weighted_specialist_advantage_score": float(
+                (effective_defer[active] * weighted_advantage[active]).mean().item()
+            ),
+            "validation_top_specialist_advantage_score": float(top_advantage[active].mean().item()),
+            "validation_positive_specialist_mass": float(positive_mass[active].mean().item()),
+            "validation_top_specialist_positive_rate": float((top_advantage[active] > 0).float().mean().item()),
+        }
 
     def _optimize_regression_router_module(
         self,
@@ -569,6 +626,23 @@ class GraphDrone:
             anchor_mse_val=anchor_mse_val,
             label="Router",
         )
+        self._router.eval()
+        with torch.no_grad():
+            out_final = self._router(v_tokens_t, full_index=va_batch.full_index)
+            self._router_fit_diagnostics = self._regression_residual_usefulness_diagnostics(
+                expert_predictions=v_preds_t,
+                y_true=y_va_t,
+                specialist_weights=out_final.specialist_weights,
+                defer_prob=out_final.defer_prob,
+                full_index=va_batch.full_index,
+            )
+        if self._router_fit_diagnostics:
+            print(
+                "  -> Regression router usefulness: "
+                f"weighted_adv={self._router_fit_diagnostics['validation_weighted_specialist_advantage_score']:.4f} "
+                f"best_adv={self._router_fit_diagnostics['validation_best_specialist_advantage_score']:.4f} "
+                f"positive_mass={self._router_fit_diagnostics['validation_positive_specialist_mass']:.4f}"
+            )
 
     def _compute_gora_obs(self, X: np.ndarray, descriptors: tuple[ViewDescriptor, ...]) -> torch.Tensor:
         from sklearn.neighbors import NearestNeighbors
@@ -731,6 +805,7 @@ class GraphDrone:
         preds = anchor_preds.copy()
         preds[active_mask] = integration.predictions
         diagnostics = dict(integration.diagnostics)
+        diagnostics.update(self._router_fit_diagnostics)
         if router_out.ot_costs is not None:
             diagnostics["mean_ot_cost"] = float(router_out.ot_costs.mean().item())
         if router_out.aux_loss is not None:

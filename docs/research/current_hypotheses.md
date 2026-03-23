@@ -3,7 +3,7 @@
 This file is generated from `docs/research/findings.jsonl`.
 It is the current research surface for scaling decisions, not an append-only history.
 
-Updated: 2026-03-23T04:08:57.496850+00:00
+Updated: 2026-03-23T13:25:48.287271+00:00
 
 ## How To Read This
 
@@ -25,10 +25,17 @@ Updated: 2026-03-23T04:08:57.496850+00:00
 |---|---|---|---|---|
 | `afc-b-rotor-mechanism` | `afc_phase_b` | Rotor improves token alignment, but the current routing and integration design still does not convert that into a stable benchmark win. | `exp/afc-b-cayley-rotor` | `2026-03-23-afc-phase-b-claim-first.md` |
 
+## Confounded
+
+| Claim ID | Topic | Conclusion | Branch | Note |
+|---|---|---|---|---|
+| `afc-b-joint-training-interference` | `afc_phase_b` | Probably not as the dominant blocker. Freezing the base router did not improve the rotor challenger over the corrected non-frozen run, but branch-local champion drift prevents a clean falsification. | `exp/afc-b-frozen-router` | `2026-03-23-afc-phase-b-frozen-router.md` |
+
 ## Recent Findings
 
 | Timestamp | Claim ID | Status | Summary |
 |---|---|---|---|
+| `2026-03-23T13:25:48.287059+00:00` | `afc-b-joint-training-interference` | `confounded` | The frozen-base rotor ablation weakened the joint-training-interference hypothesis: it was flat to slightly worse than the corrected non-frozen rotor challenger, though same-branch champion drift means the result should be treated as informative rather than final. |
 | `2026-03-23T04:08:57.496645+00:00` | `afc-b-reg-anchor-asymmetry` | `partially_causal` | Excluding anchor mass improved the rotor challenger much more than the champion path and largely removed the earlier strong negative result, but latency and remaining integration issues still block promotion. |
 | `2026-03-23T04:08:57.463397+00:00` | `afc-b-rotor-mechanism` | `open` | Phase B claim-first review supported the mechanism but left translation open due to circuit design and metric coupling questions. |
 
