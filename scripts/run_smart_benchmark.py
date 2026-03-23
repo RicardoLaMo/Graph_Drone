@@ -89,6 +89,12 @@ QUICK_DATASETS = {
 
 GRAPHDRONE_VERSION = os.getenv("GRAPHDRONE_VERSION_OVERRIDE", "2026.03.22-clf-afc-d-regonly-v1")
 GRAPHDRONE_PRESET = os.getenv("GRAPHDRONE_PRESET", "afc_candidate")
+SAVE_CLASSIFICATION_PREDICTIONS = os.getenv("GRAPHDRONE_SAVE_CLASSIFICATION_PREDICTIONS", "0").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
 
 def _graphdrone_config(*, n_classes: int = 1, default_router_kind: str, dataset_key: str | None = None) -> GraphDroneConfig:
@@ -160,6 +166,14 @@ def load_cache(path: Path) -> Optional[dict]:
 def save_cache(path: Path, payload: dict):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2))
+
+
+def _prediction_payload(y_true: np.ndarray, y_pred_proba: np.ndarray, y_pred_labels: np.ndarray) -> dict[str, object]:
+    return {
+        "y_true": np.asarray(y_true).astype(int).tolist(),
+        "y_pred_proba": np.asarray(y_pred_proba).astype(float).tolist(),
+        "y_pred_labels": np.asarray(y_pred_labels).astype(int).tolist(),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -429,6 +443,8 @@ def run_task(dataset: str, fold: int, cache_dir: Path, max_samples: int, methods
                 "defer": float(defer) if not np.isnan(float(defer)) else None,
                 "elapsed": elapsed,
             }
+            if task_type == "classification" and SAVE_CLASSIFICATION_PREDICTIONS:
+                payload["predictions"] = _prediction_payload(y_te, proba, labels)
             save_cache(cpath, payload)
             rows.append({
                 **metrics,
