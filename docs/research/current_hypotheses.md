@@ -3,7 +3,7 @@
 This file is generated from `docs/research/findings.jsonl`.
 It is the current research surface for scaling decisions, not an append-only history.
 
-Updated: 2026-03-23T19:59:55.187289+00:00
+Updated: 2026-03-23T23:16:13.770359+00:00
 
 ## How To Read This
 
@@ -46,6 +46,10 @@ Updated: 2026-03-23T19:59:55.187289+00:00
 | `afc-framework-task-similarity-transfer-space` | `afc_framework` | Not yet. On the first similarity-aware held-out check, both encoders mapped each unseen dataset to exactly one seen prototype with near-total confidence, which is stable but too collapsed to count as a nuanced task-neighborhood space. | `exp/afc-cross-dataset-lma` | `2026-03-23-afc-cross-dataset-lma-kickoff.md` |
 | `afc-b-residual-usefulness-gap` | `afc_phase_b` | On cpu_act, yes. Both champion and challenger have positive best-available specialist advantage but negative attention-weighted specialist advantage; rotor narrows the gap slightly on validation but still worsens held-out RMSE. California remains unresolved due NaN usefulness diagnostics. | `exp/afc-b-frozen-router` | `2026-03-23-afc-phase-b-residual-usefulness.md` |
 | `afc-b-rotor-mechanism` | `afc_phase_b` | Rotor improves token alignment, but the current routing and integration design still does not convert that into a stable benchmark win. | `exp/afc-b-cayley-rotor` | `2026-03-23-afc-phase-b-claim-first.md` |
+| `v13-reg-afc-allocation-translation` | `v13_regression` | Open. AFC alignment remains mechanism-supported in regression, but v1.3 should only keep spending on it if alignment gains translate into allocation gains on the corrected regression circuit. | `exp/v13-regression-program` | `2026-03-23-v13-regression-handoff.md` |
+| `v13-reg-meta-prior-readiness` | `v13_regression` | Open. The current evidence does not justify starting with regression meta-priors; v1.3 should only enter that lane if improved local routing still cannot learn useful allocation policies from single datasets. | `exp/v13-regression-program` | `2026-03-23-v13-regression-handoff.md` |
+| `v13-reg-realized-specialist-value` | `v13_regression` | Open. Current regression evidence shows useful specialists can exist while realized specialist value remains negative, so v1.3 needs an allocation-focused routing objective rather than another benchmark-only pass. | `exp/v13-regression-program` | `2026-03-23-v13-regression-handoff.md` |
+| `v13-reg-stability-surface` | `v13_regression` | Open. The california instability and regression fallback paths are now safe enough to observe, but the v1.3 stability lane still needs to turn them into a complete causal diagnostics surface. | `exp/v13-regression-program` | `2026-03-23-v13-regression-handoff.md` |
 
 ## Confounded
 
@@ -64,6 +68,10 @@ Updated: 2026-03-23T19:59:55.187289+00:00
 
 | Timestamp | Claim ID | Status | Summary |
 |---|---|---|---|
+| `2026-03-23T23:16:13.770011+00:00` | `v13-reg-meta-prior-readiness` | `open` | Regression meta-priors are a later v1.3 lane, not the first move, and should be gated on local-routing evidence. |
+| `2026-03-23T23:16:13.738272+00:00` | `v13-reg-afc-allocation-translation` | `open` | v1.3 keeps AFC alive for regression, but only as an allocation-translation question rather than as a presumed feature win. |
+| `2026-03-23T23:16:13.705585+00:00` | `v13-reg-realized-specialist-value` | `open` | The primary v1.3 regression question is whether routing can be trained to realize specialist value instead of merely detecting that it exists. |
+| `2026-03-23T23:16:13.673633+00:00` | `v13-reg-stability-surface` | `open` | v1.3 regression should begin with a stability lane that classifies and explains regression fallback modes instead of treating them as opaque safe fallbacks. |
 | `2026-03-23T19:59:55.186947+00:00` | `afc-framework-binary-rank-loss-probe` | `falsified` | The first binary rank-loss probe separated ranking-surface questions from calibration questions, but the current pairwise formulation did not translate into a better live task-prior route. It should not be the next default architecture step without a different target or coupling. |
 | `2026-03-23T19:49:37.217034+00:00` | `afc-framework-binary-threshold-sensitivity` | `partially_causal` | Threshold-sensitivity analysis showed that defer-regularized task priors improve calibration consistently on the binary slice, but only partially improve the broader threshold landscape. The next bottleneck has shifted from defer saturation to score ordering and threshold geometry. |
 | `2026-03-23T19:43:50.594637+00:00` | `afc-framework-task-prior-defer-regularization` | `partially_causal` | Once task-bank identity and exact reuse were live, the remaining blocker proved to be defer saturation rather than prior availability. A task-prior-aware defer penalty moved mean defer out of the ~0.999 regime, and a mild setting produced the first promoted binary slice on this branch. |
@@ -72,8 +80,4 @@ Updated: 2026-03-23T19:59:55.187289+00:00
 | `2026-03-23T18:38:39.263083+00:00` | `afc-framework-live-task-prior-activation-surface` | `partially_causal` | The first live classification prototype showed that the task-prior bank is ready but the current GraphDrone classification architecture does not reliably expose an activation surface for it. The limiting factor moved from prior quality to router-stage availability. |
 | `2026-03-23T18:28:00.917927+00:00` | `afc-framework-metadata-guided-task-neighborhoods` | `partially_causal` | The metadata-guided task bank derived neighborhood targets from dataset signatures rather than named-task rules. It kept segment nearest to pendigits on unseen-task lookup, unlike the contrastive-only bank, while remaining sharper than the reconstruction-only bank. |
 | `2026-03-23T18:21:55.430449+00:00` | `afc-framework-contrastive-task-bank-sharpening` | `partially_causal` | Adding supervised contrastive pressure on top of reconstruction tightened exact-match similarities to about 0.997-0.999 and reduced unseen-segment entropy, but did not yet produce a stable semantically clean task-family assignment. |
-| `2026-03-23T18:16:28.734975+00:00` | `afc-framework-persistent-task-prototype-bank` | `partially_causal` | The new prototype bank persists encoder state, normalization, and task centroids. Known datasets now return exact-reuse hits with high similarity, and an unseen segment dataset attaches to a soft neighborhood centered on pendigits/diabetes/credit_g instead of collapsing to a single arbitrary prototype. |
-| `2026-03-23T18:06:30.959673+00:00` | `afc-framework-normalized-task-neighborhoods` | `partially_causal` | Normalization and a larger classification bank materially improved the task-conditioned prior: the similarity space now shows soft local neighborhoods like credit_g~diabetes/segment and pendigits~segment/optdigits instead of pure one-prototype collapse. |
-| `2026-03-23T17:32:05.358173+00:00` | `afc-framework-task-similarity-transfer-space` | `open` | The task-conditioned prior now looks more like a hard prototype assigner than a useful similar-task transfer space. The next bottleneck is representation collapse, so the next work should target normalization and metric learning rather than only encoder choice. |
-| `2026-03-23T17:25:43.001231+00:00` | `afc-framework-task-context-heldout-generalization` | `open` | The task-conditioned prior is learnable but not yet robustly transferable: held-out reconstruction remains fragile and is dominated by the optdigits outlier, so the next work should target feature normalization and dataset mismatch before claiming encoder-level wins. |
 
