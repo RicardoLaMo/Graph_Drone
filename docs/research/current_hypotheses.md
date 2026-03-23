@@ -3,7 +3,7 @@
 This file is generated from `docs/research/findings.jsonl`.
 It is the current research surface for scaling decisions, not an append-only history.
 
-Updated: 2026-03-23T13:25:48.287271+00:00
+Updated: 2026-03-23T13:41:40.482788+00:00
 
 ## How To Read This
 
@@ -23,6 +23,7 @@ Updated: 2026-03-23T13:25:48.287271+00:00
 
 | Claim ID | Topic | Conclusion | Branch | Note |
 |---|---|---|---|---|
+| `afc-b-residual-usefulness-gap` | `afc_phase_b` | On cpu_act, yes. Both champion and challenger have positive best-available specialist advantage but negative attention-weighted specialist advantage; rotor narrows the gap slightly on validation but still worsens held-out RMSE. California remains unresolved due NaN usefulness diagnostics. | `exp/afc-b-frozen-router` | `2026-03-23-afc-phase-b-residual-usefulness.md` |
 | `afc-b-rotor-mechanism` | `afc_phase_b` | Rotor improves token alignment, but the current routing and integration design still does not convert that into a stable benchmark win. | `exp/afc-b-cayley-rotor` | `2026-03-23-afc-phase-b-claim-first.md` |
 
 ## Confounded
@@ -35,6 +36,7 @@ Updated: 2026-03-23T13:25:48.287271+00:00
 
 | Timestamp | Claim ID | Status | Summary |
 |---|---|---|---|
+| `2026-03-23T13:41:40.482544+00:00` | `afc-b-residual-usefulness-gap` | `open` | The new residual-usefulness diagnostic showed that specialist value can exist while realized router value stays negative. Rotor slightly improved the validation usefulness score on cpu_act, but not enough to improve held-out quality, so allocation/objective mismatch remains the main live hypothesis. |
 | `2026-03-23T13:25:48.287059+00:00` | `afc-b-joint-training-interference` | `confounded` | The frozen-base rotor ablation weakened the joint-training-interference hypothesis: it was flat to slightly worse than the corrected non-frozen rotor challenger, though same-branch champion drift means the result should be treated as informative rather than final. |
 | `2026-03-23T04:08:57.496645+00:00` | `afc-b-reg-anchor-asymmetry` | `partially_causal` | Excluding anchor mass improved the rotor challenger much more than the champion path and largely removed the earlier strong negative result, but latency and remaining integration issues still block promotion. |
 | `2026-03-23T04:08:57.463397+00:00` | `afc-b-rotor-mechanism` | `open` | Phase B claim-first review supported the mechanism but left translation open due to circuit design and metric coupling questions. |
