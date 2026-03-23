@@ -18,8 +18,15 @@ OPTIONAL_DELTA_COLUMNS = (
     "defer",
     "exit_frac",
     "legitimacy_score_mean",
+    "n_experts",
+    "n_specialists",
     "mean_ot_cost",
+    "mean_specialist_validity",
+    "closed_specialist_frac",
     "alignment_aux_loss",
+    "alignment_cosine_pre",
+    "alignment_cosine_post",
+    "alignment_cosine_gain",
 )
 
 

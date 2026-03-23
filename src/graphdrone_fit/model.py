@@ -505,6 +505,14 @@ class GraphDrone:
             "router_skipped": router_skipped,
         }
 
+    @staticmethod
+    def _portfolio_diagnostics(batch: ExpertPredictionBatch) -> dict[str, object]:
+        n_experts = len(batch.expert_ids)
+        return {
+            "n_experts": int(n_experts),
+            "n_specialists": int(max(n_experts - 1, 0)),
+        }
+
     def _classification_predictions(
         self,
         matrix: np.ndarray,
@@ -519,6 +527,7 @@ class GraphDrone:
                 "router_kind": "legitimacy_gate_anchor_only",
                 "mean_defer_prob": 0.0,
             }
+            diagnostics.update(self._portfolio_diagnostics(batch))
             diagnostics.update(self._legitimacy_diagnostics(decision, router_skipped=True))
             return anchor_preds, diagnostics
 
@@ -546,6 +555,8 @@ class GraphDrone:
                 diagnostics["mean_ot_cost"] = float(router_out.ot_costs.mean().item())
             if router_out.aux_loss is not None:
                 diagnostics["alignment_aux_loss"] = float(router_out.aux_loss.detach().cpu().item())
+            if router_out.extra_diagnostics:
+                diagnostics.update(router_out.extra_diagnostics)
         else:
             active_preds = anchor_geo_poe_blend(
                 active_batch.predictions,
@@ -556,6 +567,7 @@ class GraphDrone:
                 "router_kind": "geo_poe",
                 "mean_defer_prob": float("nan"),
             }
+            diagnostics.update(self._portfolio_diagnostics(active_batch))
 
         preds = anchor_preds.copy()
         preds[active_mask] = np.asarray(active_preds, dtype=np.float32)
@@ -577,6 +589,7 @@ class GraphDrone:
                 "mean_defer_prob": 0.0,
                 "full_index": int(batch.full_index),
             }
+            diagnostics.update(self._portfolio_diagnostics(batch))
             diagnostics.update(self._legitimacy_diagnostics(decision, router_skipped=True))
             return anchor_preds, diagnostics
 
@@ -598,6 +611,8 @@ class GraphDrone:
             diagnostics["mean_ot_cost"] = float(router_out.ot_costs.mean().item())
         if router_out.aux_loss is not None:
             diagnostics["alignment_aux_loss"] = float(router_out.aux_loss.detach().cpu().item())
+        if router_out.extra_diagnostics:
+            diagnostics.update(router_out.extra_diagnostics)
         diagnostics.update(self._legitimacy_diagnostics(decision, router_skipped=False))
         return preds.astype(np.float32), diagnostics
 

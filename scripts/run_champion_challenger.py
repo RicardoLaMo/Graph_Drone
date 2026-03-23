@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -23,7 +24,9 @@ from graphdrone_fit.champion_challenger import (
     load_results_csv,
     write_comparison_artifacts,
 )
+from graphdrone_fit.claim_checks import build_claim_markdown, evaluate_claims, write_claim_artifacts
 from graphdrone_fit.presets import available_graphdrone_presets
+from graphdrone_fit.run_provenance import append_run_event, finalize_run_ledger, start_run_ledger
 
 
 SCRIPT_BY_TASK = {
@@ -75,6 +78,7 @@ def _run_backend(
     datasets: list[str] | None,
     folds: list[int] | None,
     max_samples: int,
+    heartbeat_seconds: float,
 ) -> Path:
     env = os.environ.copy()
     env["PYTHONPATH"] = _pythonpath_env()
@@ -98,7 +102,29 @@ def _run_backend(
         *methods,
     ]
     print(f"\n[{label}:{task}] {' '.join(cmd)}")
-    subprocess.run(cmd, cwd=ROOT, env=env, check=True)
+    process = subprocess.Popen(cmd, cwd=ROOT, env=env)
+    ledger_path = start_run_ledger(
+        run_dir=run_dir,
+        root=ROOT,
+        label=label,
+        task=task,
+        cmd=cmd,
+        env=env,
+        child_pid=process.pid,
+    )
+    append_run_event(run_dir=run_dir, child_pid=process.pid, event="started")
+    started = time.monotonic()
+    while True:
+        try:
+            returncode = process.wait(timeout=heartbeat_seconds)
+            break
+        except subprocess.TimeoutExpired:
+            append_run_event(run_dir=run_dir, child_pid=process.pid, event="heartbeat")
+    elapsed_seconds = time.monotonic() - started
+    append_run_event(run_dir=run_dir, child_pid=process.pid, event="finished", returncode=returncode)
+    finalize_run_ledger(ledger_path=ledger_path, elapsed_seconds=elapsed_seconds, returncode=returncode)
+    if returncode != 0:
+        raise subprocess.CalledProcessError(returncode, cmd)
     return output_dir / "results_granular.csv"
 
 
@@ -130,7 +156,9 @@ def main() -> None:
     parser.add_argument("--with-tabpfn-anchor", action="store_true")
     parser.add_argument("--efficiency-only", action="store_true")
     parser.add_argument("--output-dir", type=Path, default=ROOT / "eval" / "champion_challenger")
+    parser.add_argument("--heartbeat-seconds", type=float, default=15.0)
     args = parser.parse_args()
+    args.heartbeat_seconds = max(float(args.heartbeat_seconds), 1.0)
 
     tasks = _contract_tasks(args.task)
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -149,6 +177,7 @@ def main() -> None:
     print(f"  TabPFN anchor    : {args.with_tabpfn_anchor}")
     print(f"  Efficiency only  : {args.efficiency_only}")
     print(f"  Output dir       : {args.output_dir}")
+    print(f"  Heartbeat secs   : {args.heartbeat_seconds}")
 
     for task in tasks:
         champion_csv = _run_backend(
@@ -162,6 +191,7 @@ def main() -> None:
             datasets=args.datasets,
             folds=args.folds,
             max_samples=args.max_samples,
+            heartbeat_seconds=args.heartbeat_seconds,
         )
         challenger_csv = _run_backend(
             label="challenger",
@@ -174,6 +204,7 @@ def main() -> None:
             datasets=args.datasets,
             folds=args.folds,
             max_samples=args.max_samples,
+            heartbeat_seconds=args.heartbeat_seconds,
         )
         champion_frames.append(load_results_csv(champion_csv, method_label="champion"))
         challenger_frames.append(load_results_csv(challenger_csv, method_label="challenger"))
@@ -190,6 +221,7 @@ def main() -> None:
                 datasets=args.datasets,
                 folds=args.folds,
                 max_samples=args.max_samples,
+                heartbeat_seconds=args.heartbeat_seconds,
             )
             anchor_frames.append(load_results_csv(anchor_csv, method_label="tabpfn"))
 
@@ -234,6 +266,12 @@ def main() -> None:
         markdown_report=report,
         anchor_reference=anchor_reference,
     )
+    claim_report = evaluate_claims(paired_df)
+    write_claim_artifacts(
+        output_dir=comparison_dir,
+        claim_report=claim_report,
+        markdown_report=build_claim_markdown(claim_report),
+    )
     metadata = {
         "tasks": tasks,
         "gate": args.gate,
@@ -246,6 +284,7 @@ def main() -> None:
         "with_tabpfn_anchor": args.with_tabpfn_anchor,
         "efficiency_only": args.efficiency_only,
         "max_samples": args.max_samples,
+        "heartbeat_seconds": args.heartbeat_seconds,
     }
     (comparison_dir / "metadata.json").write_text(json.dumps(metadata, indent=2))
 

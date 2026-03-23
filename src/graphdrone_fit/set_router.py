@@ -5,6 +5,7 @@ from dataclasses import dataclass, replace
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from .alignment import OTNoiseGate, RotorAlignment
 from .config import LegitimacyGateConfig, SetRouterConfig
@@ -18,6 +19,7 @@ class RouterOutputs:
     router_kind: str
     aux_loss: torch.Tensor | None = None
     ot_costs: torch.Tensor | None = None
+    extra_diagnostics: dict[str, float] | None = None
 
 
 @dataclass(frozen=True)
@@ -71,7 +73,17 @@ class BootstrapFullRouter(nn.Module):
         n_rows, n_experts, _ = tokens.shape
         specialist_weights = torch.zeros((n_rows, n_experts), dtype=tokens.dtype, device=tokens.device)
         defer_prob = torch.zeros((n_rows, 1), dtype=tokens.dtype, device=tokens.device)
-        return RouterOutputs(specialist_weights, defer_prob, full_index, "bootstrap_full_only")
+        diagnostics = {
+            "n_experts": float(n_experts),
+            "n_specialists": float(max(n_experts - 1, 0)),
+        }
+        return RouterOutputs(
+            specialist_weights,
+            defer_prob,
+            full_index,
+            "bootstrap_full_only",
+            extra_diagnostics=diagnostics,
+        )
 
 
 class LearnedNoiseGate(nn.Module):
@@ -121,26 +133,50 @@ class ContextualTransformerRouter(nn.Module):
         if hasattr(self.noise_gate_module, "fit_prototypes"):
             self.noise_gate_module.fit_prototypes(tokens, full_index=full_index)
 
-    def _apply_noise_gate(self, tokens: torch.Tensor, *, full_index: int) -> tuple[torch.Tensor, torch.Tensor | None]:
+    def _apply_noise_gate(
+        self,
+        tokens: torch.Tensor,
+        *,
+        full_index: int,
+    ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
         if self.noise_gate_module is None:
-            return tokens, None
+            return tokens, None, None
         validity, ot_costs = self.noise_gate_module(tokens, full_index=full_index)
-        return tokens * validity, ot_costs
+        return tokens * validity, ot_costs, validity
 
     def forward(self, tokens: torch.Tensor, *, full_index: int) -> RouterOutputs:
-        gated_tokens, ot_costs = self._apply_noise_gate(tokens, full_index=full_index)
+        gated_tokens, ot_costs, validity = self._apply_noise_gate(tokens, full_index=full_index)
         anchor_token = gated_tokens[:, full_index, :]
         q = self.q_proj(anchor_token)
         k = self.k_proj(gated_tokens)
         attn_scores = torch.einsum("bh,beh->be", q, k) * self.scale
         specialist_weights = torch.softmax(attn_scores, dim=-1)
         defer_prob = torch.sigmoid(self.defer_head(anchor_token))
+        diagnostics = {
+            "n_experts": float(tokens.shape[1]),
+            "n_specialists": float(max(tokens.shape[1] - 1, 0)),
+        }
+        if validity is not None and tokens.shape[1] > 1:
+            specialist_validity = torch.cat(
+                [
+                    validity[:, :full_index, :],
+                    validity[:, full_index + 1 :, :],
+                ],
+                dim=1,
+            )
+            diagnostics.update(
+                {
+                    "mean_specialist_validity": float(specialist_validity.mean().item()),
+                    "closed_specialist_frac": float((specialist_validity < 0.5).float().mean().item()),
+                }
+            )
         return RouterOutputs(
             specialist_weights=specialist_weights,
             defer_prob=defer_prob,
             full_index=full_index,
             router_kind=self.router_kind,
             ot_costs=ot_costs,
+            extra_diagnostics=diagnostics,
         )
 
 
@@ -170,6 +206,8 @@ class RotorAlignedRouter(nn.Module):
         aligned = tokens.clone()
         anchor = tokens[:, full_index, :]
         losses: list[torch.Tensor] = []
+        pre_cosines: list[torch.Tensor] = []
+        post_cosines: list[torch.Tensor] = []
         rotor_idx = 0
         for expert_idx in range(tokens.shape[1]):
             if expert_idx == full_index:
@@ -178,13 +216,38 @@ class RotorAlignedRouter(nn.Module):
             rotated = rotor(tokens[:, expert_idx, :])
             aligned[:, expert_idx, :] = rotated
             losses.append(rotor.alignment_loss(tokens[:, expert_idx, :], anchor.detach()))
+            pre_cosines.append(F.cosine_similarity(tokens[:, expert_idx, :], anchor, dim=-1).mean())
+            post_cosines.append(F.cosine_similarity(rotated, anchor, dim=-1).mean())
             rotor_idx += 1
 
         outputs = self.base_router(aligned, full_index=full_index)
         aux_loss = None
+        diagnostics = dict(outputs.extra_diagnostics or {})
         if losses:
             aux_loss = self.alignment_lambda * torch.stack(losses).mean()
-        return replace(outputs, router_kind=self.router_kind, aux_loss=aux_loss)
+            pre = torch.stack(pre_cosines).mean()
+            post = torch.stack(post_cosines).mean()
+            diagnostics.update(
+                {
+                    "alignment_cosine_pre": float(pre.item()),
+                    "alignment_cosine_post": float(post.item()),
+                    "alignment_cosine_gain": float((post - pre).item()),
+                }
+            )
+        else:
+            diagnostics.update(
+                {
+                    "alignment_cosine_pre": float("nan"),
+                    "alignment_cosine_post": float("nan"),
+                    "alignment_cosine_gain": float("nan"),
+                }
+            )
+        return replace(
+            outputs,
+            router_kind=self.router_kind,
+            aux_loss=aux_loss,
+            extra_diagnostics=diagnostics,
+        )
 
 
 def _make_noise_gate(config: SetRouterConfig, token_dim: int) -> nn.Module | None:

@@ -223,6 +223,8 @@ def run_tabpfn(X_tr, y_tr, X_te, task_type: str):
 def _diagnostic_payload(diagnostics: dict[str, object]) -> dict[str, object]:
     keep_keys = (
         "router_kind",
+        "n_experts",
+        "n_specialists",
         "mean_defer_prob",
         "early_exit",
         "exit_frac",
@@ -231,7 +233,12 @@ def _diagnostic_payload(diagnostics: dict[str, object]) -> dict[str, object]:
         "legitimacy_score_mean",
         "router_skipped",
         "mean_ot_cost",
+        "mean_specialist_validity",
+        "closed_specialist_frac",
         "alignment_aux_loss",
+        "alignment_cosine_pre",
+        "alignment_cosine_post",
+        "alignment_cosine_gain",
     )
     payload: dict[str, object] = {}
     for key in keep_keys:
