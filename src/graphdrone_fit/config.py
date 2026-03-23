@@ -1,8 +1,26 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal
+
+
+ROUTER_KIND_ALIASES = {
+    "contextual_transformer_router": "contextual_transformer",
+    "cross_attention_set_router": "contextual_transformer",
+    "hyper_set_router": "contextual_transformer",
+}
+VALID_ROUTER_KINDS = frozenset(
+    {
+        "bootstrap_full_only",
+        "contextual_transformer",
+        "noise_gate_router",
+        "contextual_transformer_rotor",
+        "noise_gate_router_rotor",
+        "contextual_transformer_ot_gate",
+        "ot_noise_gate_router",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -16,12 +34,113 @@ class PortfolioLoadConfig:
 
 @dataclass(frozen=True)
 class SetRouterConfig:
-    kind: Literal["bootstrap_full_only", "contextual_transformer", "noise_gate_router"] = "bootstrap_full_only"
+    kind: Literal[
+        "bootstrap_full_only",
+        "contextual_transformer",
+        "noise_gate_router",
+        "contextual_transformer_rotor",
+        "noise_gate_router_rotor",
+        "contextual_transformer_ot_gate",
+        "ot_noise_gate_router",
+    ] = "bootstrap_full_only"
     sparse_top_k: int = 1
+    alignment_lambda: float = 0.0
+    router_seed: int = 42
+    freeze_base_router: bool = False
+    ot_prototype_count: int = 32
+    ot_epsilon: float = 0.05
+    ot_max_iter: int = 50
+    ot_alpha: float = 6.0
+    ot_threshold: float = 0.25
+    # Defer regularization: quadratic penalty (mean_defer - defer_target)^2
+    # applied during binary classification router training to prevent defer saturation.
+    # Set defer_penalty_lambda=0.0 (default) to disable (no change to existing behavior).
+    defer_penalty_lambda: float = 0.0
+    defer_target: float = 0.8
+    # Task-conditioned prior: inject a cross-dataset task prior into the anchor token.
+    # All fields default to None/0 which disables the prior entirely (no-op).
+    task_prior_bank_dir: str | None = None
+    task_prior_encoder_kind: Literal["transformer", "gru"] = "transformer"
+    task_prior_strength: float = 0.5
+    task_prior_dataset_key: str | None = None
+    task_prior_exact_reuse_blend: float = 0.5
+    # OOF threshold calibration: compute F1-maximizing threshold on OOF blend
+    # predictions after router training and apply it at inference (binary only).
+    # Set calibrate_threshold=False (default) to disable (preserves prior behavior).
+    calibrate_threshold: bool = False
 
     def validate(self) -> "SetRouterConfig":
+        normalized_kind = ROUTER_KIND_ALIASES.get(self.kind, self.kind)
+        if normalized_kind not in VALID_ROUTER_KINDS:
+            raise ValueError(
+                f"Unsupported router kind={self.kind!r}; expected one of "
+                f"{sorted(VALID_ROUTER_KINDS | set(ROUTER_KIND_ALIASES))}"
+            )
         if self.sparse_top_k < 1:
             raise ValueError(f"sparse_top_k must be positive, got {self.sparse_top_k}")
+        if self.alignment_lambda < 0:
+            raise ValueError(f"alignment_lambda must be non-negative, got {self.alignment_lambda}")
+        if self.router_seed < 0:
+            raise ValueError(f"router_seed must be non-negative, got {self.router_seed}")
+        if self.ot_prototype_count < 1:
+            raise ValueError(f"ot_prototype_count must be positive, got {self.ot_prototype_count}")
+        if self.ot_epsilon <= 0:
+            raise ValueError(f"ot_epsilon must be positive, got {self.ot_epsilon}")
+        if self.ot_max_iter < 1:
+            raise ValueError(f"ot_max_iter must be positive, got {self.ot_max_iter}")
+        if self.defer_penalty_lambda < 0:
+            raise ValueError(f"defer_penalty_lambda must be non-negative, got {self.defer_penalty_lambda}")
+        if not 0.0 <= self.defer_target <= 1.0:
+            raise ValueError(f"defer_target must be in [0, 1], got {self.defer_target}")
+        if self.task_prior_strength < 0:
+            raise ValueError(f"task_prior_strength must be non-negative, got {self.task_prior_strength}")
+        if not 0.0 <= self.task_prior_exact_reuse_blend <= 1.0:
+            raise ValueError(
+                f"task_prior_exact_reuse_blend must be in [0, 1], got {self.task_prior_exact_reuse_blend}"
+            )
+        if self.task_prior_bank_dir is not None and not str(self.task_prior_bank_dir).strip():
+            raise ValueError("task_prior_bank_dir must be non-empty when provided")
+        if self.task_prior_dataset_key is not None and not str(self.task_prior_dataset_key).strip():
+            raise ValueError("task_prior_dataset_key must be non-empty when provided")
+        return replace(self, kind=normalized_kind)
+
+
+@dataclass(frozen=True)
+class LegitimacyGateConfig:
+    enabled: bool = True
+    regression_enabled: bool = True
+    binary_enabled: bool = False
+    multiclass_enabled: bool = False
+    classification_entropy_threshold: float = 0.15
+    regression_variance_threshold: float = 0.005
+
+    def validate(self) -> "LegitimacyGateConfig":
+        if not 0.0 <= self.classification_entropy_threshold <= 1.0:
+            raise ValueError(
+                "classification_entropy_threshold must be in [0, 1], got "
+                f"{self.classification_entropy_threshold}"
+            )
+        if self.regression_variance_threshold < 0.0:
+            raise ValueError(
+                f"regression_variance_threshold must be non-negative, got {self.regression_variance_threshold}"
+            )
+        return self
+
+
+@dataclass(frozen=True)
+class HyperbolicDescriptorConfig:
+    enabled: bool = False
+    embedding_dim: int = 4
+    curvature: float = 1.0
+    max_norm: float = 0.95
+
+    def validate(self) -> "HyperbolicDescriptorConfig":
+        if self.embedding_dim < 1:
+            raise ValueError(f"embedding_dim must be positive, got {self.embedding_dim}")
+        if self.curvature <= 0:
+            raise ValueError(f"curvature must be positive, got {self.curvature}")
+        if not 0.0 < self.max_norm < 1.0:
+            raise ValueError(f"max_norm must be in (0, 1), got {self.max_norm}")
         return self
 
 
@@ -30,6 +149,8 @@ class GraphDroneConfig:
     portfolio: PortfolioLoadConfig | None = None
     full_expert_id: str = "FULL"
     router: SetRouterConfig = field(default_factory=SetRouterConfig)
+    legitimacy_gate: LegitimacyGateConfig = field(default_factory=LegitimacyGateConfig)
+    hyperbolic_descriptors: HyperbolicDescriptorConfig = field(default_factory=HyperbolicDescriptorConfig)
     # n_classes > 1 forces classification mode and pins the output dimension.
     # Leave at 1 for regression or binary auto-detection.
     n_classes: int = 1
@@ -41,7 +162,14 @@ class GraphDroneConfig:
     def validate(self) -> "GraphDroneConfig":
         if not self.full_expert_id.strip():
             raise ValueError("full_expert_id must be non-empty")
-        self.router.validate()
+        router = self.router.validate()
+        legitimacy_gate = self.legitimacy_gate.validate()
+        hyperbolic_descriptors = self.hyperbolic_descriptors.validate()
         if self.portfolio is not None:
             self.portfolio.resolved_manifest_path()
-        return self
+        return replace(
+            self,
+            router=router,
+            legitimacy_gate=legitimacy_gate,
+            hyperbolic_descriptors=hyperbolic_descriptors,
+        )

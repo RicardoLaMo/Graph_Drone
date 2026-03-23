@@ -1,0 +1,7 @@
+interface:
+  display_name: "Research Memory Ledger"
+  short_description: "Turn experiments into durable knowledge"
+  default_prompt: "Use $research-memory-ledger to record this experiment as durable research knowledge rather than a one-off run."
+
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,7 @@
+interface:
+  display_name: "GraphDrone Benchmark Governance"
+  short_description: "Govern GraphDrone benchmark contracts and evidence"
+  default_prompt: "Use $graphdrone-benchmark-governance to run or review a GraphDrone benchmark with explicit contract control and evidence grading."
+
+policy:
+  allow_implicit_invocation: true

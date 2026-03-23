@@ -1,0 +1,7 @@
+interface:
+  display_name: "GraphDrone Research Memory"
+  short_description: "Record and review durable GraphDrone findings"
+  default_prompt: "Use $graphdrone-research-memory to record a GraphDrone experiment into branch notes and durable findings."
+
+policy:
+  allow_implicit_invocation: true

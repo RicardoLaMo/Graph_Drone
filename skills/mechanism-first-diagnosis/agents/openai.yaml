@@ -1,0 +1,7 @@
+interface:
+  display_name: "Mechanism-First Diagnosis"
+  short_description: "Explain local-win global-loss failures"
+  default_prompt: "Use $mechanism-first-diagnosis to explain why a component win failed to survive end-to-end integration."
+
+policy:
+  allow_implicit_invocation: true

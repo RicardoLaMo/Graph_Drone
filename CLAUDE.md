@@ -1,19 +1,42 @@
 # GraphDrone — Developer Guide for Claude
 
-## Current best ELO (2026-03-19, v1.20.0) — **BOTH ENGINES WIN**
+## Project Skill Bridge
+
+The repo now exports reusable research-operation skills into `.claude/skills/`.
+
+- Source of truth: `skills/`
+- Claude-facing copy: `.claude/skills/`
+- Refresh command:
+  ```bash
+  python scripts/export_skills_to_claude.py
+  ```
+
+For methodology-heavy tasks, read `.claude/skills/INDEX.md` first, then the relevant skill pack:
+- generic parent skills:
+  - `research-platform-ops`
+  - `mechanism-first-diagnosis`
+  - `research-memory-ledger`
+  - `benchmark-evidence-governance`
+- GraphDrone specializations:
+  - `graphdrone-research-ops`
+  - `graphdrone-mechanism-diagnosis`
+  - `graphdrone-research-memory`
+  - `graphdrone-benchmark-governance`
+
+## Current best ELO (2026-03-23, v1.3.0) — **BOTH ENGINES WIN**
 
 | Engine | GD ELO | TabPFN ELO | Benchmark | Tasks |
 |---|---|---|---|---|
 | **Regression** | **1523.2** | 1476.8 | geopoe, v1-geopoe-2026.03.19c | 36/36 |
-| **Classification** | **1503.3** | 1496.7 | smart benchmark, 2026.03.19-clf-mc-v1.20 | 54/54 |
+| **Classification** | **1512.4** | 1487.6 | smart benchmark, 2026.03.23-clf-v1.3-phase3b-r3 | 54/54 |
 
 Both engines are in `main`. One `GraphDrone` class dispatches via `_detect_problem_type(y)`.
 
-### Classification per-dataset (v1.20, smart benchmark — 9 datasets × 3 folds)
+### Classification per-dataset (v1.3.0, smart benchmark — 9 datasets × 3 folds)
 | Dataset | GD F1 | TPF F1 | GD log_loss | TPF log_loss | Result |
 |---|---|---|---|---|---|
-| diabetes (binary) | 0.7394 | 0.7320 | 0.4748 | 0.4736 | **GD wins F1 +0.007** |
-| credit_g (binary) | 0.6897 | 0.6937 | 0.4836 | 0.4760 | Gap: −0.004 F1 |
+| diabetes (binary) | 0.7539 | 0.7320 | 0.4738 | 0.4736 | **GD wins F1 +0.022** |
+| credit_g (binary) | 0.7226 | 0.6937 | 0.4805 | 0.4760 | **GD wins F1 +0.029** (gap closed) |
 | segment (7-class) | 0.9474 | 0.9474 | 0.1383 | 0.1442 | Tie F1, **GD wins log_loss** |
 | mfeat_factors (10-class) | 0.9843 | 0.9826 | 0.0386 | 0.0442 | **GD wins both** |
 | pendigits (10-class) | 0.9949 | 0.9959 | 0.0268 | 0.0261 | Near-saturation |
@@ -94,7 +117,7 @@ PYTHONPATH=src python scripts/run_smart_benchmark.py --quick --folds 0
 
 - **Bump `GRAPHDRONE_VERSION`** in the relevant script after any model code change, or stale cached results will be used.
 - Current regression version: `v1-geopoe-2026.03.19c`
-- Current classification version: `2026.03.19-clf-mc-v1.20`
+- Current classification version: `2026.03.23-clf-v1.3-phase3b-r3`
 
 ---
 
@@ -108,13 +131,15 @@ PYTHONPATH=src python scripts/run_smart_benchmark.py --quick --folds 0
 | 2026-03-19 | v1-geopoe-2026.03.19b | 1482.3 | — | Multi-view reg, no residual penalty. Diamonds collapse (defer=1.0). |
 | 2026-03-19 | v1-geopoe-2026.03.19c | **1523.2** | — | Residual penalty added. GD beats TabPFN on regression. v1.18.0. |
 | 2026-03-19 | v1.19.0 | 1523.2 | 1502.2 | Binary/multiclass split. Both engines win. |
-| **2026-03-19** | **v1.20.0** | **1523.2** | **1503.3** | **← current main**. Feature-count portfolio + bagged quality tokens. 9 datasets. |
+| 2026-03-19 | v1.20.0 | 1523.2 | 1503.3 | Feature-count portfolio + bagged quality tokens. 9 datasets. |
+| 2026-03-23 | v1.3.0-rc | 1523.2 | 1507.9 | TaskConditionedPrior + confidence-gated defer penalty. credit_g gap −0.004→−0.0014. |
+| **2026-03-23** | **v1.3.0** | **1523.2** | **1512.4** | **← current branch**. OOF threshold calibration (Phase 3B). credit_g gap fully closed, GD leads TabPFN +0.029. |
 
 ---
 
 ## Known gaps (future work)
 
-1. **credit_g still lags TabPFN** (−0.004 F1). Root cause: 20 features × 3 SUBs at 70-80% provides minimal diversity; OOF holdout ~160 rows. Further improvement: Latin square permutations (Idea E in `research/tabicl_inspiration.md`).
+1. **credit_g gap CLOSED** (v1.3.0). OOF threshold calibration moved threshold to 0.61–0.68 (credit_g has 30% positive rate). GD now leads TabPFN +0.029 F1. Remaining open: log_loss on credit_g still lags (threshold shifts improve F1 but not calibration).
 
 2. **Multiclass log_loss on low-dim** (maternal_health_risk, SDSS17 below TabPFN). Static GeoPOE at anchor_weight=5.0 is well-calibrated for F1 but slightly over-confident. ScalarGatingAdapter (Phase 3) was designed to learn this but had a bug (`use_learned` path exclusion); fixed in `exp/clf-mc-scalar-gating` but not yet benchmarked successfully.
 

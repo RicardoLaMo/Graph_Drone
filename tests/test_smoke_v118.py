@@ -63,7 +63,7 @@ def check(name: str, condition: bool, detail: str = ""):
 print("\n── Regression engine (v1-width GORA) ─────────────────────────────")
 
 split = int(N_REG * 0.8)
-gd_reg = GraphDrone(GraphDroneConfig())
+gd_reg = GraphDrone(GraphDroneConfig(router=SetRouterConfig(kind="contextual_transformer")))
 gd_reg.fit(X_reg[:split], y_reg[:split], problem_type="regression")
 result_reg = gd_reg.predict(X_reg[split:], return_diagnostics=True)
 
@@ -83,6 +83,8 @@ diag_reg = result_reg.diagnostics
 check("regression: router_kind is NOT geo_poe",
       diag_reg.get("router_kind") != "geo_poe",
       f"router_kind={diag_reg.get('router_kind')}")
+check("regression: legitimacy diagnostics present",
+      "early_exit" in diag_reg and "exit_frac" in diag_reg)
 check("regression: problem_type stored as regression",
       gd_reg._problem_type == "regression")
 
@@ -90,7 +92,7 @@ check("regression: problem_type stored as regression",
 # ---------------------------------------------------------------------------
 # 3. CLASSIFICATION ENGINE — binary
 # ---------------------------------------------------------------------------
-print("\n── Classification engine — binary (multi-view static GeoPOE) ──────")
+print("\n── Classification engine — binary (learned noise-gated router) ────")
 
 split_b = int(N_BIN * 0.8)
 gd_bin = GraphDrone(GraphDroneConfig(n_classes=2))
@@ -109,9 +111,11 @@ acc_bin = (preds_bin == y_bin[split_b:]).mean()
 check("binary clf: accuracy > 0.5", acc_bin > 0.5, f"acc={acc_bin:.3f}")
 
 diag_bin = result_bin.diagnostics
-check("binary clf: router_kind=geo_poe (static path)",
-      diag_bin.get("router_kind") == "geo_poe",
+check("binary clf: router_kind is learned path",
+      diag_bin.get("router_kind") != "geo_poe",
       f"router_kind={diag_bin.get('router_kind')}")
+check("binary clf: legitimacy diagnostics present",
+      "early_exit" in diag_bin and "exit_frac" in diag_bin)
 check("binary clf: problem_type stored as classification",
       gd_bin._problem_type == "classification")
 

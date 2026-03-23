@@ -1,0 +1,7 @@
+interface:
+  display_name: "GraphDrone Research Ops"
+  short_description: "Operate GraphDrone research with durable evidence"
+  default_prompt: "Use $graphdrone-research-ops to run a GraphDrone research change with branch hygiene, evidence capture, and durable finding updates."
+
+policy:
+  allow_implicit_invocation: true

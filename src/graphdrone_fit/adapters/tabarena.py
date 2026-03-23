@@ -4,7 +4,16 @@ import pandas as pd
 import torch
 from sklearn.impute import SimpleImputer
 from tabarena.benchmark.models.wrapper.abstract_class import AbstractExecModel
-from graphdrone_fit import GraphDrone, GraphDroneConfig, SetRouterConfig, ExpertBuildSpec, ViewDescriptor, IdentitySelectorAdapter
+from graphdrone_fit import (
+    ExpertBuildSpec,
+    GraphDrone,
+    GraphDroneConfig,
+    HyperbolicDescriptorConfig,
+    IdentitySelectorAdapter,
+    LegitimacyGateConfig,
+    SetRouterConfig,
+    ViewDescriptor,
+)
 
 # Monkey-patch GpuMemoryTracker to disable GPU memory tracking
 # This avoids CUDA device-side assert errors caused by hardcoded device=0
@@ -22,8 +31,28 @@ class GraphDroneTabArenaAdapter(AbstractExecModel):
     """
     Enhanced Adapter for TabArena with Hybrid Prior support.
     """
-    def __init__(self, *args, n_estimators: int = 8, router_kind: str = "noise_gate_router",
-                 use_gora: bool = True, use_hybrid_prior: bool = False, **kwargs):
+    def __init__(
+        self,
+        *args,
+        n_estimators: int = 8,
+        router_kind: str = "noise_gate_router",
+        use_gora: bool = True,
+        use_hybrid_prior: bool = False,
+        legitimacy_gate: bool = True,
+        gate_regression: bool = True,
+        gate_binary: bool = False,
+        gate_multiclass: bool = False,
+        legitimacy_entropy_threshold: float = 0.15,
+        legitimacy_variance_threshold: float = 0.005,
+        use_hyperbolic_descriptors: bool = False,
+        alignment_lambda: float = 0.1,
+        ot_prototype_count: int = 32,
+        ot_epsilon: float = 0.05,
+        ot_max_iter: int = 50,
+        ot_alpha: float = 6.0,
+        ot_threshold: float = 0.25,
+        **kwargs,
+    ):
         # Extract device from kwargs if present (TabArena may pass it)
         kwargs.pop('device', None)
         super().__init__(*args, **kwargs)
@@ -31,6 +60,19 @@ class GraphDroneTabArenaAdapter(AbstractExecModel):
         self.router_kind = router_kind
         self.use_gora = use_gora
         self.use_hybrid_prior = use_hybrid_prior
+        self.legitimacy_gate = legitimacy_gate
+        self.gate_regression = gate_regression
+        self.gate_binary = gate_binary
+        self.gate_multiclass = gate_multiclass
+        self.legitimacy_entropy_threshold = legitimacy_entropy_threshold
+        self.legitimacy_variance_threshold = legitimacy_variance_threshold
+        self.use_hyperbolic_descriptors = use_hyperbolic_descriptors
+        self.alignment_lambda = alignment_lambda
+        self.ot_prototype_count = ot_prototype_count
+        self.ot_epsilon = ot_epsilon
+        self.ot_max_iter = ot_max_iter
+        self.ot_alpha = ot_alpha
+        self.ot_threshold = ot_threshold
         self.model = None
         self.imputer = None
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -80,7 +122,26 @@ class GraphDroneTabArenaAdapter(AbstractExecModel):
 
         config = GraphDroneConfig(
             full_expert_id="FULL",
-            router=SetRouterConfig(kind=self.router_kind)
+            router=SetRouterConfig(
+                kind=self.router_kind,
+                alignment_lambda=self.alignment_lambda,
+                ot_prototype_count=self.ot_prototype_count,
+                ot_epsilon=self.ot_epsilon,
+                ot_max_iter=self.ot_max_iter,
+                ot_alpha=self.ot_alpha,
+                ot_threshold=self.ot_threshold,
+            ),
+            legitimacy_gate=LegitimacyGateConfig(
+                enabled=self.legitimacy_gate,
+                regression_enabled=self.gate_regression,
+                binary_enabled=self.gate_binary,
+                multiclass_enabled=self.gate_multiclass,
+                classification_entropy_threshold=self.legitimacy_entropy_threshold,
+                regression_variance_threshold=self.legitimacy_variance_threshold,
+            ),
+            hyperbolic_descriptors=HyperbolicDescriptorConfig(
+                enabled=self.use_hyperbolic_descriptors,
+            ),
         )
         
         # Fit imputer on training data to handle datasets with missing values

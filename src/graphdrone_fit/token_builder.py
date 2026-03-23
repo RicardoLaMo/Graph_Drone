@@ -1,8 +1,13 @@
 from __future__ import annotations
-import torch
-import numpy as np
 from dataclasses import dataclass, field
 from typing import Dict, Tuple, Optional
+
+import numpy as np
+import torch
+import torch.nn as nn
+
+from .config import HyperbolicDescriptorConfig
+from .hyperbolic import HyperbolicDescriptorEncoder
 from .view_descriptor import ViewDescriptor
 from .support_encoder import SupportEncoding
 
@@ -18,11 +23,20 @@ class TokenBatch:
     field_slices: dict[str, tuple[int, int]]
     field_names: dict[str, tuple[str, ...]]
 
-class UniversalTokenBuilder:
+class UniversalTokenBuilder(nn.Module):
     """
     Consolidated Token Builder for GraphDrone.
     Handles Prediction, Quality (Sigma2), Support Moments, SNR, and Geometric Observers.
     """
+    def __init__(self, hyperbolic_config: HyperbolicDescriptorConfig | None = None):
+        super().__init__()
+        self.hyperbolic_config = hyperbolic_config.validate() if hyperbolic_config is not None else None
+        self.hyperbolic_encoder = (
+            HyperbolicDescriptorEncoder(self.hyperbolic_config)
+            if self.hyperbolic_config is not None and self.hyperbolic_config.enabled
+            else None
+        )
+
     def build(
         self,
         *,
@@ -125,6 +139,9 @@ class UniversalTokenBuilder:
         return TokenBatch(tokens, expert_ids, slices, names)
 
     def _build_descriptor_tensor(self, descriptors: tuple[ViewDescriptor, ...]) -> tuple[torch.Tensor, tuple[str, ...]]:
+        if self.hyperbolic_encoder is not None:
+            return self.hyperbolic_encoder(descriptors)
+
         rows = []
         for d in descriptors:
             rows.append([
@@ -137,3 +154,11 @@ class UniversalTokenBuilder:
             ])
         names = ("is_anchor", "input_dim", "preferred_k", "fam_full", "fam_subspace", "fam_support")
         return torch.tensor(rows, dtype=torch.float32), names
+
+    def trainable_parameters(self) -> list[nn.Parameter]:
+        return list(self.parameters())
+
+    @torch.no_grad()
+    def project_hyperbolic_parameters_(self) -> None:
+        if self.hyperbolic_encoder is not None:
+            self.hyperbolic_encoder.project_parameters_()

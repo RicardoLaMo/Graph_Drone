@@ -1,0 +1,7 @@
+interface:
+  display_name: "Benchmark Evidence Governance"
+  short_description: "Govern benchmark contracts and evidence"
+  default_prompt: "Use $benchmark-evidence-governance to review or run benchmarks with explicit contract control and evidence grading."
+
+policy:
+  allow_implicit_invocation: true
