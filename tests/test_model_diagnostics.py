@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from graphdrone_fit.config import GraphDroneConfig
+from graphdrone_fit.config import GraphDroneConfig, LegitimacyGateConfig
 from graphdrone_fit.expert_factory import ExpertPredictionBatch
 from graphdrone_fit.model import GraphDrone
 from graphdrone_fit.view_descriptor import ViewDescriptor
@@ -76,6 +76,52 @@ def test_regression_residual_usefulness_gap_is_positive_when_router_misses_avail
     assert float(stats["residual_usefulness_gap"][active].mean().item()) > 0.9
 
 
+def test_regression_allocation_usefulness_prefers_positive_mass_on_helpful_specialists():
+    expert_predictions = torch.tensor(
+        [
+            [10.0, 9.0, 20.0],
+            [5.0, 4.0, 20.0],
+        ],
+        dtype=torch.float32,
+    )
+    y_true = torch.tensor([9.0, 4.0], dtype=torch.float32)
+    defer_prob = torch.ones((2, 1), dtype=torch.float32)
+
+    good_weights = torch.tensor(
+        [
+            [0.1, 0.9, 0.0],
+            [0.1, 0.9, 0.0],
+        ],
+        dtype=torch.float32,
+    )
+    bad_weights = torch.tensor(
+        [
+            [0.1, 0.0, 0.9],
+            [0.1, 0.0, 0.9],
+        ],
+        dtype=torch.float32,
+    )
+
+    good_stats = GraphDrone._regression_residual_usefulness_tensors(
+        expert_predictions=expert_predictions,
+        y_true=y_true,
+        specialist_weights=good_weights,
+        defer_prob=defer_prob,
+        full_index=0,
+    )
+    bad_stats = GraphDrone._regression_residual_usefulness_tensors(
+        expert_predictions=expert_predictions,
+        y_true=y_true,
+        specialist_weights=bad_weights,
+        defer_prob=defer_prob,
+        full_index=0,
+    )
+
+    good_score = GraphDrone._regression_allocation_usefulness_from_stats(good_stats)
+    bad_score = GraphDrone._regression_allocation_usefulness_from_stats(bad_stats)
+    assert float(good_score.item()) > float(bad_score.item())
+
+
 def test_regression_prediction_falls_back_to_anchor_when_training_nonfinite():
     gd = GraphDrone(GraphDroneConfig())
     gd._problem_type = "regression"
@@ -119,3 +165,53 @@ def test_regression_prediction_falls_back_to_anchor_when_training_nonfinite():
     assert diagnostics["validation_router_training_nonfinite_flag"] == 1.0
     assert diagnostics["regression_router_fallback_stage"] == "train_loss"
     assert diagnostics["regression_router_fallback_reason"] == "nonfinite_loss"
+
+
+def test_regression_legitimacy_early_exit_preserves_router_fit_diagnostics():
+    gd = GraphDrone(
+        GraphDroneConfig(
+            legitimacy_gate=LegitimacyGateConfig(
+                enabled=True,
+                regression_enabled=True,
+                binary_enabled=False,
+                multiclass_enabled=False,
+                regression_variance_threshold=1.0,
+            )
+        )
+    )
+    gd._problem_type = "regression"
+    gd._router_fit_diagnostics = {
+        "validation_weighted_specialist_advantage_score": 0.25,
+        "validation_allocation_usefulness_score": 0.5,
+    }
+
+    batch = ExpertPredictionBatch(
+        expert_ids=("FULL", "SUB0"),
+        descriptors=(
+            ViewDescriptor(
+                expert_id="FULL",
+                family="FULL",
+                view_name="Full",
+                is_anchor=True,
+                input_dim=2,
+                input_indices=(0, 1),
+            ),
+            ViewDescriptor(
+                expert_id="SUB0",
+                family="structural_subspace",
+                view_name="Sub",
+                input_dim=1,
+                input_indices=(0,),
+            ),
+        ),
+        predictions=np.array([[1.0, 10.0], [2.0, 20.0]], dtype=np.float32),
+        full_expert_id="FULL",
+        full_index=0,
+        quality_scores=np.zeros((2, 2, 1), dtype=np.float32),
+    )
+
+    preds, diagnostics = gd._regression_predictions(np.zeros((2, 2), dtype=np.float32), batch)
+    assert np.allclose(preds, np.array([1.0, 2.0], dtype=np.float32))
+    assert diagnostics["router_kind"] == "legitimacy_gate_anchor_only"
+    assert diagnostics["validation_weighted_specialist_advantage_score"] == 0.25
+    assert diagnostics["validation_allocation_usefulness_score"] == 0.5

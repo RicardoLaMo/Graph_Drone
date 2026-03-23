@@ -46,6 +46,7 @@ class SetRouterConfig:
     sparse_top_k: int = 1
     alignment_lambda: float = 0.0
     residual_usefulness_lambda: float = 0.0
+    allocation_usefulness_lambda: float = 0.0
     router_seed: int = 42
     freeze_base_router: bool = False
     ot_prototype_count: int = 32
@@ -77,6 +78,10 @@ class SetRouterConfig:
         if self.residual_usefulness_lambda < 0:
             raise ValueError(
                 f"residual_usefulness_lambda must be non-negative, got {self.residual_usefulness_lambda}"
+            )
+        if self.allocation_usefulness_lambda < 0:
+            raise ValueError(
+                f"allocation_usefulness_lambda must be non-negative, got {self.allocation_usefulness_lambda}"
             )
         if self.router_seed < 0:
             raise ValueError(f"router_seed must be non-negative, got {self.router_seed}")

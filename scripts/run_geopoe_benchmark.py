@@ -270,6 +270,8 @@ def _diagnostic_payload(diagnostics: dict[str, object]) -> dict[str, object]:
         "validation_residual_usefulness_gap",
         "validation_positive_specialist_mass",
         "validation_top_specialist_positive_rate",
+        "validation_allocation_usefulness_score",
+        "validation_allocation_usefulness_lambda",
         "validation_residual_usefulness_lambda",
     )
     payload: dict[str, object] = {}

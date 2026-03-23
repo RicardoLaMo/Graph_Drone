@@ -43,6 +43,50 @@ Use:
 - quick regression gate first
 - then fold-0 mini-full regression
 
+## First implemented change
+
+The first usefulness-routing change adds a direct allocation-focused regression objective.
+
+New config/control:
+- `allocation_usefulness_lambda`
+- env: `GRAPHDRONE_ALLOCATION_USEFULNESS_LAMBDA`
+
+Current formulation:
+- reward positive `validation_weighted_specialist_advantage_score`
+- reward positive `validation_positive_specialist_mass`
+- combined training-side allocation score:
+  - `validation_allocation_usefulness_score`
+
+This is intentionally different from the already falsified residual-gap penalty:
+- the old formulation mainly punished missed opportunity after a poor allocation
+- the new formulation tries to reward selective mass on helpful specialists directly
+
+## First quick result
+
+Quick contract:
+- `eval/v13_reg_usefulness_quick_v2/report/results_granular.csv`
+- `eval/v13_reg_usefulness_quick_v2/report/regression_route_state_summary.csv`
+
+Setting:
+- `GRAPHDRONE_ALLOCATION_USEFULNESS_LAMBDA=0.1`
+
+Observed behavior:
+- `california`
+  - stayed `clean_routed`
+  - weighted specialist advantage improved slightly
+  - positive specialist mass improved slightly
+  - defer dropped from the prior quick baseline
+  - RMSE got slightly worse
+- `cpu_act`
+  - stayed `legitimacy_gate_anchor_only` at prediction time
+  - but now preserves training-side usefulness diagnostics in the artifact row
+  - weighted specialist advantage and positive specialist mass were both strong on the router-training split
+
+Current interpretation:
+- the direct allocation reward is mechanistically alive
+- the new usefulness diagnostics are now visible even on early-exit rows
+- end-to-end translation is still mixed, so the lane remains open
+
 ## Acceptance
 
 This lane succeeds when realized specialist value improves materially before or alongside RMSE/R² improvement.

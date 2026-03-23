@@ -381,7 +381,20 @@ class GraphDrone:
             "validation_residual_usefulness_gap": float(
                 stats["residual_usefulness_gap"][active].mean().item()
             ),
+            "validation_allocation_usefulness_score": float(
+                GraphDrone._regression_allocation_usefulness_from_stats(stats).item()
+            ),
         }
+
+    @staticmethod
+    def _regression_allocation_usefulness_from_stats(stats: dict[str, torch.Tensor]) -> torch.Tensor:
+        active = stats["active_mask"]
+        if not bool(active.any().item()):
+            reference = stats["weighted_advantage"]
+            return reference.new_zeros(())
+        weighted_advantage = stats["weighted_advantage"][active].mean()
+        positive_mass = stats["positive_mass"][active].mean()
+        return weighted_advantage + 0.5 * positive_mass
 
     @staticmethod
     def _regression_residual_usefulness_tensors(
@@ -488,6 +501,7 @@ class GraphDrone:
         print(
             f"  -> Optimizing {label} on {self.device} "
             f"(Patience={patience}, MSE+ResidualPenalty"
+            f"{'+AllocationUsefulness' if self.config.router.allocation_usefulness_lambda > 0 else ''}"
             f"{'+UsefulnessGap' if self.config.router.residual_usefulness_lambda > 0 else ''}, "
             f"anchor_mse={anchor_mse_val:.6f})..."
         )
@@ -527,6 +541,16 @@ class GraphDrone:
                             + self.config.router.residual_usefulness_lambda
                             * usefulness["residual_usefulness_gap"][active].mean()
                         )
+                if self.config.router.allocation_usefulness_lambda > 0:
+                    usefulness = self._regression_residual_usefulness_tensors(
+                        expert_predictions=v_preds_t,
+                        y_true=y_va_t,
+                        specialist_weights=out.specialist_weights,
+                        defer_prob=out.defer_prob,
+                        full_index=full_index,
+                    )
+                    allocation_score = self._regression_allocation_usefulness_from_stats(usefulness)
+                    loss = loss - self.config.router.allocation_usefulness_lambda * allocation_score
             if not torch.isfinite(loss):
                 saw_nonfinite = True
                 print(f"  -> {label} produced non-finite loss; restoring best router state.")
@@ -958,12 +982,16 @@ class GraphDrone:
             self._router_fit_diagnostics["validation_residual_usefulness_lambda"] = float(
                 self.config.router.residual_usefulness_lambda
             )
+            self._router_fit_diagnostics["validation_allocation_usefulness_lambda"] = float(
+                self.config.router.allocation_usefulness_lambda
+            )
             print(
                 "  -> Regression router usefulness: "
                 f"weighted_adv={usefulness_diagnostics['validation_weighted_specialist_advantage_score']:.4f} "
                 f"best_adv={usefulness_diagnostics['validation_best_specialist_advantage_score']:.4f} "
                 f"gap={usefulness_diagnostics['validation_residual_usefulness_gap']:.4f} "
-                f"positive_mass={usefulness_diagnostics['validation_positive_specialist_mass']:.4f}"
+                f"positive_mass={usefulness_diagnostics['validation_positive_specialist_mass']:.4f} "
+                f"allocation={usefulness_diagnostics['validation_allocation_usefulness_score']:.4f}"
             )
 
     def _compute_gora_obs(self, X: np.ndarray, descriptors: tuple[ViewDescriptor, ...]) -> torch.Tensor:
@@ -1112,6 +1140,7 @@ class GraphDrone:
             }
             diagnostics.update(self._regression_fallback_defaults())
             diagnostics.update(self._portfolio_diagnostics(batch))
+            diagnostics.update(self._router_fit_diagnostics)
             diagnostics.update(self._legitimacy_diagnostics(decision, router_skipped=True))
             return anchor_preds, diagnostics
 
