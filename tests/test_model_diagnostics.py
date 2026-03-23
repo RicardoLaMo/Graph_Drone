@@ -80,7 +80,11 @@ def test_regression_prediction_falls_back_to_anchor_when_training_nonfinite():
     gd = GraphDrone(GraphDroneConfig())
     gd._problem_type = "regression"
     gd._router_training_force_anchor_only = True
-    gd._router_fit_diagnostics = {"validation_router_training_nonfinite_flag": 1.0}
+    gd._router_fit_diagnostics = {
+        "validation_router_training_nonfinite_flag": 1.0,
+        "regression_router_fallback_stage": "train_loss",
+        "regression_router_fallback_reason": "nonfinite_loss",
+    }
 
     batch = ExpertPredictionBatch(
         expert_ids=("FULL", "SUB0"),
@@ -113,3 +117,5 @@ def test_regression_prediction_falls_back_to_anchor_when_training_nonfinite():
     assert diagnostics["router_nonfinite_fallback"] is True
     assert diagnostics["effective_defer_rate"] == 0.0
     assert diagnostics["validation_router_training_nonfinite_flag"] == 1.0
+    assert diagnostics["regression_router_fallback_stage"] == "train_loss"
+    assert diagnostics["regression_router_fallback_reason"] == "nonfinite_loss"

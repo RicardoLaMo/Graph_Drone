@@ -103,6 +103,20 @@ class GraphDrone:
         self._router_training_force_anchor_only: bool = False
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
+    def _record_regression_router_fallback(
+        self,
+        *,
+        stage: str,
+        reason: str,
+        nonfinite: bool,
+        **extra: object,
+    ) -> None:
+        self._router_fit_diagnostics["regression_router_fallback_stage"] = stage
+        self._router_fit_diagnostics["regression_router_fallback_reason"] = reason
+        self._router_fit_diagnostics["validation_router_training_nonfinite_flag"] = float(nonfinite)
+        for key, value in extra.items():
+            self._router_fit_diagnostics[key] = value
+
     def fit(
         self,
         X: np.ndarray,
@@ -441,7 +455,11 @@ class GraphDrone:
         params = [param for param in router.parameters() if param.requires_grad]
         if not params:
             print(f"  -> {label} has no trainable parameters, skipping optimization.")
-            self._router_fit_diagnostics["validation_router_training_nonfinite_flag"] = 0.0
+            self._record_regression_router_fallback(
+                stage="train_setup",
+                reason="no_trainable_params",
+                nonfinite=False,
+            )
             return
 
         optimizer = torch.optim.Adam(params, lr=1e-3)
@@ -459,6 +477,12 @@ class GraphDrone:
             f"anchor_mse={anchor_mse_val:.6f})..."
         )
         autocast_enabled = self.device == "cuda"
+        self._router_fit_diagnostics["validation_router_tokens_finite_flag"] = float(torch.isfinite(v_tokens_t).all().item())
+        self._router_fit_diagnostics["validation_router_predictions_finite_flag"] = float(
+            torch.isfinite(v_preds_t).all().item()
+        )
+        self._router_fit_diagnostics["validation_router_targets_finite_flag"] = float(torch.isfinite(y_va_t).all().item())
+        self._router_fit_diagnostics["validation_anchor_mse_finite_flag"] = float(np.isfinite(anchor_mse_val))
         for _ in range(500):
             router.train()
             optimizer.zero_grad()
@@ -491,6 +515,11 @@ class GraphDrone:
             if not torch.isfinite(loss):
                 saw_nonfinite = True
                 print(f"  -> {label} produced non-finite loss; restoring best router state.")
+                self._record_regression_router_fallback(
+                    stage="train_loss",
+                    reason="nonfinite_loss",
+                    nonfinite=True,
+                )
                 break
             loss.backward()
             grad_is_finite = True
@@ -504,6 +533,11 @@ class GraphDrone:
                 saw_nonfinite = True
                 print(f"  -> {label} produced non-finite gradients; restoring best router state.")
                 optimizer.zero_grad(set_to_none=True)
+                self._record_regression_router_fallback(
+                    stage="train_gradients",
+                    reason="nonfinite_gradients",
+                    nonfinite=True,
+                )
                 break
             torch.nn.utils.clip_grad_norm_(params, max_norm=1.0)
             optimizer.step()
@@ -512,6 +546,11 @@ class GraphDrone:
             if not params_are_finite:
                 saw_nonfinite = True
                 print(f"  -> {label} produced non-finite parameters; restoring best router state.")
+                self._record_regression_router_fallback(
+                    stage="train_parameters",
+                    reason="nonfinite_parameters",
+                    nonfinite=True,
+                )
                 break
             if loss.item() < best_loss:
                 best_loss = loss.item()
@@ -1072,6 +1111,12 @@ class GraphDrone:
                 "effective_defer_rate": 0.0,
                 "full_index": int(active_batch.full_index),
                 "router_nonfinite_fallback": True,
+                "regression_router_fallback_stage": self._router_fit_diagnostics.get(
+                    "regression_router_fallback_stage", "train_unknown"
+                ),
+                "regression_router_fallback_reason": self._router_fit_diagnostics.get(
+                    "regression_router_fallback_reason", "unknown"
+                ),
             }
             diagnostics.update(self._portfolio_diagnostics(active_batch))
             diagnostics.update(self._router_fit_diagnostics)
@@ -1097,6 +1142,11 @@ class GraphDrone:
                     "full_index": int(active_batch.full_index),
                     "router_nonfinite_fallback": True,
                     "effective_defer_rate": 0.0,
+                    "regression_router_fallback_stage": "predict_router_output",
+                    "regression_router_fallback_reason": "nonfinite_router_output",
+                    "prediction_router_tokens_finite_flag": bool(torch.isfinite(token_tensor).all().item()),
+                    "prediction_router_weights_finite_flag": bool(torch.isfinite(router_out.specialist_weights).all().item()),
+                    "prediction_router_defer_finite_flag": bool(torch.isfinite(router_out.defer_prob).all().item()),
                 }
                 diagnostics.update(self._portfolio_diagnostics(active_batch))
                 diagnostics.update(self._router_fit_diagnostics)
