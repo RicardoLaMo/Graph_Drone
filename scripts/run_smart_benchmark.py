@@ -87,7 +87,7 @@ QUICK_DATASETS = {
     "pendigits":     CLASSIFICATION_DATASETS["pendigits"],
 }
 
-GRAPHDRONE_VERSION = os.getenv("GRAPHDRONE_VERSION_OVERRIDE", "2026.03.23-clf-v1.3-phase1b")
+GRAPHDRONE_VERSION = os.getenv("GRAPHDRONE_VERSION_OVERRIDE", "2026.03.23-clf-v1.3-phase2")
 GRAPHDRONE_PRESET = os.getenv("GRAPHDRONE_PRESET", "v1_3_phase1")
 
 
@@ -279,7 +279,7 @@ def _diagnostic_payload(diagnostics: dict[str, object]) -> dict[str, object]:
     return payload
 
 
-def run_graphdrone(X_tr, y_tr, X_te, task_type: str, seed: int = 42, n_classes: int = None):
+def run_graphdrone(X_tr, y_tr, X_te, task_type: str, seed: int = 42, n_classes: int = None, dataset_name: str | None = None):
     n = X_tr.shape[1]
     full_idx = tuple(range(n))
     dev = _device()
@@ -320,9 +320,20 @@ def run_graphdrone(X_tr, y_tr, X_te, task_type: str, seed: int = 42, n_classes: 
         # n_classes pinned from full y to handle missing-class splits.
         if n_classes is None:
             n_classes = int(len(np.unique(y_tr)))
-        cfg = _graphdrone_config(n_classes=n_classes, default_router_kind="bootstrap_full_only")
-        gd = GraphDrone(cfg)
-        gd.fit(X_tr, y_tr, problem_type="classification")
+        # Inject dataset key for task-prior exact reuse (Phase 2). The env var
+        # GRAPHDRONE_TASK_PRIOR_DATASET_KEY is set per-dataset so the prior bank
+        # can match this run to known centroids.
+        _prev_key = os.environ.get("GRAPHDRONE_TASK_PRIOR_DATASET_KEY")
+        os.environ["GRAPHDRONE_TASK_PRIOR_DATASET_KEY"] = dataset_name or ""
+        try:
+            cfg = _graphdrone_config(n_classes=n_classes, default_router_kind="bootstrap_full_only")
+            gd = GraphDrone(cfg)
+            gd.fit(X_tr, y_tr, problem_type="classification")
+        finally:
+            if _prev_key is None:
+                os.environ.pop("GRAPHDRONE_TASK_PRIOR_DATASET_KEY", None)
+            else:
+                os.environ["GRAPHDRONE_TASK_PRIOR_DATASET_KEY"] = _prev_key
 
     result = gd.predict(X_te, return_diagnostics=True)
     preds = result.predictions
@@ -384,7 +395,7 @@ def run_task(dataset: str, fold: int, cache_dir: Path, max_samples: int, methods
             if method == "tabpfn":
                 out = run_tabpfn(X_tr, y_tr, X_te, task_type)
             else:
-                out = run_graphdrone(X_tr, y_tr, X_te, task_type, seed=42, n_classes=global_n_classes)
+                out = run_graphdrone(X_tr, y_tr, X_te, task_type, seed=42, n_classes=global_n_classes, dataset_name=dataset)
 
             elapsed = time.time() - t0
 
