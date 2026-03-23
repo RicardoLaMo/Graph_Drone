@@ -239,7 +239,7 @@ class GraphDrone:
         if not use_learned:
             return False, None
         if is_binary and self.config.router.kind == "bootstrap_full_only":
-            return True, SetRouterConfig(kind="noise_gate_router")
+            return True, replace(self.config.router, kind="noise_gate_router")
         return True, self.config.router
 
     def _trainable_params(self) -> list[torch.nn.Parameter]:
