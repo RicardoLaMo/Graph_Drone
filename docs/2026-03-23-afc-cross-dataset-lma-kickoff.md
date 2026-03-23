@@ -118,6 +118,86 @@ The more defensible next step is:
 - regression-only and classification-only token-bank analysis
 - then test whether family-level structure becomes cleaner within each task regime
 
+## Within-task split result
+
+Regression-only slice:
+
+```bash
+PYTHONPATH=src python scripts/analyze_cross_dataset_view_tokens.py \
+  --datasets california cpu_act diamonds kin8nm \
+  --max-samples 384 \
+  --sample-rows 48 \
+  --output-dir eval/afc_cross_dataset_lma_regression_v1
+```
+
+Classification-only slice:
+
+```bash
+PYTHONPATH=src python scripts/analyze_cross_dataset_view_tokens.py \
+  --datasets pendigits diabetes credit_g optdigits \
+  --max-samples 384 \
+  --sample-rows 48 \
+  --output-dir eval/afc_cross_dataset_lma_classification_v1
+```
+
+Regression summary:
+- `mean_cosine_same_family = 0.5495`
+- `mean_cosine_cross_family = 0.5880`
+- cross-dataset same-family/same-anchor mean cosine: `0.4631`
+
+Classification summary:
+- `mean_cosine_same_family = 0.8855`
+- `mean_cosine_cross_family = 0.8914`
+- cross-dataset same-family/same-anchor mean cosine: `0.8628`
+
+Read:
+- classification tokens exhibit much tighter cross-dataset geometry than regression tokens
+- neither regime yet shows a simple “same family beats cross family” rule
+- but the classification regime is far more coherent overall than regression
+
+Interpretation:
+- task type is not just a nuisance covariate; it appears to be a primary organizing axis for any shared prior
+- a single universal prior over all tasks is weaker than a task-conditioned design
+- classification is the better first target for a learned cross-dataset LMA prior
+- regression likely needs either a different summary representation or stronger normalization before shared alignment will make sense
+
+## Design implication: hierarchical or task-conditioned prior
+
+The current evidence supports a two-stage design more than a flat hyper-router.
+
+Proposed direction:
+
+1. Task-context encoder.
+- Input: a dataset-level sequence of view-summary tokens
+- Each token should combine:
+  - descriptor fields (`family`, `is_anchor`, `projection_kind`, `input_dim`, `preferred_k`)
+  - token-bank summary statistics
+  - simple router/usefulness statistics where available
+- Model options:
+  - small transformer encoder over the view-token sequence
+  - or a compact GRU over a canonical expert order (`FULL`, `SUB0`, `SUB1`, `SUB2`, ...)
+
+2. Task-conditioned prior head.
+- Output: a task embedding `z_task`
+- Use `z_task` to condition:
+  - rotor/alignment parameters
+  - router initialization
+  - specialist validity priors
+  - or attention bias terms over view families
+
+3. Family-level alignment inside task regime.
+- Only after conditioning on task type or task embedding should the model try to learn finer family-level alignment
+
+Why this is better than a flat prior:
+- regression and classification do not currently occupy the same token geometry
+- forcing one universal prior would likely mix incompatible manifolds
+- a hierarchical prior can first separate the broad regime, then share structure where it is actually reusable
+
+Current recommendation:
+- start with classification-first task-conditioned LMA
+- use a small transformer encoder if permutation robustness over view order matters
+- use a GRU only if we intentionally define and trust a canonical expert sequence and want a lighter recurrent prior
+
 ## Initial analysis questions
 
 1. Do anchor views from different datasets cluster more tightly than random view pairs?

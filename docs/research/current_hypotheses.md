@@ -3,7 +3,7 @@
 This file is generated from `docs/research/findings.jsonl`.
 It is the current research surface for scaling decisions, not an append-only history.
 
-Updated: 2026-03-23T16:58:30.582825+00:00
+Updated: 2026-03-23T17:11:56.304669+00:00
 
 ## How To Read This
 
@@ -23,6 +23,7 @@ Updated: 2026-03-23T16:58:30.582825+00:00
 
 | Claim ID | Topic | Conclusion | Branch | Note |
 |---|---|---|---|---|
+| `afc-framework-task-conditioned-lma-prior` | `afc_framework` | Probably yes. The within-task token-bank splits show classification has much tighter cross-dataset geometry than regression, while the mixed slice showed task type dominates family. That makes task type a real design axis for the next prior rather than a detail to ignore. | `exp/afc-cross-dataset-lma` | `2026-03-23-afc-cross-dataset-lma-kickoff.md` |
 | `afc-b-reg-anchor-asymmetry` | `afc_phase_b` | Yes. The asymmetry was real and partly causal, but fixing it was not sufficient to make Phase B promotable. | `exp/afc-b-reg-anchor-exclusion` | `2026-03-23-afc-phase-b-anchor-exclusion.md` |
 
 ## Open
@@ -50,6 +51,7 @@ Updated: 2026-03-23T16:58:30.582825+00:00
 
 | Timestamp | Claim ID | Status | Summary |
 |---|---|---|---|
+| `2026-03-23T17:11:56.304425+00:00` | `afc-framework-task-conditioned-lma-prior` | `partially_causal` | The cross-dataset token-bank results now support a task-conditioned or hierarchical LMA prior: classification geometry is much more coherent than regression, so a flat universal prior is less defensible than a regime-aware transformer/GRU-style conditioning layer. |
 | `2026-03-23T16:58:30.582498+00:00` | `afc-framework-cross-dataset-token-geometry` | `open` | The first controlled cross-dataset token-bank pass found nontrivial shared geometry, but task type dominated family-level structure. This keeps the LMA line alive while narrowing the design toward task-conditioned or hierarchical priors. |
 | `2026-03-23T16:40:55.281593+00:00` | `afc-b-residual-objective-gap-penalty` | `falsified` | The residual-usefulness-gap objective is now falsified in its current form as a local fix: the lambda sweep stayed slightly worse than the champion at every setting, with changes driven mostly by routing suppression rather than positive specialist allocation. |
 | `2026-03-23T16:13:20.166398+00:00` | `afc-framework-cross-dataset-hyper-lma` | `open` | Cross-dataset latent manifold alignment / hyper-router priors are now recorded as the next-scale AFC hypothesis: if local objective fixes keep improving internals without strong held-out wins, the routing prior should be learned across datasets rather than from tiny per-dataset splits. |
