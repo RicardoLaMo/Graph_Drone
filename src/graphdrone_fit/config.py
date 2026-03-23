@@ -58,6 +58,8 @@ class SetRouterConfig:
     task_prior_strength: float = 0.5
     task_prior_dataset_key: str | None = None
     task_prior_exact_reuse_blend: float = 0.5
+    task_prior_defer_penalty_lambda: float = 0.0
+    task_prior_defer_target: float = 0.8
 
     def validate(self) -> "SetRouterConfig":
         normalized_kind = ROUTER_KIND_ALIASES.get(self.kind, self.kind)
@@ -87,6 +89,14 @@ class SetRouterConfig:
         if not 0.0 <= self.task_prior_exact_reuse_blend <= 1.0:
             raise ValueError(
                 f"task_prior_exact_reuse_blend must be in [0, 1], got {self.task_prior_exact_reuse_blend}"
+            )
+        if self.task_prior_defer_penalty_lambda < 0:
+            raise ValueError(
+                f"task_prior_defer_penalty_lambda must be non-negative, got {self.task_prior_defer_penalty_lambda}"
+            )
+        if not 0.0 <= self.task_prior_defer_target <= 1.0:
+            raise ValueError(
+                f"task_prior_defer_target must be in [0, 1], got {self.task_prior_defer_target}"
             )
         if self.task_prior_bank_dir is not None and not str(self.task_prior_bank_dir).strip():
             raise ValueError("task_prior_bank_dir must be non-empty when provided")

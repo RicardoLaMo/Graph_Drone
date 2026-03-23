@@ -669,6 +669,9 @@ class GraphDrone:
         )
 
         autocast_enabled = self.device == "cuda"
+        task_prior_penalty_lambda = 0.0 if router_cfg is None else float(router_cfg.task_prior_defer_penalty_lambda)
+        task_prior_defer_target = 0.8 if router_cfg is None else float(router_cfg.task_prior_defer_target)
+        task_prior_confidence = self._task_prior_confidence_scale()
         for _ in range(500):
             self._router.train()
             optimizer.zero_grad()
@@ -680,6 +683,10 @@ class GraphDrone:
                 blend_nll = F.nll_loss(F.log_softmax(log_q, dim=-1), y_va_t)
                 aux_loss = out.aux_loss if out.aux_loss is not None else blend_nll.new_zeros(())
                 loss = blend_nll + 2.0 * F.relu(blend_nll - anchor_nll_val) + aux_loss
+                if task_prior_penalty_lambda > 0 and task_prior_confidence > 0:
+                    mean_defer = out.defer_prob.mean()
+                    defer_penalty = (mean_defer - task_prior_defer_target) ** 2
+                    loss = loss + task_prior_penalty_lambda * task_prior_confidence * defer_penalty
             loss.backward()
             optimizer.step()
             self._post_optimizer_step()
@@ -702,6 +709,17 @@ class GraphDrone:
             f"  -> Classification Router trained. "
             f"blend_nll={final_blend_nll:.4f}  anchor_nll={anchor_nll_val:.4f}  mean_defer={mean_defer:.3f}"
         )
+
+    def _task_prior_confidence_scale(self) -> float:
+        if not self._task_prior_diagnostics:
+            return 0.0
+        if not bool(self._task_prior_diagnostics.get("task_prior_feedback_used", False)):
+            return 0.0
+        exact = 1.0 if bool(self._task_prior_diagnostics.get("task_prior_exact_reuse_used", False)) else 0.0
+        top_prob = float(self._task_prior_diagnostics.get("task_prior_top_neighbor_prob", 0.0) or 0.0)
+        entropy = float(self._task_prior_diagnostics.get("task_prior_entropy", 0.0) or 0.0)
+        entropy_scale = max(0.0, 1.0 - entropy / 2.0)
+        return max(exact, min(1.0, top_prob + entropy_scale))
 
     def _maybe_attach_task_prior_router(
         self,
