@@ -16,8 +16,10 @@ sys.path.insert(0, str(ROOT / "src"))
 from graphdrone_fit.task_conditioned_prior import (
     TaskContextDatasetClassifier,
     TaskContextGRUEncoder,
+    TaskContextSequenceAutoencoder,
     TaskContextTransformerEncoder,
     build_task_context_batch,
+    split_batch_by_dataset,
 )
 
 import pandas as pd
@@ -31,6 +33,14 @@ def _build_model(encoder_kind: str, input_dim: int, hidden_dim: int, num_classes
     else:
         raise ValueError(f"Unsupported encoder_kind={encoder_kind!r}")
     return TaskContextDatasetClassifier(encoder=encoder, hidden_dim=hidden_dim, num_classes=num_classes)
+
+
+def _build_encoder(encoder_kind: str, input_dim: int, hidden_dim: int):
+    if encoder_kind == "transformer":
+        return TaskContextTransformerEncoder(input_dim=input_dim, hidden_dim=hidden_dim)
+    if encoder_kind == "gru":
+        return TaskContextGRUEncoder(input_dim=input_dim, hidden_dim=hidden_dim)
+    raise ValueError(f"Unsupported encoder_kind={encoder_kind!r}")
 
 
 def _run_one(encoder_kind: str, batch, epochs: int, lr: float, weight_decay: float, device: str) -> dict:
@@ -63,10 +73,61 @@ def _run_one(encoder_kind: str, batch, epochs: int, lr: float, weight_decay: flo
     }
 
 
+def _run_leave_one_dataset_out_reconstruction(encoder_kind: str, batch, epochs: int, lr: float, weight_decay: float, device: str) -> dict:
+    per_dataset = []
+    for held_out_dataset in batch.dataset_names:
+        train_batch, test_batch = split_batch_by_dataset(batch, held_out_dataset)
+        encoder = _build_encoder(encoder_kind, input_dim=batch.sequences.shape[-1], hidden_dim=64)
+        model = TaskContextSequenceAutoencoder(
+            encoder=encoder,
+            hidden_dim=64,
+            seq_len=batch.sequences.shape[1],
+            input_dim=batch.sequences.shape[2],
+        ).to(device)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+        train_sequences = train_batch.sequences.to(device)
+        test_sequences = test_batch.sequences.to(device)
+
+        for _ in range(epochs):
+            model.train()
+            optimizer.zero_grad()
+            recon, _ = model(train_sequences)
+            loss = F.mse_loss(recon, train_sequences)
+            loss.backward()
+            optimizer.step()
+
+        with torch.no_grad():
+            model.eval()
+            train_recon, train_embedding = model(train_sequences)
+            test_recon, test_embedding = model(test_sequences)
+            train_mse = float(F.mse_loss(train_recon, train_sequences).item())
+            test_mse = float(F.mse_loss(test_recon, test_sequences).item())
+            per_dataset.append(
+                {
+                    "held_out_dataset": held_out_dataset,
+                    "train_mse": train_mse,
+                    "test_mse": test_mse,
+                    "generalization_gap": test_mse - train_mse,
+                    "train_embedding_norm": float(train_embedding.norm(dim=-1).mean().item()),
+                    "test_embedding_norm": float(test_embedding.norm(dim=-1).mean().item()),
+                }
+            )
+
+    mean_test_mse = sum(item["test_mse"] for item in per_dataset) / len(per_dataset)
+    mean_gap = sum(item["generalization_gap"] for item in per_dataset) / len(per_dataset)
+    return {
+        "encoder_kind": encoder_kind,
+        "mean_test_mse": mean_test_mse,
+        "mean_generalization_gap": mean_gap,
+        "per_dataset": per_dataset,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Prototype a task-conditioned LMA prior from task-context bootstrap summaries.")
     parser.add_argument("--analysis-dir", type=Path, required=True, help="Directory containing task_context_examples.csv")
     parser.add_argument("--encoder", choices=["transformer", "gru", "both"], default="both")
+    parser.add_argument("--mode", choices=["dataset_id", "leave_one_dataset_out_reconstruction"], default="dataset_id")
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
@@ -84,6 +145,7 @@ def main() -> None:
     encoder_kinds = ["transformer", "gru"] if args.encoder == "both" else [args.encoder]
     summary = {
         "analysis_dir": str(args.analysis_dir),
+        "mode": args.mode,
         "device": device,
         "n_examples": int(batch.sequences.shape[0]),
         "seq_len": int(batch.sequences.shape[1]),
@@ -92,9 +154,20 @@ def main() -> None:
         "results": [],
     }
     for encoder_kind in encoder_kinds:
-        result = _run_one(encoder_kind, batch=batch, epochs=args.epochs, lr=args.lr, weight_decay=args.weight_decay, device=device)
-        summary["results"].append({k: v for k, v in result.items() if k != "history"})
-        (args.output_dir / f"{encoder_kind}_history.json").write_text(json.dumps(result["history"], indent=2), encoding="utf-8")
+        if args.mode == "dataset_id":
+            result = _run_one(encoder_kind, batch=batch, epochs=args.epochs, lr=args.lr, weight_decay=args.weight_decay, device=device)
+            summary["results"].append({k: v for k, v in result.items() if k != "history"})
+            (args.output_dir / f"{encoder_kind}_history.json").write_text(json.dumps(result["history"], indent=2), encoding="utf-8")
+        else:
+            result = _run_leave_one_dataset_out_reconstruction(
+                encoder_kind,
+                batch=batch,
+                epochs=args.epochs,
+                lr=args.lr,
+                weight_decay=args.weight_decay,
+                device=device,
+            )
+            summary["results"].append(result)
 
     (args.output_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     print(json.dumps(summary, indent=2))

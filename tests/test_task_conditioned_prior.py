@@ -6,9 +6,11 @@ import pandas as pd
 import torch
 
 from graphdrone_fit.task_conditioned_prior import (
+    TaskContextSequenceAutoencoder,
     TaskContextGRUEncoder,
     TaskContextTransformerEncoder,
     build_task_context_batch,
+    split_batch_by_dataset,
 )
 
 
@@ -41,6 +43,7 @@ def test_build_task_context_batch_orders_full_first() -> None:
     assert batch.sequences.shape == (4, 3, batch.sequences.shape[-1])
     assert batch.labels.shape[0] == 4
     assert batch.dataset_names == ("a", "b")
+    assert batch.example_datasets == ("a", "a", "b", "b")
 
 
 def test_transformer_encoder_forward_shape() -> None:
@@ -57,3 +60,22 @@ def test_gru_encoder_forward_shape() -> None:
     out = encoder(batch.sequences)
     assert out.shape == (4, 32)
     assert torch.isfinite(out).all()
+
+
+def test_split_batch_by_dataset() -> None:
+    batch = build_task_context_batch(_task_context_frame())
+    train_batch, test_batch = split_batch_by_dataset(batch, "b")
+    assert train_batch.sequences.shape[0] == 2
+    assert test_batch.sequences.shape[0] == 2
+    assert all(name == "a" for name in train_batch.example_datasets)
+    assert all(name == "b" for name in test_batch.example_datasets)
+
+
+def test_sequence_autoencoder_forward_shape() -> None:
+    batch = build_task_context_batch(_task_context_frame())
+    encoder = TaskContextTransformerEncoder(input_dim=batch.sequences.shape[-1], hidden_dim=32, num_heads=4, num_layers=1)
+    model = TaskContextSequenceAutoencoder(encoder=encoder, hidden_dim=32, seq_len=batch.sequences.shape[1], input_dim=batch.sequences.shape[2])
+    recon, embedding = model(batch.sequences)
+    assert recon.shape == batch.sequences.shape
+    assert embedding.shape == (4, 32)
+    assert torch.isfinite(recon).all()

@@ -255,6 +255,52 @@ Still, it is enough to justify the next research step:
 - prefer transformer as the default baseline
 - move next to a stricter generalization test, not immediate integration
 
+## Held-out generalization check
+
+Held-out prototype run:
+
+```bash
+PYTHONPATH=src python scripts/prototype_task_conditioned_lma.py \
+  --analysis-dir eval/afc_cross_dataset_lma_classification_bootstrap_v1 \
+  --encoder both \
+  --mode leave_one_dataset_out_reconstruction \
+  --epochs 150 \
+  --output-dir eval/afc_task_conditioned_lma_generalization_cls_v1
+```
+
+Result summary:
+- transformer:
+  - mean held-out test MSE: `46.61`
+  - mean generalization gap: `45.17`
+- GRU:
+  - mean held-out test MSE: `40.31`
+  - mean generalization gap: `39.42`
+
+Per-dataset read:
+- both encoders generalize reasonably on `credit_g` and `diabetes`
+- both are acceptable on `pendigits`
+- both fail badly on `optdigits`
+
+Interpretation:
+- the task-conditioned prior is learnable, but cross-dataset generalization is still fragile
+- the current bottleneck is not just encoder class
+- dataset heterogeneity inside the classification regime is still large enough to break the prior on some held-out tasks
+
+This changes the architectural read in an important way:
+- transformer remains the default baseline for task-conditioned prior learning because it fit the in-sample context task better
+- but the held-out result does **not** justify claiming transformer is already the better generalizing prior
+- GRU actually had slightly lower held-out reconstruction error in this first check
+- the real problem appears to be representation mismatch, especially around `optdigits`, not simply model capacity
+
+So the next question is not “transformer or GRU?”
+It is:
+- what normalization or representation change makes held-out datasets look less alien to the shared prior?
+
+Current best next step:
+- inspect why `optdigits` is a strong outlier
+- normalize or reparameterize the task-context features before another encoder comparison
+- only then revisit encoder choice
+
 ## Initial analysis questions
 
 1. Do anchor views from different datasets cluster more tightly than random view pairs?

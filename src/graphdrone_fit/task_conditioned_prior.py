@@ -28,6 +28,7 @@ class TaskContextBatch:
     sequences: torch.Tensor
     labels: torch.Tensor
     dataset_names: tuple[str, ...]
+    example_datasets: tuple[str, ...]
     feature_names: tuple[str, ...]
 
 
@@ -76,14 +77,34 @@ def build_task_context_batch(task_context_df: pd.DataFrame) -> TaskContextBatch:
         if any(len(row) != feat_dim for row in seq_rows):
             raise ValueError(f"Inconsistent feature dimension for {(dataset, bootstrap_id)}")
 
+    example_datasets = tuple(dataset for dataset, _, _ in grouped)
     sequences = torch.tensor([seq_rows for _, _, seq_rows in grouped], dtype=torch.float32)
     labels = torch.tensor([label_by_dataset[dataset] for dataset, _, _ in grouped], dtype=torch.long)
     return TaskContextBatch(
         sequences=sequences,
         labels=labels,
         dataset_names=tuple(dataset_names),
+        example_datasets=example_datasets,
         feature_names=feature_names or (),
     )
+
+
+def split_batch_by_dataset(batch: TaskContextBatch, held_out_dataset: str) -> tuple[TaskContextBatch, TaskContextBatch]:
+    train_idx = [idx for idx, dataset in enumerate(batch.example_datasets) if dataset != held_out_dataset]
+    test_idx = [idx for idx, dataset in enumerate(batch.example_datasets) if dataset == held_out_dataset]
+    if not train_idx or not test_idx:
+        raise ValueError(f"held_out_dataset={held_out_dataset!r} must have both train and test coverage")
+
+    def _slice(indices: list[int]) -> TaskContextBatch:
+        return TaskContextBatch(
+            sequences=batch.sequences[indices],
+            labels=batch.labels[indices],
+            dataset_names=batch.dataset_names,
+            example_datasets=tuple(batch.example_datasets[idx] for idx in indices),
+            feature_names=batch.feature_names,
+        )
+
+    return _slice(train_idx), _slice(test_idx)
 
 
 class TaskContextTransformerEncoder(nn.Module):
@@ -142,3 +163,21 @@ class TaskContextDatasetClassifier(nn.Module):
         embedding = self.encoder(sequences)
         logits = self.classifier(embedding)
         return logits, embedding
+
+
+class TaskContextSequenceAutoencoder(nn.Module):
+    def __init__(self, encoder: nn.Module, hidden_dim: int, seq_len: int, input_dim: int):
+        super().__init__()
+        self.encoder = encoder
+        self.seq_len = seq_len
+        self.input_dim = input_dim
+        self.decoder = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, seq_len * input_dim),
+        )
+
+    def forward(self, sequences: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        embedding = self.encoder(sequences)
+        recon = self.decoder(embedding).view(sequences.shape[0], self.seq_len, self.input_dim)
+        return recon, embedding
