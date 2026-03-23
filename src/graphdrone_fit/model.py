@@ -7,7 +7,7 @@ import numpy as np
 import torch
 
 from .config import GraphDroneConfig, SetRouterConfig
-from .defer_integrator import integrate_predictions
+from .defer_integrator import blend_predictions_torch, integrate_predictions
 from .expert_factory import (
     ExpertBuildSpec,
     ExpertPredictionBatch,
@@ -446,9 +446,11 @@ class GraphDrone:
             optimizer.zero_grad()
             with torch.amp.autocast("cuda", enabled=autocast_enabled):
                 out = self._router(v_tokens_t, full_index=va_batch.full_index)
-                integ = (
-                    (1 - out.defer_prob) * v_preds_t[:, va_batch.full_index : va_batch.full_index + 1]
-                    + out.defer_prob * (out.specialist_weights * v_preds_t).sum(dim=1, keepdim=True)
+                integ, _, _, _ = blend_predictions_torch(
+                    expert_predictions=v_preds_t,
+                    specialist_weights=out.specialist_weights,
+                    defer_prob=out.defer_prob,
+                    full_index=va_batch.full_index,
                 )
                 mse = F.mse_loss(integ.squeeze(), y_va_t)
                 aux_loss = out.aux_loss if out.aux_loss is not None else mse.new_zeros(())

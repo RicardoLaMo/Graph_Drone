@@ -23,6 +23,8 @@ OPTIONAL_DELTA_COLUMNS = (
     "mean_ot_cost",
     "mean_specialist_validity",
     "closed_specialist_frac",
+    "mean_specialist_mass",
+    "mean_anchor_attention_weight",
     "alignment_aux_loss",
     "alignment_cosine_pre",
     "alignment_cosine_post",
