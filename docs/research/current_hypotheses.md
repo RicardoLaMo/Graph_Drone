@@ -3,7 +3,7 @@
 This file is generated from `docs/research/findings.jsonl`.
 It is the current research surface for scaling decisions, not an append-only history.
 
-Updated: 2026-03-23T18:16:28.735244+00:00
+Updated: 2026-03-23T18:21:55.430745+00:00
 
 ## How To Read This
 
@@ -23,6 +23,7 @@ Updated: 2026-03-23T18:16:28.735244+00:00
 
 | Claim ID | Topic | Conclusion | Branch | Note |
 |---|---|---|---|---|
+| `afc-framework-contrastive-task-bank-sharpening` | `afc_framework` | Partially. The contrastive bank materially sharpened exact dataset reuse and lowered unseen-task neighborhood entropy, but the unseen segment neighbor ordering shifted rather than converging to an obviously cleaner taxonomy. The bank became more decisive faster than it became more semantically trustworthy. | `exp/afc-cross-dataset-lma` | `2026-03-23-afc-cross-dataset-lma-kickoff.md` |
 | `afc-framework-normalized-task-neighborhoods` | `afc_framework` | Yes, partially. On the six-dataset normalized classification bank, the held-out similarity space no longer collapsed to one deterministic prototype in every case. Several datasets now distribute probability across a small neighborhood of plausible related tasks, which is much closer to the intended transfer behavior. | `exp/afc-cross-dataset-lma` | `2026-03-23-afc-cross-dataset-lma-kickoff.md` |
 | `afc-framework-persistent-task-prototype-bank` | `afc_framework` | Yes for exact dataset reuse, and partially for unseen-task lookup. The persistent prototype bank returns strong exact matches for known datasets and meaningful soft neighbors for unseen segment, though the neighborhood semantics are not yet sharp enough to count as a clean task taxonomy. | `exp/afc-cross-dataset-lma` | `2026-03-23-afc-cross-dataset-lma-kickoff.md` |
 | `afc-framework-task-conditioned-lma-prior` | `afc_framework` | Probably yes. The within-task token-bank splits show classification has much tighter cross-dataset geometry than regression, while the mixed slice showed task type dominates family. That makes task type a real design axis for the next prior rather than a detail to ignore. | `exp/afc-cross-dataset-lma` | `2026-03-23-afc-cross-dataset-lma-kickoff.md` |
@@ -56,6 +57,7 @@ Updated: 2026-03-23T18:16:28.735244+00:00
 
 | Timestamp | Claim ID | Status | Summary |
 |---|---|---|---|
+| `2026-03-23T18:21:55.430449+00:00` | `afc-framework-contrastive-task-bank-sharpening` | `partially_causal` | Adding supervised contrastive pressure on top of reconstruction tightened exact-match similarities to about 0.997-0.999 and reduced unseen-segment entropy, but did not yet produce a stable semantically clean task-family assignment. |
 | `2026-03-23T18:16:28.734975+00:00` | `afc-framework-persistent-task-prototype-bank` | `partially_causal` | The new prototype bank persists encoder state, normalization, and task centroids. Known datasets now return exact-reuse hits with high similarity, and an unseen segment dataset attaches to a soft neighborhood centered on pendigits/diabetes/credit_g instead of collapsing to a single arbitrary prototype. |
 | `2026-03-23T18:06:30.959673+00:00` | `afc-framework-normalized-task-neighborhoods` | `partially_causal` | Normalization and a larger classification bank materially improved the task-conditioned prior: the similarity space now shows soft local neighborhoods like credit_g~diabetes/segment and pendigits~segment/optdigits instead of pure one-prototype collapse. |
 | `2026-03-23T17:32:05.358173+00:00` | `afc-framework-task-similarity-transfer-space` | `open` | The task-conditioned prior now looks more like a hard prototype assigner than a useful similar-task transfer space. The next bottleneck is representation collapse, so the next work should target normalization and metric learning rather than only encoder choice. |
@@ -67,5 +69,4 @@ Updated: 2026-03-23T18:16:28.735244+00:00
 | `2026-03-23T16:13:20.166398+00:00` | `afc-framework-cross-dataset-hyper-lma` | `open` | Cross-dataset latent manifold alignment / hyper-router priors are now recorded as the next-scale AFC hypothesis: if local objective fixes keep improving internals without strong held-out wins, the routing prior should be learned across datasets rather than from tiny per-dataset splits. |
 | `2026-03-23T16:13:08.832205+00:00` | `afc-b-residual-objective-gap-penalty` | `open` | On the diagnostic quick regression contract, the new objective slightly reduced the negative held-out RMSE and sharply reduced defer-weighted negative specialist value, but mostly by routing less; keep the claim open and do not advance to mini-full yet. |
 | `2026-03-23T14:00:43.692285+00:00` | `afc-b-california-router-instability` | `cleared` | California was not a token NaN problem. It was non-finite learned attention after regression router training, combined with negative realized specialist value. The new explicit fallback makes that visible while preserving the previous task quality. |
-| `2026-03-23T13:41:40.482544+00:00` | `afc-b-residual-usefulness-gap` | `open` | The new residual-usefulness diagnostic showed that specialist value can exist while realized router value stays negative. Rotor slightly improved the validation usefulness score on cpu_act, but not enough to improve held-out quality, so allocation/objective mismatch remains the main live hypothesis. |
 

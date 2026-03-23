@@ -512,6 +512,100 @@ Current recommendation:
 - add a contrastive or metric-learning objective next so neighborhoods sharpen without collapsing
 - use the persistent bank as the memory substrate for any later hyper-router or cross-dataset LMA prior
 
+## Contrastive sharpening on top of the prototype bank
+
+The next step tested whether a supervised contrastive objective can sharpen the task neighborhood space beyond the reconstruction-trained bank.
+
+New support:
+- `supervised_contrastive_loss` in `src/graphdrone_fit/task_conditioned_prior.py`
+- `fit_contrastive_prototype_bank` mode in `scripts/prototype_task_conditioned_lma.py`
+
+Training contract:
+
+```bash
+PYTHONPATH=src python scripts/prototype_task_conditioned_lma.py \
+  --analysis-dir eval/afc_cross_dataset_lma_classification_bootstrap_v2 \
+  --mode fit_contrastive_prototype_bank \
+  --encoder transformer \
+  --normalize-features \
+  --epochs 120 \
+  --contrastive-temperature 0.1 \
+  --reconstruction-weight 0.25 \
+  --output-dir eval/afc_task_prototype_bank_cls_contrastive_v1
+```
+
+Observed training tail:
+- positive similarity: about `0.96`
+- negative similarity: about `-0.14`
+
+Interpretation:
+- same-dataset task embeddings are now tightly clustered
+- different datasets are pushed apart rather than merely separated by softer reconstruction geometry
+
+Known-dataset query against the contrastive bank:
+
+```bash
+PYTHONPATH=src python scripts/prototype_task_conditioned_lma.py \
+  --analysis-dir eval/afc_cross_dataset_lma_classification_bootstrap_v2 \
+  --mode query_prototype_bank \
+  --encoder transformer \
+  --bank-dir eval/afc_task_prototype_bank_cls_contrastive_v1 \
+  --query-datasets credit_g diabetes optdigits pendigits \
+  --output-dir eval/afc_task_prototype_bank_query_cls_contrastive_v1
+```
+
+Contrastive exact-match similarities:
+- `credit_g`: `0.9987`
+- `diabetes`: `0.9972`
+- `optdigits`: `0.9986`
+- `pendigits`: `0.9971`
+
+This is materially sharper than the reconstruction-trained bank, where exact matches were already high but still in the `0.93-0.99` range.
+
+Unseen `segment` query against a contrastive bank trained without `segment`:
+
+```bash
+PYTHONPATH=src python scripts/prototype_task_conditioned_lma.py \
+  --analysis-dir eval/afc_cross_dataset_lma_classification_bootstrap_v2_minus_segment \
+  --mode fit_contrastive_prototype_bank \
+  --encoder transformer \
+  --normalize-features \
+  --epochs 120 \
+  --contrastive-temperature 0.1 \
+  --reconstruction-weight 0.25 \
+  --output-dir eval/afc_task_prototype_bank_cls_minus_segment_contrastive_v1
+
+PYTHONPATH=src python scripts/prototype_task_conditioned_lma.py \
+  --analysis-dir eval/afc_cross_dataset_lma_classification_bootstrap_v2 \
+  --mode query_prototype_bank \
+  --encoder transformer \
+  --bank-dir eval/afc_task_prototype_bank_cls_minus_segment_contrastive_v1 \
+  --query-datasets segment \
+  --output-dir eval/afc_task_prototype_bank_query_segment_contrastive_v1
+```
+
+Observed `segment` neighbors under contrastive training:
+- `credit_g`: probability `0.3158`, mean similarity `0.6040`
+- `pendigits`: probability `0.2531`, mean similarity `0.3790`
+- `diabetes`: probability `0.2155`, mean similarity `0.2251`
+- soft-neighbor entropy: `1.5166`
+
+Comparison to the reconstruction-trained unseen query:
+- prior top neighbor was `pendigits`
+- contrastive top neighbor became `credit_g`
+- entropy dropped from `1.5667` to `1.5166`
+
+Interpretation:
+- contrastive training does sharpen the bank
+- it improves exact reuse confidence and reduces unseen-task entropy
+- but it does **not** yet guarantee a semantically cleaner task family structure
+- in other words, the bank is becoming more decisive faster than it is becoming more correct
+
+Current recommendation:
+- keep the contrastive objective as the next default bank-sharpening baseline
+- do not yet claim that the learned task neighborhoods are semantically aligned
+- next work should add explicit neighborhood supervision or taxonomy-aware metric structure before using this bank to drive a live hyper-router
+
 ## Initial analysis questions
 
 1. Do anchor views from different datasets cluster more tightly than random view pairs?

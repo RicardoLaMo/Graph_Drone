@@ -50,6 +50,7 @@ class TaskPrototypeBank:
     encoder_kind: str
     hidden_dim: int
     normalize_features: bool
+    training_objective: str = "reconstruction"
     normalization: TaskContextNormalization | None = None
 
 
@@ -197,6 +198,7 @@ def build_task_prototype_bank(
     encoder_kind: str,
     hidden_dim: int,
     normalize_features: bool,
+    training_objective: str = "reconstruction",
     normalization: TaskContextNormalization | None = None,
 ) -> TaskPrototypeBank:
     centroids = normalized_centroids(embeddings=embeddings, dataset_names=batch.dataset_names, example_datasets=batch.example_datasets)
@@ -212,8 +214,30 @@ def build_task_prototype_bank(
         encoder_kind=encoder_kind,
         hidden_dim=hidden_dim,
         normalize_features=normalize_features,
+        training_objective=training_objective,
         normalization=normalization,
     )
+
+
+def supervised_contrastive_loss(embeddings: torch.Tensor, labels: torch.Tensor, temperature: float = 0.1) -> torch.Tensor:
+    if embeddings.ndim != 2:
+        raise ValueError(f"embeddings must be 2D, got shape={tuple(embeddings.shape)}")
+    if labels.ndim != 1 or labels.shape[0] != embeddings.shape[0]:
+        raise ValueError("labels must be 1D with same batch size as embeddings")
+    z = F.normalize(embeddings, dim=-1)
+    logits = (z @ z.T) / temperature
+    logits = logits - logits.max(dim=1, keepdim=True).values.detach()
+    same_label = labels.unsqueeze(0) == labels.unsqueeze(1)
+    non_self = ~torch.eye(labels.shape[0], device=labels.device, dtype=torch.bool)
+    positive_mask = same_label & non_self
+    exp_logits = torch.exp(logits) * non_self
+    log_prob = logits - torch.log(exp_logits.sum(dim=1, keepdim=True).clamp_min(1e-12))
+    positive_counts = positive_mask.sum(dim=1)
+    valid = positive_counts > 0
+    if not torch.any(valid):
+        raise ValueError("supervised_contrastive_loss requires at least one positive pair")
+    mean_log_prob_pos = (positive_mask * log_prob).sum(dim=1) / positive_counts.clamp_min(1)
+    return -mean_log_prob_pos[valid].mean()
 
 
 def _normalization_to_jsonable(normalization: TaskContextNormalization | None) -> dict[str, Any] | None:
@@ -247,6 +271,7 @@ def save_task_prototype_bank(bank: TaskPrototypeBank, path: str | Path) -> None:
         "encoder_kind": bank.encoder_kind,
         "hidden_dim": bank.hidden_dim,
         "normalize_features": bank.normalize_features,
+        "training_objective": bank.training_objective,
         "normalization": _normalization_to_jsonable(bank.normalization),
     }
     target.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -262,6 +287,7 @@ def load_task_prototype_bank(path: str | Path) -> TaskPrototypeBank:
         encoder_kind=str(payload["encoder_kind"]),
         hidden_dim=int(payload["hidden_dim"]),
         normalize_features=bool(payload["normalize_features"]),
+        training_objective=str(payload.get("training_objective", "reconstruction")),
         normalization=_normalization_from_jsonable(payload.get("normalization")),
     )
 

@@ -18,6 +18,7 @@ from graphdrone_fit.task_conditioned_prior import (
     save_task_prototype_bank,
     slice_batch_by_datasets,
     split_batch_by_dataset,
+    supervised_contrastive_loss,
 )
 
 
@@ -132,3 +133,28 @@ def test_task_prototype_bank_save_load_and_query(tmp_path) -> None:
     assert result["exact_reuse_available"] is True
     assert result["top_neighbors"][0]["dataset"] == "a"
     assert result["similar_neighbors_excluding_exact"][0]["dataset"] == "b"
+
+
+def test_supervised_contrastive_loss_prefers_grouped_embeddings() -> None:
+    labels = torch.tensor([0, 0, 1, 1], dtype=torch.long)
+    grouped = torch.tensor(
+        [
+            [1.0, 0.0],
+            [0.9, 0.1],
+            [0.0, 1.0],
+            [0.1, 0.9],
+        ],
+        dtype=torch.float32,
+    )
+    mixed = torch.tensor(
+        [
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [0.9, 0.1],
+            [0.1, 0.9],
+        ],
+        dtype=torch.float32,
+    )
+    grouped_loss = supervised_contrastive_loss(grouped, labels, temperature=0.1)
+    mixed_loss = supervised_contrastive_loss(mixed, labels, temperature=0.1)
+    assert grouped_loss < mixed_loss
