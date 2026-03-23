@@ -68,6 +68,35 @@ def test_rotor_claim_separates_component_success_from_bottom_line():
     assert claim["integration_status"] == "not_translating"
 
 
+def test_rotor_claim_ignores_partial_nan_rows_and_keeps_support_signal():
+    paired = _frame(
+        [
+            {
+                "dataset": "california",
+                "fold": 0,
+                "task_type": "regression",
+                "router_kind_challenger": "contextual_transformer_rotor",
+                "n_specialists_challenger": 3.0,
+                "alignment_cosine_gain": 0.01,
+                "rmse_rel_improvement": -0.01,
+            },
+            {
+                "dataset": "diamonds",
+                "fold": 0,
+                "task_type": "regression",
+                "router_kind_challenger": "contextual_transformer_rotor",
+                "n_specialists_challenger": 3.0,
+                "alignment_cosine_gain": float("nan"),
+                "rmse_rel_improvement": -0.02,
+            },
+        ]
+    )
+    report = evaluate_claims(paired)
+    claim = report["claims"]["rotor_alignment"]
+    assert claim["component_status"] == "supported"
+    assert claim["summary"]["finite_gain_task_fraction"] == 0.5
+
+
 def test_ot_claim_reports_supported_when_gate_closes():
     paired = _frame(
         [
@@ -88,3 +117,20 @@ def test_ot_claim_reports_supported_when_gate_closes():
     claim = report["claims"]["ot_noise_gate"]
     assert claim["component_status"] == "supported"
     assert claim["integration_status"] == "translating"
+
+
+def test_rotor_rows_do_not_trigger_ot_claim():
+    paired = _frame(
+        [
+            {
+                "dataset": "credit_g",
+                "fold": 0,
+                "task_type": "classification",
+                "router_kind_challenger": "noise_gate_router_rotor",
+                "n_specialists_challenger": 3.0,
+                "alignment_cosine_gain_challenger": 0.02,
+            }
+        ]
+    )
+    report = evaluate_claims(paired)
+    assert report["claims"]["ot_noise_gate"]["applicable"] is False

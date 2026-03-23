@@ -42,7 +42,20 @@ def _as_json_ready(obj: Any) -> Any:
 def _router_mask(df: pd.DataFrame, needle: str) -> pd.Series:
     if "router_kind_challenger" not in df.columns:
         return pd.Series(False, index=df.index)
-    return df["router_kind_challenger"].fillna("").astype(str).str.contains(needle, regex=False)
+    kinds = df["router_kind_challenger"].fillna("").astype(str)
+    if needle == "rotor":
+        return kinds.str.contains("_rotor", regex=False)
+    if needle == "ot":
+        return kinds.str.startswith("ot_") | kinds.str.contains("_ot_", regex=False) | kinds.str.contains("ot_gate", regex=False)
+    return kinds.str.contains(needle, regex=False)
+
+
+def _series_with_fallback(df: pd.DataFrame, primary: str, fallback: str | None = None) -> pd.Series:
+    if primary in df.columns:
+        return df[primary]
+    if fallback is not None and fallback in df.columns:
+        return df[fallback]
+    return pd.Series(np.nan, index=df.index)
 
 
 def _bottom_line_summary(rows: pd.DataFrame) -> dict[str, Any]:
@@ -157,7 +170,8 @@ def _evaluate_legitimacy_claim(paired_df: pd.DataFrame) -> dict[str, Any]:
 
 
 def _evaluate_rotor_claim(paired_df: pd.DataFrame) -> dict[str, Any]:
-    applicable = _router_mask(paired_df, "rotor").any()
+    rotor_mask = _router_mask(paired_df, "rotor")
+    applicable = rotor_mask.any()
     if not applicable or paired_df.empty:
         return _claim_result(
             name="rotor_alignment",
@@ -166,13 +180,16 @@ def _evaluate_rotor_claim(paired_df: pd.DataFrame) -> dict[str, Any]:
             reasons=["no rotor challenger rows in paired results"],
         )
 
-    mean_specialists = _mean(paired_df, "n_specialists_challenger")
-    mean_gain = _mean(paired_df, "alignment_cosine_gain_challenger")
-    active_mask = pd.to_numeric(
-        paired_df.get("alignment_cosine_gain_challenger", pd.Series(np.nan, index=paired_df.index)),
-        errors="coerce",
-    ).fillna(0.0) > 0.0
-    active_rows = paired_df[active_mask]
+    rows = paired_df[rotor_mask].copy()
+    mean_specialists = _mean(rows, "n_specialists_challenger")
+    mean_gain = _mean(rows, "alignment_cosine_gain_challenger")
+    if np.isnan(mean_gain):
+        mean_gain = _mean(rows, "alignment_cosine_gain")
+    gain_series = _series_with_fallback(rows, "alignment_cosine_gain_challenger", "alignment_cosine_gain")
+    gain_values = pd.Series(pd.to_numeric(gain_series, errors="coerce"), index=rows.index)
+    finite_gain_frac = float(gain_values.notna().mean()) if len(rows) else float("nan")
+    active_mask = gain_values.fillna(0.0) > 0.0
+    active_rows = rows[active_mask]
 
     if not np.isnan(mean_specialists) and mean_specialists <= 0:
         return _claim_result(
@@ -183,7 +200,8 @@ def _evaluate_rotor_claim(paired_df: pd.DataFrame) -> dict[str, Any]:
             summary={
                 "mean_n_specialists": mean_specialists,
                 "mean_alignment_cosine_gain": mean_gain,
-                "activated_task_fraction": _fraction(paired_df, active_mask),
+                "finite_gain_task_fraction": finite_gain_frac,
+                "activated_task_fraction": _fraction(rows, active_mask),
             },
         )
 
@@ -196,6 +214,7 @@ def _evaluate_rotor_claim(paired_df: pd.DataFrame) -> dict[str, Any]:
             summary={
                 "mean_n_specialists": mean_specialists,
                 "mean_alignment_cosine_gain": mean_gain,
+                "finite_gain_task_fraction": finite_gain_frac,
             },
         )
 
@@ -203,6 +222,9 @@ def _evaluate_rotor_claim(paired_df: pd.DataFrame) -> dict[str, Any]:
         f"mean_n_specialists={mean_specialists:.6f}" if not np.isnan(mean_specialists) else "mean_n_specialists=nan",
         f"mean_alignment_cosine_gain={mean_gain:.6f}",
     ]
+    if not np.isnan(finite_gain_frac) and finite_gain_frac < 1.0:
+        missing_count = int((~gain_values.notna()).sum())
+        reasons.append(f"{missing_count} rotor task(s) reported non-finite alignment gain")
     component_status = "supported" if mean_gain > 0 else "contradicted"
     if component_status == "contradicted":
         reasons.append("rotor does not improve anchor-specialist cosine alignment")
@@ -215,13 +237,15 @@ def _evaluate_rotor_claim(paired_df: pd.DataFrame) -> dict[str, Any]:
         summary={
             "mean_n_specialists": mean_specialists,
             "mean_alignment_cosine_gain": mean_gain,
-            "activated_task_fraction": _fraction(paired_df, active_mask),
+            "finite_gain_task_fraction": finite_gain_frac,
+            "activated_task_fraction": _fraction(rows, active_mask),
         },
     )
 
 
 def _evaluate_ot_gate_claim(paired_df: pd.DataFrame) -> dict[str, Any]:
-    applicable = _router_mask(paired_df, "ot").any()
+    ot_mask = _router_mask(paired_df, "ot")
+    applicable = ot_mask.any()
     if not applicable or paired_df.empty:
         return _claim_result(
             name="ot_noise_gate",
@@ -230,14 +254,20 @@ def _evaluate_ot_gate_claim(paired_df: pd.DataFrame) -> dict[str, Any]:
             reasons=["no OT-gate challenger rows in paired results"],
         )
 
-    mean_ot_cost = _mean(paired_df, "mean_ot_cost_challenger")
-    mean_validity = _mean(paired_df, "mean_specialist_validity_challenger")
-    closed_frac = _mean(paired_df, "closed_specialist_frac_challenger")
-    active_mask = pd.to_numeric(
-        paired_df.get("closed_specialist_frac_challenger", pd.Series(np.nan, index=paired_df.index)),
-        errors="coerce",
-    ).fillna(0.0) > 0.0
-    active_rows = paired_df[active_mask]
+    rows = paired_df[ot_mask].copy()
+    mean_ot_cost = _mean(rows, "mean_ot_cost_challenger")
+    if np.isnan(mean_ot_cost):
+        mean_ot_cost = _mean(rows, "mean_ot_cost")
+    mean_validity = _mean(rows, "mean_specialist_validity_challenger")
+    if np.isnan(mean_validity):
+        mean_validity = _mean(rows, "mean_specialist_validity")
+    closed_frac = _mean(rows, "closed_specialist_frac_challenger")
+    if np.isnan(closed_frac):
+        closed_frac = _mean(rows, "closed_specialist_frac")
+    closed_series = _series_with_fallback(rows, "closed_specialist_frac_challenger", "closed_specialist_frac")
+    closed_values = pd.Series(pd.to_numeric(closed_series, errors="coerce"), index=rows.index)
+    active_mask = closed_values.fillna(0.0) > 0.0
+    active_rows = rows[active_mask]
 
     if np.isnan(mean_ot_cost) or np.isnan(mean_validity):
         return _claim_result(
@@ -272,7 +302,7 @@ def _evaluate_ot_gate_claim(paired_df: pd.DataFrame) -> dict[str, Any]:
             "mean_ot_cost": mean_ot_cost,
             "mean_specialist_validity": mean_validity,
             "mean_closed_specialist_frac": closed_frac,
-            "activated_task_fraction": _fraction(paired_df, active_mask),
+            "activated_task_fraction": _fraction(rows, active_mask),
         },
     )
 
