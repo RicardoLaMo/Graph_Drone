@@ -57,6 +57,7 @@ They may initially point to the same base SHA, but each should evolve as an isol
 ### 1. Regression stability lane
 
 - branch: `exp/v13-reg-stability`
+- worktree: `/home/wliu23/projects/GraphDrone2/.worktrees/v13-reg-stability`
 - question:
   - can we make regression router failures explainable and fully diagnosable?
 
@@ -71,6 +72,7 @@ Success condition:
 ### 2. Regression usefulness-routing lane
 
 - branch: `exp/v13-reg-usefulness-routing`
+- worktree: `/home/wliu23/projects/GraphDrone2/.worktrees/v13-reg-usefulness-routing`
 - question:
   - can regression routing be trained to realize positive specialist value rather than only detect that it exists?
 
@@ -85,6 +87,7 @@ Success condition:
 ### 3. Regression AFC revisit lane
 
 - branch: `exp/v13-reg-afc-revisit`
+- worktree: `/home/wliu23/projects/GraphDrone2/.worktrees/v13-reg-afc-revisit`
 - question:
   - after the regression circuit is better instrumented, does AFC alignment improve allocation quality rather than only token geometry?
 
@@ -99,6 +102,7 @@ Success condition:
 ### 4. Regression meta-prior readiness lane
 
 - branch: `exp/v13-reg-meta-prior-readiness`
+- worktree: `/home/wliu23/projects/GraphDrone2/.worktrees/v13-reg-meta-prior-readiness`
 - question:
   - is local regression router learning still too weak after the usefulness-routing lane, such that a task-conditioned regression prior becomes justified?
 
