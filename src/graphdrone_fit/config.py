@@ -46,6 +46,7 @@ class SetRouterConfig:
     sparse_top_k: int = 1
     alignment_lambda: float = 0.0
     router_seed: int = 42
+    freeze_base_router: bool = False
     ot_prototype_count: int = 32
     ot_epsilon: float = 0.05
     ot_max_iter: int = 50

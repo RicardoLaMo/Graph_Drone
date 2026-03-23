@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional, Union
 
 import numpy as np
@@ -16,7 +16,12 @@ from .expert_factory import (
     fit_portfolio_from_specs,
 )
 from .geo_ensemble import anchor_geo_poe_blend, learned_geo_poe_blend, learned_geo_poe_blend_torch
-from .set_router import LegitimacyGate, LegitimacyGateDecision, build_set_router
+from .set_router import (
+    LegitimacyGate,
+    LegitimacyGateDecision,
+    RotorAlignedRouter,
+    build_set_router,
+)
 from .support_encoder import MomentSupportEncoder
 from .token_builder import QualityEncoding, UniversalTokenBuilder
 from .view_descriptor import ViewDescriptor
@@ -228,13 +233,103 @@ class GraphDrone:
         return True, self.config.router
 
     def _trainable_params(self) -> list[torch.nn.Parameter]:
-        params = list(self._token_builder.trainable_parameters())
+        params = [param for param in self._token_builder.trainable_parameters() if param.requires_grad]
         if self._router is not None:
-            params.extend(list(self._router.parameters()))
+            params.extend(param for param in self._router.parameters() if param.requires_grad)
         return params
 
     def _post_optimizer_step(self) -> None:
         self._token_builder.project_hyperbolic_parameters_()
+
+    @staticmethod
+    def _freeze_module_parameters(module: torch.nn.Module) -> None:
+        for param in module.parameters():
+            param.requires_grad_(False)
+
+    @staticmethod
+    def _fit_router_auxiliary_state(
+        router: torch.nn.Module,
+        aux_tokens: torch.Tensor,
+        *,
+        full_index: int,
+    ) -> None:
+        if hasattr(router, "fit_auxiliary_state"):
+            router.fit_auxiliary_state(aux_tokens, full_index=full_index)
+
+    @staticmethod
+    def _attention_diagnostics(
+        *,
+        expert_ids: tuple[str, ...],
+        full_index: int,
+        specialist_weights: torch.Tensor,
+    ) -> dict[str, float]:
+        weights = specialist_weights.detach().cpu()
+        diagnostics: dict[str, float] = {}
+        for idx, expert_id in enumerate(expert_ids):
+            diagnostics[f"mean_attention_{expert_id}"] = float(weights[:, idx].mean().item())
+
+        if weights.shape[1] <= 1:
+            return diagnostics
+
+        non_anchor_mask = torch.ones(weights.shape[1], dtype=torch.bool)
+        non_anchor_mask[full_index] = False
+        non_anchor = weights[:, non_anchor_mask]
+        non_anchor_mass = non_anchor.sum(dim=-1, keepdim=True)
+        normalized = non_anchor / non_anchor_mass.clamp(min=1e-9)
+        entropy = -(normalized.clamp(min=1e-9) * normalized.clamp(min=1e-9).log()).sum(dim=-1)
+        diagnostics["non_anchor_attention_entropy"] = float(entropy.mean().item())
+        return diagnostics
+
+    def _optimize_regression_router_module(
+        self,
+        router: torch.nn.Module,
+        *,
+        v_tokens_t: torch.Tensor,
+        v_preds_t: torch.Tensor,
+        y_va_t: torch.Tensor,
+        full_index: int,
+        anchor_mse_val: float,
+        label: str,
+    ) -> None:
+        import torch.nn.functional as F
+
+        params = [param for param in router.parameters() if param.requires_grad]
+        if not params:
+            print(f"  -> {label} has no trainable parameters, skipping optimization.")
+            return
+
+        optimizer = torch.optim.Adam(params, lr=1e-3)
+        best_loss = float("inf")
+        patience, wait = 25, 0
+        print(
+            f"  -> Optimizing {label} on {self.device} "
+            f"(Patience={patience}, MSE+ResidualPenalty, anchor_mse={anchor_mse_val:.6f})..."
+        )
+        autocast_enabled = self.device == "cuda"
+        for _ in range(500):
+            router.train()
+            optimizer.zero_grad()
+            with torch.amp.autocast("cuda", enabled=autocast_enabled):
+                out = router(v_tokens_t, full_index=full_index)
+                integ, _, _, _ = blend_predictions_torch(
+                    expert_predictions=v_preds_t,
+                    specialist_weights=out.specialist_weights,
+                    defer_prob=out.defer_prob,
+                    full_index=full_index,
+                )
+                mse = F.mse_loss(integ.squeeze(), y_va_t)
+                aux_loss = out.aux_loss if out.aux_loss is not None else mse.new_zeros(())
+                loss = mse + 2.0 * F.relu(mse - anchor_mse_val) + aux_loss
+            loss.backward()
+            optimizer.step()
+            self._post_optimizer_step()
+            if loss.item() < best_loss:
+                best_loss = loss.item()
+                wait = 0
+            else:
+                wait += 1
+                if wait >= patience:
+                    break
 
     def _sample_aux_rows(self, matrix: np.ndarray, max_rows: int = 1024) -> np.ndarray:
         if len(matrix) <= max_rows:
@@ -409,62 +504,71 @@ class GraphDrone:
         va_tokens = self._build_regression_tokens(X_va, va_batch)
         token_dim = va_tokens.tokens.shape[-1]
         self._seed_router_training()
-        self._router = build_set_router(
-            self.config.router,
-            token_dim=token_dim,
-            n_experts=va_tokens.tokens.shape[1],
-        ).to(self.device)
 
         aux_X = self._sample_aux_rows(X_tr)
         aux_batch = self._expert_factory.predict_all(aux_X)
         aux_tokens = self._build_regression_tokens(aux_X, aux_batch)
-        if hasattr(self._router, "fit_auxiliary_state"):
-            self._router.fit_auxiliary_state(aux_tokens.tokens.to(self.device), full_index=aux_batch.full_index)
-
-        trainable_params = self._trainable_params()
-        if not trainable_params:
-            print("  -> Router has no trainable parameters (BootstrapFullRouter), skipping optimization.")
-            return
-
-        optimizer = torch.optim.Adam(trainable_params, lr=1e-3)
-        best_loss = float("inf")
-        patience, wait = 25, 0
+        aux_tokens_t = aux_tokens.tokens.to(self.device)
         y_va_t = torch.tensor(y_va, dtype=torch.float32, device=self.device)
         v_preds_t = torch.tensor(va_batch.predictions, dtype=torch.float32, device=self.device)
         v_tokens_t = va_tokens.tokens.to(self.device)
 
         with torch.no_grad():
             anchor_mse_val = F.mse_loss(v_preds_t[:, va_batch.full_index], y_va_t).item()
-        print(
-            f"  -> Optimizing Router on {self.device} "
-            f"(Patience={patience}, MSE+ResidualPenalty, anchor_mse={anchor_mse_val:.6f})..."
-        )
+        if self.config.router.kind == "contextual_transformer_rotor" and self.config.router.freeze_base_router:
+            print("  -> Frozen-router rotor ablation: training base router first, then freezing it.")
+            base_cfg = replace(
+                self.config.router,
+                kind="contextual_transformer",
+                alignment_lambda=0.0,
+                freeze_base_router=False,
+            )
+            base_router = build_set_router(
+                base_cfg,
+                token_dim=token_dim,
+                n_experts=va_tokens.tokens.shape[1],
+            ).to(self.device)
+            self._fit_router_auxiliary_state(base_router, aux_tokens_t, full_index=aux_batch.full_index)
+            self._optimize_regression_router_module(
+                base_router,
+                v_tokens_t=v_tokens_t,
+                v_preds_t=v_preds_t,
+                y_va_t=y_va_t,
+                full_index=va_batch.full_index,
+                anchor_mse_val=anchor_mse_val,
+                label="Frozen-base pre-router",
+            )
+            self._freeze_module_parameters(base_router)
+            self._router = RotorAlignedRouter(
+                token_dim=token_dim,
+                n_experts=va_tokens.tokens.shape[1],
+                base_router=base_router,
+                alignment_lambda=self.config.router.alignment_lambda,
+                router_kind="contextual_transformer_rotor_frozen_base",
+            ).to(self.device)
+        else:
+            self._router = build_set_router(
+                self.config.router,
+                token_dim=token_dim,
+                n_experts=va_tokens.tokens.shape[1],
+            ).to(self.device)
 
-        autocast_enabled = self.device == "cuda"
-        for _ in range(500):
-            self._router.train()
-            optimizer.zero_grad()
-            with torch.amp.autocast("cuda", enabled=autocast_enabled):
-                out = self._router(v_tokens_t, full_index=va_batch.full_index)
-                integ, _, _, _ = blend_predictions_torch(
-                    expert_predictions=v_preds_t,
-                    specialist_weights=out.specialist_weights,
-                    defer_prob=out.defer_prob,
-                    full_index=va_batch.full_index,
-                )
-                mse = F.mse_loss(integ.squeeze(), y_va_t)
-                aux_loss = out.aux_loss if out.aux_loss is not None else mse.new_zeros(())
-                loss = mse + 2.0 * F.relu(mse - anchor_mse_val) + aux_loss
-            loss.backward()
-            optimizer.step()
-            self._post_optimizer_step()
-            if loss.item() < best_loss:
-                best_loss = loss.item()
-                wait = 0
-            else:
-                wait += 1
-                if wait >= patience:
-                    break
+        self._fit_router_auxiliary_state(self._router, aux_tokens_t, full_index=aux_batch.full_index)
+
+        trainable_params = self._trainable_params()
+        if not trainable_params:
+            print("  -> Router has no trainable parameters (BootstrapFullRouter), skipping optimization.")
+            return
+
+        self._optimize_regression_router_module(
+            self._router,
+            v_tokens_t=v_tokens_t,
+            v_preds_t=v_preds_t,
+            y_va_t=y_va_t,
+            full_index=va_batch.full_index,
+            anchor_mse_val=anchor_mse_val,
+            label="Router",
+        )
 
     def _compute_gora_obs(self, X: np.ndarray, descriptors: tuple[ViewDescriptor, ...]) -> torch.Tensor:
         from sklearn.neighbors import NearestNeighbors
@@ -570,6 +674,13 @@ class GraphDrone:
                 diagnostics["alignment_aux_loss"] = float(router_out.aux_loss.detach().cpu().item())
             if router_out.extra_diagnostics:
                 diagnostics.update(router_out.extra_diagnostics)
+            diagnostics.update(
+                self._attention_diagnostics(
+                    expert_ids=active_batch.expert_ids,
+                    full_index=active_batch.full_index,
+                    specialist_weights=router_out.specialist_weights,
+                )
+            )
         else:
             active_preds = anchor_geo_poe_blend(
                 active_batch.predictions,
@@ -626,6 +737,13 @@ class GraphDrone:
             diagnostics["alignment_aux_loss"] = float(router_out.aux_loss.detach().cpu().item())
         if router_out.extra_diagnostics:
             diagnostics.update(router_out.extra_diagnostics)
+        diagnostics.update(
+            self._attention_diagnostics(
+                expert_ids=active_batch.expert_ids,
+                full_index=active_batch.full_index,
+                specialist_weights=router_out.specialist_weights,
+            )
+        )
         diagnostics.update(self._legitimacy_diagnostics(decision, router_skipped=False))
         return preds.astype(np.float32), diagnostics
 

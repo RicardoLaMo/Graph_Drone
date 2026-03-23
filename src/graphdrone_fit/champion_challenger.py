@@ -29,6 +29,7 @@ OPTIONAL_DELTA_COLUMNS = (
     "alignment_cosine_pre",
     "alignment_cosine_post",
     "alignment_cosine_gain",
+    "non_anchor_attention_entropy",
 )
 
 
@@ -115,6 +116,20 @@ def build_paired_task_table(champion_df: pd.DataFrame, challenger_df: pd.DataFra
         challenger_col = f"{base_name}_challenger"
         if champion_col in merged.columns and challenger_col in merged.columns:
             merged[f"{base_name}_delta"] = merged[challenger_col] - merged[champion_col]
+
+    dynamic_attention_bases = set()
+    for col in merged.columns:
+        if not col.endswith("_champion"):
+            continue
+        base_name = col[: -len("_champion")]
+        challenger_col = f"{base_name}_challenger"
+        if challenger_col not in merged.columns:
+            continue
+        if base_name.startswith("mean_attention_"):
+            dynamic_attention_bases.add(base_name)
+
+    for base_name in sorted(dynamic_attention_bases):
+        merged[f"{base_name}_delta"] = merged[f"{base_name}_challenger"] - merged[f"{base_name}_champion"]
 
     return merged
 

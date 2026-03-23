@@ -74,6 +74,7 @@ def build_graphdrone_config_from_preset(
             kind=os.getenv("GRAPHDRONE_ROUTER_KIND", default_router_kind),
             alignment_lambda=_env_float("GRAPHDRONE_ALIGNMENT_LAMBDA", 0.1),
             router_seed=_env_int("GRAPHDRONE_ROUTER_SEED", 42),
+            freeze_base_router=_env_flag("GRAPHDRONE_FREEZE_BASE_ROUTER", False),
             ot_prototype_count=_env_int("GRAPHDRONE_OT_PROTOTYPE_COUNT", 32),
             ot_epsilon=_env_float("GRAPHDRONE_OT_EPSILON", 0.05),
             ot_max_iter=_env_int("GRAPHDRONE_OT_MAX_ITER", 50),

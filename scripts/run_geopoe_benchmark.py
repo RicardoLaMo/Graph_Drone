@@ -247,6 +247,15 @@ def _diagnostic_payload(diagnostics: dict[str, object]) -> dict[str, object]:
             payload[key] = bool(value)
         elif value is not None:
             payload[key] = str(value)
+    for key, value in diagnostics.items():
+        if key in payload:
+            continue
+        if not (key.startswith("mean_attention_") or key == "non_anchor_attention_entropy"):
+            continue
+        if isinstance(value, (np.floating, float)):
+            payload[key] = float(value)
+        elif isinstance(value, (np.integer, int)):
+            payload[key] = int(value)
     return payload
 
 
