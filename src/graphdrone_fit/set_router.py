@@ -292,3 +292,68 @@ def build_set_router(config: SetRouterConfig, token_dim: int = 14, n_experts: in
             router_kind=config.kind,
         )
     return base_router
+
+
+class TaskConditionedRouter(nn.Module):
+    """Inject a dataset-level prior embedding into the anchor token before routing.
+
+    This is a clean wrapper around any base router: when no task prior has been
+    set (or strength=0), it delegates to the base router unmodified.  When a
+    prior context is set via set_task_prior_context(), it shifts the anchor token
+    by a learned linear projection of the prior before passing to the base router.
+    """
+
+    def __init__(
+        self,
+        *,
+        token_dim: int,
+        prior_dim: int,
+        base_router: nn.Module,
+        strength: float,
+        router_kind: str,
+    ):
+        super().__init__()
+        self.base_router = base_router
+        self.strength = strength
+        self.router_kind = router_kind
+        self.prior_to_token = nn.Linear(prior_dim, token_dim)
+        self.register_buffer("_task_prior_context", torch.zeros(prior_dim), persistent=False)
+        self._has_task_prior = False
+
+    @torch.no_grad()
+    def set_task_prior_context(self, context: torch.Tensor) -> None:
+        context = torch.as_tensor(context, dtype=self._task_prior_context.dtype, device=self._task_prior_context.device)
+        if context.ndim != 1:
+            raise ValueError(f"task prior context must be 1D, got shape={tuple(context.shape)}")
+        if context.shape[0] != self._task_prior_context.shape[0]:
+            raise ValueError(
+                f"task prior context dim mismatch: expected {self._task_prior_context.shape[0]}, got {context.shape[0]}"
+            )
+        self._task_prior_context.copy_(context)
+        self._has_task_prior = True
+
+    @torch.no_grad()
+    def fit_auxiliary_state(self, tokens: torch.Tensor, *, full_index: int) -> None:
+        if hasattr(self.base_router, "fit_auxiliary_state"):
+            self.base_router.fit_auxiliary_state(tokens, full_index=full_index)
+
+    def forward(self, tokens: torch.Tensor, *, full_index: int) -> RouterOutputs:
+        if not self._has_task_prior or self.strength <= 0:
+            outputs = self.base_router(tokens, full_index=full_index)
+            diagnostics = dict(outputs.extra_diagnostics or {})
+            diagnostics.update({"task_prior_enabled": 0.0})
+            return replace(outputs, router_kind=self.router_kind, extra_diagnostics=diagnostics)
+
+        conditioned = tokens.clone()
+        prior_shift = self.prior_to_token(self._task_prior_context).to(tokens.device)
+        conditioned[:, full_index, :] = conditioned[:, full_index, :] + self.strength * prior_shift.unsqueeze(0)
+        outputs = self.base_router(conditioned, full_index=full_index)
+        diagnostics = dict(outputs.extra_diagnostics or {})
+        diagnostics.update(
+            {
+                "task_prior_enabled": 1.0,
+                "task_prior_strength": float(self.strength),
+                "task_prior_norm": float(self._task_prior_context.norm().item()),
+            }
+        )
+        return replace(outputs, router_kind=self.router_kind, extra_diagnostics=diagnostics)

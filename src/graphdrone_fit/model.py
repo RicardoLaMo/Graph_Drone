@@ -20,7 +20,12 @@ from .set_router import (
     LegitimacyGate,
     LegitimacyGateDecision,
     RotorAlignedRouter,
+    TaskConditionedRouter,
     build_set_router,
+)
+from .task_conditioned_prior import (
+    build_task_context_frame_from_router_tokens,
+    compute_task_prior_from_bank,
 )
 from .support_encoder import MomentSupportEncoder
 from .token_builder import QualityEncoding, UniversalTokenBuilder
@@ -98,6 +103,7 @@ class GraphDrone:
         self._clf_uses_learned_router: bool = False
         self._router_fit_diagnostics: dict[str, float] = {}
         self._router_training_force_anchor_only: bool = False
+        self._task_prior_diagnostics: dict[str, object] = {}
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
     def fit(
@@ -530,6 +536,13 @@ class GraphDrone:
         token_dim = va_tokens.tokens.shape[-1]
         self._seed_router_training()
         self._router = build_set_router(router_cfg, token_dim=token_dim, n_experts=va_tokens.tokens.shape[1]).to(self.device)
+        self._router = self._maybe_attach_task_prior_router(
+            router=self._router,
+            router_cfg=router_cfg,
+            tokens=va_tokens.tokens,
+            descriptors=va_batch.descriptors,
+            task_type="classification",
+        )
 
         aux_X = self._sample_aux_rows(X_tr90)
         aux_batch = oof_factory.predict_all(aux_X)
@@ -597,6 +610,85 @@ class GraphDrone:
             f"  -> Classification Router trained. "
             f"blend_nll={final_blend_nll:.4f}  anchor_nll={anchor_nll_val:.4f}  mean_defer={mean_defer:.3f}"
         )
+
+    def _task_prior_confidence_scale(self) -> float:
+        """Return a [0, 1] confidence weight based on task prior diagnostics."""
+        if not self._task_prior_diagnostics:
+            return 0.0
+        if not bool(self._task_prior_diagnostics.get("task_prior_feedback_used", False)):
+            return 0.0
+        exact = 1.0 if bool(self._task_prior_diagnostics.get("task_prior_exact_reuse_used", False)) else 0.0
+        top_prob = float(self._task_prior_diagnostics.get("task_prior_top_neighbor_prob", 0.0) or 0.0)
+        entropy = float(self._task_prior_diagnostics.get("task_prior_entropy", 0.0) or 0.0)
+        entropy_scale = max(0.0, 1.0 - entropy / 2.0)
+        return max(exact, min(1.0, top_prob + entropy_scale))
+
+    def _maybe_attach_task_prior_router(
+        self,
+        *,
+        router: torch.nn.Module,
+        router_cfg: SetRouterConfig | None,
+        tokens: torch.Tensor,
+        descriptors: tuple,
+        task_type: str,
+    ) -> torch.nn.Module:
+        """Wrap router with TaskConditionedRouter if task_prior_bank_dir is configured."""
+        if router_cfg is None or router_cfg.task_prior_bank_dir is None:
+            self._task_prior_diagnostics = {}
+            return router
+        task_context_df = build_task_context_frame_from_router_tokens(
+            tokens=tokens,
+            descriptors=descriptors,
+            dataset_name=router_cfg.task_prior_dataset_key or "__current__",
+            task_type=task_type,
+        )
+        query_dataset = router_cfg.task_prior_dataset_key or "__current__"
+        prior_bundle = compute_task_prior_from_bank(
+            bank_dir=router_cfg.task_prior_bank_dir,
+            task_context_df=task_context_df,
+            encoder_kind=router_cfg.task_prior_encoder_kind,
+            device=self.device,
+            query_dataset=query_dataset,
+            top_k=3,
+            exact_reuse_blend=router_cfg.task_prior_exact_reuse_blend,
+        )
+        conditioned = TaskConditionedRouter(
+            token_dim=tokens.shape[-1],
+            prior_dim=prior_bundle["prior_vector"].shape[0],
+            base_router=router,
+            strength=router_cfg.task_prior_strength,
+            router_kind=f"{getattr(router, 'router_kind', router_cfg.kind)}_task_prior",
+        ).to(self.device)
+        conditioned.set_task_prior_context(prior_bundle["prior_vector"].to(self.device))
+        query_result = prior_bundle["query_result"]
+        top_neighbors = query_result.get("top_neighbors", [])
+        base_neighbor_probs = query_result.get("base_neighbor_probabilities", {})
+        base_top_neighbor = max(base_neighbor_probs, key=base_neighbor_probs.get) if base_neighbor_probs else ""
+        self._task_prior_diagnostics = {
+            "task_prior_training_objective": str(prior_bundle["training_objective"]),
+            "task_prior_encoder_kind": str(prior_bundle["encoder_kind"]),
+            "task_prior_top_neighbor": top_neighbors[0]["dataset"] if top_neighbors else "",
+            "task_prior_top_neighbor_prob": float(top_neighbors[0]["probability"]) if top_neighbors else float("nan"),
+            "task_prior_base_top_neighbor": base_top_neighbor,
+            "task_prior_base_top_neighbor_prob": float(base_neighbor_probs.get(base_top_neighbor, float("nan"))),
+            "task_prior_entropy": float(query_result.get("soft_neighbor_entropy", float("nan"))),
+            "task_prior_exact_reuse_available": bool(query_result.get("exact_reuse_available", False)),
+            "task_prior_exact_reuse_blend": float(prior_bundle.get("exact_reuse_blend", 0.0)),
+            "task_prior_exact_reuse_used": bool(prior_bundle.get("exact_reuse_used", False)),
+            "task_prior_query_dataset": query_dataset,
+            "task_prior_feedback_used": bool(query_result.get("feedback_used", False)),
+            "task_prior_feedback_top_source": (
+                query_result.get("top_source_datasets", [{}])[0].get("dataset", "")
+                if query_result.get("top_source_datasets")
+                else ""
+            ),
+            "task_prior_feedback_top_source_weight": (
+                float(query_result.get("top_source_datasets", [{}])[0].get("weight", float("nan")))
+                if query_result.get("top_source_datasets")
+                else float("nan")
+            ),
+        }
+        return conditioned
 
     def _fit_regression_router(self, matrix: np.ndarray, y: np.ndarray) -> None:
         from sklearn.model_selection import train_test_split

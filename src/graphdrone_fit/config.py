@@ -57,6 +57,13 @@ class SetRouterConfig:
     # Set defer_penalty_lambda=0.0 (default) to disable (no change to existing behavior).
     defer_penalty_lambda: float = 0.0
     defer_target: float = 0.8
+    # Task-conditioned prior: inject a cross-dataset task prior into the anchor token.
+    # All fields default to None/0 which disables the prior entirely (no-op).
+    task_prior_bank_dir: str | None = None
+    task_prior_encoder_kind: Literal["transformer", "gru"] = "transformer"
+    task_prior_strength: float = 0.5
+    task_prior_dataset_key: str | None = None
+    task_prior_exact_reuse_blend: float = 0.5
 
     def validate(self) -> "SetRouterConfig":
         normalized_kind = ROUTER_KIND_ALIASES.get(self.kind, self.kind)
@@ -81,6 +88,16 @@ class SetRouterConfig:
             raise ValueError(f"defer_penalty_lambda must be non-negative, got {self.defer_penalty_lambda}")
         if not 0.0 <= self.defer_target <= 1.0:
             raise ValueError(f"defer_target must be in [0, 1], got {self.defer_target}")
+        if self.task_prior_strength < 0:
+            raise ValueError(f"task_prior_strength must be non-negative, got {self.task_prior_strength}")
+        if not 0.0 <= self.task_prior_exact_reuse_blend <= 1.0:
+            raise ValueError(
+                f"task_prior_exact_reuse_blend must be in [0, 1], got {self.task_prior_exact_reuse_blend}"
+            )
+        if self.task_prior_bank_dir is not None and not str(self.task_prior_bank_dir).strip():
+            raise ValueError("task_prior_bank_dir must be non-empty when provided")
+        if self.task_prior_dataset_key is not None and not str(self.task_prior_dataset_key).strip():
+            raise ValueError("task_prior_dataset_key must be non-empty when provided")
         return replace(self, kind=normalized_kind)
 
 
