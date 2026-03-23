@@ -8,6 +8,8 @@ import torch
 from graphdrone_fit.task_conditioned_prior import (
     TaskContextSequenceAutoencoder,
     TaskContextGRUEncoder,
+    apply_task_context_normalization,
+    fit_task_context_normalization,
     TaskContextTransformerEncoder,
     build_task_context_batch,
     split_batch_by_dataset,
@@ -79,3 +81,11 @@ def test_sequence_autoencoder_forward_shape() -> None:
     assert recon.shape == batch.sequences.shape
     assert embedding.shape == (4, 32)
     assert torch.isfinite(recon).all()
+
+
+def test_task_context_normalization_preserves_binary_features() -> None:
+    batch = build_task_context_batch(_task_context_frame())
+    norm = fit_task_context_normalization(batch)
+    normalized = apply_task_context_normalization(batch, norm)
+    is_anchor_idx = batch.feature_names.index("is_anchor")
+    assert torch.equal(batch.sequences[..., is_anchor_idx], normalized.sequences[..., is_anchor_idx])

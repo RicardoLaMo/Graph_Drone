@@ -32,6 +32,13 @@ class TaskContextBatch:
     feature_names: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class TaskContextNormalization:
+    mean: torch.Tensor
+    std: torch.Tensor
+    continuous_mask: torch.Tensor
+
+
 def _feature_row(row: pd.Series) -> tuple[list[float], list[str]]:
     mean_token = json.loads(row["mean_token_json"])
     values: list[float] = [float(row["is_anchor"]), float(row["input_dim"]), float(row["preferred_k"]), float(row["mean_norm"]), float(row["std_norm"])]
@@ -86,6 +93,39 @@ def build_task_context_batch(task_context_df: pd.DataFrame) -> TaskContextBatch:
         dataset_names=tuple(dataset_names),
         example_datasets=example_datasets,
         feature_names=feature_names or (),
+    )
+
+
+def _continuous_feature_mask(feature_names: Sequence[str]) -> torch.Tensor:
+    mask = []
+    for name in feature_names:
+        is_binary = (
+            name == "is_anchor"
+            or name.startswith("family_")
+            or name.startswith("projection_")
+        )
+        mask.append(not is_binary)
+    return torch.tensor(mask, dtype=torch.bool)
+
+
+def fit_task_context_normalization(batch: TaskContextBatch) -> TaskContextNormalization:
+    mask = _continuous_feature_mask(batch.feature_names)
+    flat = batch.sequences.reshape(-1, batch.sequences.shape[-1])
+    mean = flat.mean(dim=0)
+    std = flat.std(dim=0, unbiased=False).clamp_min(1e-6)
+    return TaskContextNormalization(mean=mean, std=std, continuous_mask=mask)
+
+
+def apply_task_context_normalization(batch: TaskContextBatch, normalization: TaskContextNormalization) -> TaskContextBatch:
+    sequences = batch.sequences.clone()
+    mask = normalization.continuous_mask
+    sequences[..., mask] = (sequences[..., mask] - normalization.mean[mask]) / normalization.std[mask]
+    return TaskContextBatch(
+        sequences=sequences,
+        labels=batch.labels,
+        dataset_names=batch.dataset_names,
+        example_datasets=batch.example_datasets,
+        feature_names=batch.feature_names,
     )
 
 

@@ -3,7 +3,7 @@
 This file is generated from `docs/research/findings.jsonl`.
 It is the current research surface for scaling decisions, not an append-only history.
 
-Updated: 2026-03-23T17:32:05.358458+00:00
+Updated: 2026-03-23T18:06:30.960006+00:00
 
 ## How To Read This
 
@@ -23,6 +23,7 @@ Updated: 2026-03-23T17:32:05.358458+00:00
 
 | Claim ID | Topic | Conclusion | Branch | Note |
 |---|---|---|---|---|
+| `afc-framework-normalized-task-neighborhoods` | `afc_framework` | Yes, partially. On the six-dataset normalized classification bank, the held-out similarity space no longer collapsed to one deterministic prototype in every case. Several datasets now distribute probability across a small neighborhood of plausible related tasks, which is much closer to the intended transfer behavior. | `exp/afc-cross-dataset-lma` | `2026-03-23-afc-cross-dataset-lma-kickoff.md` |
 | `afc-framework-task-conditioned-lma-prior` | `afc_framework` | Probably yes. The within-task token-bank splits show classification has much tighter cross-dataset geometry than regression, while the mixed slice showed task type dominates family. That makes task type a real design axis for the next prior rather than a detail to ignore. | `exp/afc-cross-dataset-lma` | `2026-03-23-afc-cross-dataset-lma-kickoff.md` |
 | `afc-b-reg-anchor-asymmetry` | `afc_phase_b` | Yes. The asymmetry was real and partly causal, but fixing it was not sufficient to make Phase B promotable. | `exp/afc-b-reg-anchor-exclusion` | `2026-03-23-afc-phase-b-anchor-exclusion.md` |
 
@@ -54,6 +55,7 @@ Updated: 2026-03-23T17:32:05.358458+00:00
 
 | Timestamp | Claim ID | Status | Summary |
 |---|---|---|---|
+| `2026-03-23T18:06:30.959673+00:00` | `afc-framework-normalized-task-neighborhoods` | `partially_causal` | Normalization and a larger classification bank materially improved the task-conditioned prior: the similarity space now shows soft local neighborhoods like credit_g~diabetes/segment and pendigits~segment/optdigits instead of pure one-prototype collapse. |
 | `2026-03-23T17:32:05.358173+00:00` | `afc-framework-task-similarity-transfer-space` | `open` | The task-conditioned prior now looks more like a hard prototype assigner than a useful similar-task transfer space. The next bottleneck is representation collapse, so the next work should target normalization and metric learning rather than only encoder choice. |
 | `2026-03-23T17:25:43.001231+00:00` | `afc-framework-task-context-heldout-generalization` | `open` | The task-conditioned prior is learnable but not yet robustly transferable: held-out reconstruction remains fragile and is dominated by the optdigits outlier, so the next work should target feature normalization and dataset mismatch before claiming encoder-level wins. |
 | `2026-03-23T17:19:23.203285+00:00` | `afc-framework-task-context-prototype-learnability` | `open` | The classification-first task-context prototype is learnable. Both encoders reached 100% accuracy on the current bootstrap dataset-identification task, with the transformer showing better final loss, so transformer should be the default baseline for the next stricter generalization check. |
@@ -65,5 +67,4 @@ Updated: 2026-03-23T17:32:05.358458+00:00
 | `2026-03-23T14:00:43.692285+00:00` | `afc-b-california-router-instability` | `cleared` | California was not a token NaN problem. It was non-finite learned attention after regression router training, combined with negative realized specialist value. The new explicit fallback makes that visible while preserving the previous task quality. |
 | `2026-03-23T13:41:40.482544+00:00` | `afc-b-residual-usefulness-gap` | `open` | The new residual-usefulness diagnostic showed that specialist value can exist while realized router value stays negative. Rotor slightly improved the validation usefulness score on cpu_act, but not enough to improve held-out quality, so allocation/objective mismatch remains the main live hypothesis. |
 | `2026-03-23T13:25:48.287059+00:00` | `afc-b-joint-training-interference` | `confounded` | The frozen-base rotor ablation weakened the joint-training-interference hypothesis: it was flat to slightly worse than the corrected non-frozen rotor challenger, though same-branch champion drift means the result should be treated as informative rather than final. |
-| `2026-03-23T04:08:57.496645+00:00` | `afc-b-reg-anchor-asymmetry` | `partially_causal` | Excluding anchor mass improved the rotor challenger much more than the champion path and largely removed the earlier strong negative result, but latency and remaining integration issues still block promotion. |
 

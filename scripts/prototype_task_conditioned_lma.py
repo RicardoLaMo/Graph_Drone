@@ -17,9 +17,12 @@ sys.path.insert(0, str(ROOT / "src"))
 from graphdrone_fit.task_conditioned_prior import (
     TaskContextDatasetClassifier,
     TaskContextGRUEncoder,
+    TaskContextNormalization,
     TaskContextSequenceAutoencoder,
     TaskContextTransformerEncoder,
+    apply_task_context_normalization,
     build_task_context_batch,
+    fit_task_context_normalization,
     split_batch_by_dataset,
 )
 
@@ -143,10 +146,37 @@ def _entropy_from_counts(counts: dict[str, int]) -> float:
     return float(-sum(p * math.log(p + 1e-12) for p in probs))
 
 
-def _run_leave_one_dataset_out_similarity(encoder_kind: str, batch, epochs: int, lr: float, weight_decay: float, device: str) -> dict:
+def _softmax_neighbor_summary(similarities: torch.Tensor, seen_datasets: list[str], top_k: int = 3) -> dict[str, object]:
+    probs = torch.softmax(similarities, dim=-1).mean(dim=0)
+    probs = probs / probs.sum()
+    values, indices = torch.topk(probs, k=min(top_k, probs.shape[0]))
+    top_neighbors = [
+        {"dataset": seen_datasets[idx], "probability": float(val)}
+        for val, idx in zip(values.tolist(), indices.tolist())
+    ]
+    entropy = float(-(probs * torch.log(probs + 1e-12)).sum().item())
+    return {
+        "top_neighbors": top_neighbors,
+        "soft_neighbor_entropy": entropy,
+    }
+
+
+def _run_leave_one_dataset_out_similarity(
+    encoder_kind: str,
+    batch,
+    epochs: int,
+    lr: float,
+    weight_decay: float,
+    device: str,
+    normalize_features: bool,
+) -> dict:
     per_dataset = []
     for held_out_dataset in batch.dataset_names:
         train_batch, test_batch = split_batch_by_dataset(batch, held_out_dataset)
+        if normalize_features:
+            normalization = fit_task_context_normalization(train_batch)
+            train_batch = apply_task_context_normalization(train_batch, normalization)
+            test_batch = apply_task_context_normalization(test_batch, normalization)
         encoder = _build_encoder(encoder_kind, input_dim=batch.sequences.shape[-1], hidden_dim=64)
         model = TaskContextSequenceAutoencoder(
             encoder=encoder,
@@ -177,6 +207,7 @@ def _run_leave_one_dataset_out_similarity(encoder_kind: str, batch, epochs: int,
             centroid_matrix = torch.stack([centroids[name] for name in seen_datasets], dim=0)
             sims = test_embedding @ centroid_matrix.T
             top_vals, top_idx = sims.max(dim=1)
+            soft_summary = _softmax_neighbor_summary(sims, seen_datasets=seen_datasets, top_k=min(3, len(seen_datasets)))
             votes: dict[str, int] = {}
             for idx in top_idx.tolist():
                 name = seen_datasets[idx]
@@ -192,11 +223,14 @@ def _run_leave_one_dataset_out_similarity(encoder_kind: str, batch, epochs: int,
                     "min_top_similarity": float(top_vals.min().item()),
                     "max_top_similarity": float(top_vals.max().item()),
                     "neighbor_votes": votes,
+                    "soft_neighbor_entropy": soft_summary["soft_neighbor_entropy"],
+                    "top_neighbors": soft_summary["top_neighbors"],
                 }
             )
 
     return {
         "encoder_kind": encoder_kind,
+        "normalize_features": normalize_features,
         "per_dataset": per_dataset,
     }
 
@@ -210,6 +244,7 @@ def main() -> None:
         choices=["dataset_id", "leave_one_dataset_out_reconstruction", "leave_one_dataset_out_similarity"],
         default="dataset_id",
     )
+    parser.add_argument("--normalize-features", action="store_true")
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
@@ -229,6 +264,7 @@ def main() -> None:
         "analysis_dir": str(args.analysis_dir),
         "mode": args.mode,
         "device": device,
+        "normalize_features": bool(args.normalize_features),
         "n_examples": int(batch.sequences.shape[0]),
         "seq_len": int(batch.sequences.shape[1]),
         "input_dim": int(batch.sequences.shape[2]),
@@ -258,6 +294,7 @@ def main() -> None:
                 lr=args.lr,
                 weight_decay=args.weight_decay,
                 device=device,
+                normalize_features=args.normalize_features,
             )
             summary["results"].append(result)
 

@@ -359,6 +359,62 @@ Next likely fixes:
 - add contrastive or metric-learning structure, not only reconstruction
 - keep the task-conditioned prior, but move from hard prototype collapse toward softer task neighborhoods
 
+## Expanded classification bank with normalized neighborhoods
+
+Expanded bank:
+
+```bash
+PYTHONPATH=src python scripts/analyze_cross_dataset_view_tokens.py \
+  --datasets segment mfeat_factors pendigits optdigits diabetes credit_g \
+  --max-samples 384 \
+  --sample-rows 48 \
+  --bootstrap-summaries 16 \
+  --output-dir eval/afc_cross_dataset_lma_classification_bootstrap_v2
+```
+
+Normalized similarity-aware transfer:
+
+```bash
+PYTHONPATH=src python scripts/prototype_task_conditioned_lma.py \
+  --analysis-dir eval/afc_cross_dataset_lma_classification_bootstrap_v2 \
+  --encoder both \
+  --mode leave_one_dataset_out_similarity \
+  --normalize-features \
+  --epochs 150 \
+  --output-dir eval/afc_task_conditioned_lma_similarity_cls_v2_norm
+```
+
+What improved:
+- the prior no longer collapses into a single deterministic prototype for every held-out dataset
+- the summary now exposes soft neighborhoods, for example:
+  - `credit_g` is mostly near `diabetes`, with meaningful mass on `segment` and `pendigits`
+  - `optdigits` is mostly near `pendigits`, but still keeps some mass on `diabetes` and `credit_g`
+  - `pendigits` sits between `segment` and `optdigits`
+
+Transformer examples:
+- `credit_g`
+  - top-neighbor vote fraction: `0.6875`
+  - soft neighborhood: `diabetes (0.300)`, `segment (0.261)`, `pendigits (0.177)`
+- `optdigits`
+  - top-neighbor vote fraction: `0.8125`
+  - soft neighborhood: `pendigits (0.255)`, `diabetes (0.238)`, `credit_g (0.180)`
+- `pendigits`
+  - top-neighbor vote fraction: `0.5000`
+  - soft neighborhood: `segment (0.259)`, `optdigits (0.251)`, `diabetes (0.227)`
+
+Interpretation:
+- this is much closer to the intended “apple, banana in the fruit family” behavior
+- the task-conditioned prior now expresses local neighborhoods instead of pure one-prototype collapse
+- normalization mattered
+- the classification-first bank is large enough to show a meaningful similarity structure
+
+Current read on encoder choice:
+- transformer and GRU now tell a broadly similar neighborhood story
+- transformer remains the default baseline because it fit the context-learning tasks better overall
+- but the bigger win here came from representation normalization and a larger task bank, not from encoder family alone
+
+This is the first point where the task-conditioned LMA direction starts to look structurally useful rather than merely learnable.
+
 ## Initial analysis questions
 
 1. Do anchor views from different datasets cluster more tightly than random view pairs?
