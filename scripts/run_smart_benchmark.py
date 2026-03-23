@@ -48,11 +48,9 @@ sys.path.insert(0, str(ROOT / "src"))
 from graphdrone_fit.model import GraphDrone
 from graphdrone_fit.config import (
     GraphDroneConfig,
-    HyperbolicDescriptorConfig,
-    LegitimacyGateConfig,
-    SetRouterConfig,
 )
 from graphdrone_fit.expert_factory import ExpertBuildSpec, IdentitySelectorAdapter
+from graphdrone_fit.presets import build_graphdrone_config_from_preset
 from graphdrone_fit.view_descriptor import ViewDescriptor
 
 # ---------------------------------------------------------------------------
@@ -89,48 +87,15 @@ QUICK_DATASETS = {
     "pendigits":     CLASSIFICATION_DATASETS["pendigits"],
 }
 
-GRAPHDRONE_VERSION = "2026.03.22-clf-afc-d-regonly-v1"
-
-
-def _env_flag(name: str, default: bool) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _env_float(name: str, default: float) -> float:
-    raw = os.getenv(name)
-    return float(raw) if raw is not None else default
-
-
-def _router_config_from_env(default_kind: str) -> SetRouterConfig:
-    return SetRouterConfig(
-        kind=os.getenv("GRAPHDRONE_ROUTER_KIND", default_kind),
-        alignment_lambda=_env_float("GRAPHDRONE_ALIGNMENT_LAMBDA", 0.1),
-        ot_prototype_count=int(os.getenv("GRAPHDRONE_OT_PROTOTYPE_COUNT", "32")),
-        ot_epsilon=_env_float("GRAPHDRONE_OT_EPSILON", 0.05),
-        ot_max_iter=int(os.getenv("GRAPHDRONE_OT_MAX_ITER", "50")),
-        ot_alpha=_env_float("GRAPHDRONE_OT_ALPHA", 6.0),
-        ot_threshold=_env_float("GRAPHDRONE_OT_THRESHOLD", 0.25),
-    )
+GRAPHDRONE_VERSION = os.getenv("GRAPHDRONE_VERSION_OVERRIDE", "2026.03.22-clf-afc-d-regonly-v1")
+GRAPHDRONE_PRESET = os.getenv("GRAPHDRONE_PRESET", "afc_candidate")
 
 
 def _graphdrone_config(*, n_classes: int = 1, default_router_kind: str) -> GraphDroneConfig:
-    return GraphDroneConfig(
+    return build_graphdrone_config_from_preset(
+        preset=GRAPHDRONE_PRESET,
         n_classes=n_classes,
-        router=_router_config_from_env(default_router_kind),
-        legitimacy_gate=LegitimacyGateConfig(
-            enabled=_env_flag("GRAPHDRONE_ENABLE_LEGITIMACY_GATE", True),
-            regression_enabled=_env_flag("GRAPHDRONE_ENABLE_GATE_REGRESSION", True),
-            binary_enabled=_env_flag("GRAPHDRONE_ENABLE_GATE_BINARY", False),
-            multiclass_enabled=_env_flag("GRAPHDRONE_ENABLE_GATE_MULTICLASS", False),
-            classification_entropy_threshold=_env_float("GRAPHDRONE_GATE_ENTROPY_THRESHOLD", 0.15),
-            regression_variance_threshold=_env_float("GRAPHDRONE_GATE_VARIANCE_THRESHOLD", 0.005),
-        ),
-        hyperbolic_descriptors=HyperbolicDescriptorConfig(
-            enabled=_env_flag("GRAPHDRONE_ENABLE_HYPERBOLIC_DESCRIPTORS", False),
-        ),
+        default_router_kind=default_router_kind,
     )
 
 
@@ -246,13 +211,42 @@ def run_tabpfn(X_tr, y_tr, X_te, task_type: str):
         from tabpfn import TabPFNRegressor
         m = TabPFNRegressor(ignore_pretraining_limits=len(X_tr) > 1000)
         m.fit(X_tr, y_tr)
-        return m.predict(X_te), None
+        return m.predict(X_te), None, {}
     else:
         from tabpfn import TabPFNClassifier
         m = TabPFNClassifier(ignore_pretraining_limits=len(X_tr) > 1000)
         m.fit(X_tr, y_tr.astype(int))
         proba = m.predict_proba(X_te)
-        return proba, np.argmax(proba, axis=1)
+        return proba, np.argmax(proba, axis=1), {}
+
+
+def _diagnostic_payload(diagnostics: dict[str, object]) -> dict[str, object]:
+    keep_keys = (
+        "router_kind",
+        "mean_defer_prob",
+        "early_exit",
+        "exit_frac",
+        "legitimacy_metric",
+        "legitimacy_threshold",
+        "legitimacy_score_mean",
+        "router_skipped",
+        "mean_ot_cost",
+        "alignment_aux_loss",
+    )
+    payload: dict[str, object] = {}
+    for key in keep_keys:
+        if key not in diagnostics:
+            continue
+        value = diagnostics[key]
+        if isinstance(value, (np.floating, float)):
+            payload[key] = float(value)
+        elif isinstance(value, (np.integer, int)):
+            payload[key] = int(value)
+        elif isinstance(value, (np.bool_, bool)):
+            payload[key] = bool(value)
+        elif value is not None:
+            payload[key] = str(value)
+    return payload
 
 
 def run_graphdrone(X_tr, y_tr, X_te, task_type: str, seed: int = 42, n_classes: int = None):
@@ -302,23 +296,23 @@ def run_graphdrone(X_tr, y_tr, X_te, task_type: str, seed: int = 42, n_classes: 
 
     result = gd.predict(X_te, return_diagnostics=True)
     preds = result.predictions
-    defer = result.diagnostics.get("mean_defer_prob", 0.0)
+    diagnostics = _diagnostic_payload(result.diagnostics)
 
     if task_type == "regression":
-        return preds, None, defer
+        return preds, None, diagnostics
     else:
         proba = preds if preds.ndim == 2 else np.column_stack([1 - preds, preds])
-        return proba, np.argmax(proba, axis=1), defer
+        return proba, np.argmax(proba, axis=1), diagnostics
 
 
 # ---------------------------------------------------------------------------
 # Single task runner (one dataset × one fold × all methods)
 # ---------------------------------------------------------------------------
 
-METHODS = ["tabpfn", "graphdrone"]
+DEFAULT_METHODS = ["tabpfn", "graphdrone"]
 
 
-def run_task(dataset: str, fold: int, cache_dir: Path, max_samples: int) -> list[dict]:
+def run_task(dataset: str, fold: int, cache_dir: Path, max_samples: int, methods: list[str]) -> list[dict]:
     print(f"\n  [{dataset}  fold={fold}]")
     rows = []
 
@@ -333,18 +327,25 @@ def run_task(dataset: str, fold: int, cache_dir: Path, max_samples: int) -> list
     # Compute n_classes from full y (before split) so GraphDrone never gets a truncated class range
     global_n_classes = int(len(np.unique(y))) if task_type == "classification" else None
 
-    for method in METHODS:
+    for method in methods:
         cpath = _cache_path(cache_dir, dataset, fold, method)
         cached = load_cache(cpath)
         key = _cache_key(dataset, fold, method)
 
         if cached and cached.get("cache_key") == key and cached.get("status") == "ok":
+            diagnostics = cached.get("diagnostics", {})
             print(f"    [{method}] CACHED — skipping")
-            rows.append({**cached["metrics"], "dataset": dataset, "fold": fold,
-                         "method": method, "task_type": task_type,
-                         "defer": cached.get("defer", float("nan")),
-                         "elapsed": cached.get("elapsed", float("nan")),
-                         "status": "cached"})
+            rows.append({
+                **cached["metrics"],
+                **diagnostics,
+                "dataset": dataset,
+                "fold": fold,
+                "method": method,
+                "task_type": task_type,
+                "defer": cached.get("defer", diagnostics.get("mean_defer_prob", float("nan"))),
+                "elapsed": cached.get("elapsed", float("nan")),
+                "status": "cached",
+            })
             continue
 
         print(f"    [{method}] running...", end=" ", flush=True)
@@ -358,25 +359,37 @@ def run_task(dataset: str, fold: int, cache_dir: Path, max_samples: int) -> list
             elapsed = time.time() - t0
 
             if task_type == "regression":
-                preds, _, *rest = out
-                defer = rest[0] if rest else float("nan")
+                preds, _, diagnostics = out
                 metrics = regression_metrics(y_te, preds)
             else:
-                proba, labels, *rest = out
-                defer = rest[0] if rest else float("nan")
+                proba, labels, diagnostics = out
                 metrics = classification_metrics(y_te, proba, labels)
+            defer = diagnostics.get("mean_defer_prob", float("nan"))
 
             print(f"OK ({elapsed:.1f}s)  " +
                   "  ".join(f"{k}={v:.4f}" for k, v in metrics.items()) +
                   (f"  defer={defer:.4f}" if not np.isnan(float(defer)) else ""))
 
-            payload = {"cache_key": key, "status": "ok", "metrics": metrics,
-                       "defer": float(defer) if not np.isnan(float(defer)) else None,
-                       "elapsed": elapsed}
+            payload = {
+                "cache_key": key,
+                "status": "ok",
+                "metrics": metrics,
+                "diagnostics": diagnostics,
+                "defer": float(defer) if not np.isnan(float(defer)) else None,
+                "elapsed": elapsed,
+            }
             save_cache(cpath, payload)
-            rows.append({**metrics, "dataset": dataset, "fold": fold,
-                         "method": method, "task_type": task_type,
-                         "defer": float(defer), "elapsed": elapsed, "status": "ok"})
+            rows.append({
+                **metrics,
+                **diagnostics,
+                "dataset": dataset,
+                "fold": fold,
+                "method": method,
+                "task_type": task_type,
+                "defer": float(defer),
+                "elapsed": elapsed,
+                "status": "ok",
+            })
 
         except Exception as e:
             elapsed = time.time() - t0
@@ -483,7 +496,8 @@ def build_report(all_rows: list[dict], output_dir: Path):
 
     # --- Summary per dataset (mean over folds) ---
     numeric_cols = [c for c in df.columns
-                    if c not in ("dataset", "fold", "method", "task_type", "status")]
+                    if c not in ("dataset", "fold", "method", "task_type", "status")
+                    and pd.api.types.is_numeric_dtype(df[c])]
     agg = df.groupby(["dataset", "method", "task_type"])[numeric_cols].mean().reset_index()
     agg.to_csv(output_dir / "results_summary.csv", index=False)
 
@@ -605,6 +619,8 @@ def main():
                         default=ROOT / "eval" / "smart_benchmark")
     parser.add_argument("--quick", action="store_true",
                         help="Shorthand: 3 datasets, fold 0 only")
+    parser.add_argument("--methods", nargs="+", choices=DEFAULT_METHODS,
+                        default=DEFAULT_METHODS, help="Subset of methods to run")
     args = parser.parse_args()
 
     if args.quick:
@@ -624,19 +640,29 @@ def main():
     print("=" * 70)
     print(f"  Datasets  : {list(dataset_registry.keys())}")
     print(f"  Folds     : {args.folds}")
-    print(f"  Methods   : {METHODS}")
+    print(f"  Methods   : {args.methods}")
     print(f"  Cache dir : {args.cache_dir}")
     print(f"  GD version: {GRAPHDRONE_VERSION}")
+    print(f"  GD preset : {GRAPHDRONE_PRESET}")
     print()
 
     all_rows: list[dict] = []
     for ds in dataset_registry:
         for fold in args.folds:
-            rows = run_task(ds, fold, args.cache_dir, args.max_samples)
+            rows = run_task(ds, fold, args.cache_dir, args.max_samples, args.methods)
             all_rows.extend(rows)
 
     if all_rows:
         build_report(all_rows, args.output_dir)
+        metadata = {
+            "graphdrone_version": GRAPHDRONE_VERSION,
+            "graphdrone_preset": GRAPHDRONE_PRESET,
+            "datasets": list(dataset_registry.keys()),
+            "folds": args.folds,
+            "methods": args.methods,
+            "max_samples": args.max_samples,
+        }
+        (args.output_dir / "metadata.json").write_text(json.dumps(metadata, indent=2))
     else:
         print("No results collected.")
 

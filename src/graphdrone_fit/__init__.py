@@ -5,6 +5,7 @@ from .config import (
     LegitimacyGateConfig,
     SetRouterConfig,
 )
+from .presets import available_graphdrone_presets, build_graphdrone_config_from_preset
 from .view_descriptor import ViewDescriptor
 from .expert_factory import ExpertBuildSpec, IdentitySelectorAdapter
 
@@ -16,6 +17,8 @@ __all__ = [
     "LegitimacyGateConfig",
     "HyperbolicDescriptorConfig",
     "SetRouterConfig",
+    "available_graphdrone_presets",
+    "build_graphdrone_config_from_preset",
     "ViewDescriptor",
     "ExpertBuildSpec",
     "IdentitySelectorAdapter",
