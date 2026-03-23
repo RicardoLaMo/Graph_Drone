@@ -3,7 +3,7 @@
 This file is generated from `docs/research/findings.jsonl`.
 It is the current research surface for scaling decisions, not an append-only history.
 
-Updated: 2026-03-23T19:49:37.217408+00:00
+Updated: 2026-03-23T19:59:55.187289+00:00
 
 ## How To Read This
 
@@ -57,12 +57,14 @@ Updated: 2026-03-23T19:49:37.217408+00:00
 
 | Claim ID | Topic | Conclusion | Branch | Note |
 |---|---|---|---|---|
+| `afc-framework-binary-rank-loss-probe` | `afc_framework` | For this formulation, no. A pairwise rank auxiliary on the blended binary score improved some calibration terms, but it did not improve the credit_g best-threshold ceiling and it failed to produce a better binary challenger than defer regularization alone. The lower-weight variant also regressed credit_g F1 enough to fail the guardrail. | `exp/afc-cross-dataset-lma-rankloss` | `2026-03-23-afc-cross-dataset-lma-rankloss.md` |
 | `afc-b-residual-objective-gap-penalty` | `afc_phase_b` | For the current objective shape, no. Across lambda={0.02,0.05,0.10} on the quick regression contract, the penalty was active but did not produce a better held-out model; its main effect was modest defer suppression rather than a genuinely better specialist-allocation policy. | `exp/afc-b-residual-objective` | `2026-03-23-afc-phase-b-residual-objective.md` |
 
 ## Recent Findings
 
 | Timestamp | Claim ID | Status | Summary |
 |---|---|---|---|
+| `2026-03-23T19:59:55.186947+00:00` | `afc-framework-binary-rank-loss-probe` | `falsified` | The first binary rank-loss probe separated ranking-surface questions from calibration questions, but the current pairwise formulation did not translate into a better live task-prior route. It should not be the next default architecture step without a different target or coupling. |
 | `2026-03-23T19:49:37.217034+00:00` | `afc-framework-binary-threshold-sensitivity` | `partially_causal` | Threshold-sensitivity analysis showed that defer-regularized task priors improve calibration consistently on the binary slice, but only partially improve the broader threshold landscape. The next bottleneck has shifted from defer saturation to score ordering and threshold geometry. |
 | `2026-03-23T19:43:50.594637+00:00` | `afc-framework-task-prior-defer-regularization` | `partially_causal` | Once task-bank identity and exact reuse were live, the remaining blocker proved to be defer saturation rather than prior availability. A task-prior-aware defer penalty moved mean defer out of the ~0.999 regime, and a mild setting produced the first promoted binary slice on this branch. |
 | `2026-03-23T19:27:38.270058+00:00` | `afc-framework-live-task-exact-reuse` | `partially_causal` | Persistent task identity and exact-reuse blending are now active on the live binary route. That clears the bank/query identity bottleneck, but the remaining limiter is the binary defer policy rather than task-prior availability. |
@@ -74,5 +76,4 @@ Updated: 2026-03-23T19:49:37.217408+00:00
 | `2026-03-23T18:06:30.959673+00:00` | `afc-framework-normalized-task-neighborhoods` | `partially_causal` | Normalization and a larger classification bank materially improved the task-conditioned prior: the similarity space now shows soft local neighborhoods like credit_g~diabetes/segment and pendigits~segment/optdigits instead of pure one-prototype collapse. |
 | `2026-03-23T17:32:05.358173+00:00` | `afc-framework-task-similarity-transfer-space` | `open` | The task-conditioned prior now looks more like a hard prototype assigner than a useful similar-task transfer space. The next bottleneck is representation collapse, so the next work should target normalization and metric learning rather than only encoder choice. |
 | `2026-03-23T17:25:43.001231+00:00` | `afc-framework-task-context-heldout-generalization` | `open` | The task-conditioned prior is learnable but not yet robustly transferable: held-out reconstruction remains fragile and is dominated by the optdigits outlier, so the next work should target feature normalization and dataset mismatch before claiming encoder-level wins. |
-| `2026-03-23T17:19:23.203285+00:00` | `afc-framework-task-context-prototype-learnability` | `open` | The classification-first task-context prototype is learnable. Both encoders reached 100% accuracy on the current bootstrap dataset-identification task, with the transformer showing better final loss, so transformer should be the default baseline for the next stricter generalization check. |
 
