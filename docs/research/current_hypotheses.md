@@ -3,7 +3,7 @@
 This file is generated from `docs/research/findings.jsonl`.
 It is the current research surface for scaling decisions, not an append-only history.
 
-Updated: 2026-03-23T16:13:20.166698+00:00
+Updated: 2026-03-23T16:40:55.281876+00:00
 
 ## How To Read This
 
@@ -30,7 +30,6 @@ Updated: 2026-03-23T16:13:20.166698+00:00
 | Claim ID | Topic | Conclusion | Branch | Note |
 |---|---|---|---|---|
 | `afc-framework-cross-dataset-hyper-lma` | `afc_framework` | This is now a live framework hypothesis. The current Phase B results increasingly suggest single-dataset router fitting may be too weak, because improved local diagnostics can still come mainly from routing suppression rather than better allocation. | `exp/afc-b-residual-objective` | `2026-03-23-afc-cross-dataset-lma-hypothesis.md` |
-| `afc-b-residual-objective-gap-penalty` | `afc_phase_b` | The direct residual-usefulness penalty is active and reduces the diagnosed gap, but on the quick regression contract it does so mainly by collapsing defer rather than learning a clearly better specialist-allocation policy. | `exp/afc-b-residual-objective` | `2026-03-23-afc-phase-b-residual-objective.md` |
 | `afc-b-residual-usefulness-gap` | `afc_phase_b` | On cpu_act, yes. Both champion and challenger have positive best-available specialist advantage but negative attention-weighted specialist advantage; rotor narrows the gap slightly on validation but still worsens held-out RMSE. California remains unresolved due NaN usefulness diagnostics. | `exp/afc-b-frozen-router` | `2026-03-23-afc-phase-b-residual-usefulness.md` |
 | `afc-b-rotor-mechanism` | `afc_phase_b` | Rotor improves token alignment, but the current routing and integration design still does not convert that into a stable benchmark win. | `exp/afc-b-cayley-rotor` | `2026-03-23-afc-phase-b-claim-first.md` |
 
@@ -40,10 +39,17 @@ Updated: 2026-03-23T16:13:20.166698+00:00
 |---|---|---|---|---|
 | `afc-b-joint-training-interference` | `afc_phase_b` | Probably not as the dominant blocker. Freezing the base router did not improve the rotor challenger over the corrected non-frozen run, but branch-local champion drift prevents a clean falsification. | `exp/afc-b-frozen-router` | `2026-03-23-afc-phase-b-frozen-router.md` |
 
+## Falsified
+
+| Claim ID | Topic | Conclusion | Branch | Note |
+|---|---|---|---|---|
+| `afc-b-residual-objective-gap-penalty` | `afc_phase_b` | For the current objective shape, no. Across lambda={0.02,0.05,0.10} on the quick regression contract, the penalty was active but did not produce a better held-out model; its main effect was modest defer suppression rather than a genuinely better specialist-allocation policy. | `exp/afc-b-residual-objective` | `2026-03-23-afc-phase-b-residual-objective.md` |
+
 ## Recent Findings
 
 | Timestamp | Claim ID | Status | Summary |
 |---|---|---|---|
+| `2026-03-23T16:40:55.281593+00:00` | `afc-b-residual-objective-gap-penalty` | `falsified` | The residual-usefulness-gap objective is now falsified in its current form as a local fix: the lambda sweep stayed slightly worse than the champion at every setting, with changes driven mostly by routing suppression rather than positive specialist allocation. |
 | `2026-03-23T16:13:20.166398+00:00` | `afc-framework-cross-dataset-hyper-lma` | `open` | Cross-dataset latent manifold alignment / hyper-router priors are now recorded as the next-scale AFC hypothesis: if local objective fixes keep improving internals without strong held-out wins, the routing prior should be learned across datasets rather than from tiny per-dataset splits. |
 | `2026-03-23T16:13:08.832205+00:00` | `afc-b-residual-objective-gap-penalty` | `open` | On the diagnostic quick regression contract, the new objective slightly reduced the negative held-out RMSE and sharply reduced defer-weighted negative specialist value, but mostly by routing less; keep the claim open and do not advance to mini-full yet. |
 | `2026-03-23T14:00:43.692285+00:00` | `afc-b-california-router-instability` | `cleared` | California was not a token NaN problem. It was non-finite learned attention after regression router training, combined with negative realized specialist value. The new explicit fallback makes that visible while preserving the previous task quality. |

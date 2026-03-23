@@ -149,7 +149,52 @@ That idea is not activated in this branch yet. It remains a next framework hypot
 
 ## Next checks
 
-1. Run the same residual-usefulness objective on the mini-full fold-0 regression contract.
-2. Sweep `GRAPHDRONE_RESIDUAL_USEFULNESS_LAMBDA` over a small set such as `{0.02, 0.05, 0.1}`.
-3. If the objective keeps helping mainly by reducing defer, redesign the auxiliary term so it rewards selective positive specialist allocation rather than simple routing suppression.
-4. If local objectives keep stalling, open the next branch for cross-dataset latent manifold alignment / hyper-LMA routing priors.
+1. Sweep `GRAPHDRONE_RESIDUAL_USEFULNESS_LAMBDA` over a small set such as `{0.02, 0.05, 0.1}`.
+2. If the objective keeps helping mainly by reducing defer, redesign the auxiliary term so it rewards selective positive specialist allocation rather than simple routing suppression.
+3. If local objectives keep stalling, open the next branch for cross-dataset latent manifold alignment / hyper-LMA routing priors.
+
+## Lambda sweep follow-up
+
+After the initial quick probe at `lambda=0.1`, the same quick regression contract was rerun with:
+- `lambda=0.02`
+- `lambda=0.05`
+- `lambda=0.10`
+
+Artifacts:
+- `eval/phaseb_residual_objective_quick_l002_sweep/comparison/promotion_decision.json`
+- `eval/phaseb_residual_objective_quick_l005_sweep/comparison/promotion_decision.json`
+- `eval/phaseb_residual_objective_quick_l010_sweep/comparison/promotion_decision.json`
+
+Headline result:
+- all three settings remained `hold`
+- all three settings stayed slightly worse than the champion on RMSE
+- none produced evidence of a genuinely better routed specialist policy
+
+Quick comparison:
+
+| lambda | mean RMSE rel. improvement | mean R2 delta | cpu_act RMSE rel. improvement | cpu_act defer | cpu_act weighted adv. | cpu_act defer-weighted adv. | cpu_act usefulness gap |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 0.02 | -0.000357 | -0.000152 | -0.000714 | 0.0058 | -0.1050 | -0.00097 | 0.2082 |
+| 0.05 | -0.000337 | -0.000144 | -0.000675 | 0.0022 | -0.1152 | -0.00037 | 0.2076 |
+| 0.10 | -0.000341 | -0.000145 | -0.000682 | 0.0017 | -0.1096 | -0.00024 | 0.2074 |
+
+Read:
+- lowering `lambda` preserves slightly more routing on `cpu_act`
+- but held-out RMSE remains slightly negative at every setting
+- the usefulness gap does shrink modestly with larger `lambda`
+- the underlying weighted specialist advantage does not become positive
+
+`california` remains dominated by the known instability path:
+- challenger defer stays `0.0`
+- held-out RMSE stays identical to the champion
+- the gap moves from about `0.2212` to `0.2236`, but the model still falls back to anchor-only behavior
+
+Updated interpretation:
+- this auxiliary term is active and measurable
+- but the current formulation does not translate into a better regression model on the quick contract
+- the main effect is still routing suppression, not successful positive specialist allocation
+
+So the strengthened conclusion is:
+- the current residual-usefulness-gap objective, as written, is not the right local fix
+- a smaller `lambda` only changes the degree of suppression
+- the next local step should be a different objective shape, not a bigger benchmark on this exact formulation
