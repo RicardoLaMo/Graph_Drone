@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 
 import torch
@@ -123,11 +124,92 @@ def _run_leave_one_dataset_out_reconstruction(encoder_kind: str, batch, epochs: 
     }
 
 
+def _normalized_centroids(embeddings: torch.Tensor, dataset_names: tuple[str, ...], example_datasets: tuple[str, ...]) -> dict[str, torch.Tensor]:
+    centroids: dict[str, torch.Tensor] = {}
+    for dataset in dataset_names:
+        idx = [i for i, name in enumerate(example_datasets) if name == dataset]
+        if not idx:
+            continue
+        centroid = embeddings[idx].mean(dim=0)
+        centroids[dataset] = F.normalize(centroid.unsqueeze(0), dim=-1).squeeze(0)
+    return centroids
+
+
+def _entropy_from_counts(counts: dict[str, int]) -> float:
+    total = sum(counts.values())
+    if total <= 0:
+        return float("nan")
+    probs = [count / total for count in counts.values() if count > 0]
+    return float(-sum(p * math.log(p + 1e-12) for p in probs))
+
+
+def _run_leave_one_dataset_out_similarity(encoder_kind: str, batch, epochs: int, lr: float, weight_decay: float, device: str) -> dict:
+    per_dataset = []
+    for held_out_dataset in batch.dataset_names:
+        train_batch, test_batch = split_batch_by_dataset(batch, held_out_dataset)
+        encoder = _build_encoder(encoder_kind, input_dim=batch.sequences.shape[-1], hidden_dim=64)
+        model = TaskContextSequenceAutoencoder(
+            encoder=encoder,
+            hidden_dim=64,
+            seq_len=batch.sequences.shape[1],
+            input_dim=batch.sequences.shape[2],
+        ).to(device)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+        train_sequences = train_batch.sequences.to(device)
+        test_sequences = test_batch.sequences.to(device)
+
+        for _ in range(epochs):
+            model.train()
+            optimizer.zero_grad()
+            recon, _ = model(train_sequences)
+            loss = F.mse_loss(recon, train_sequences)
+            loss.backward()
+            optimizer.step()
+
+        with torch.no_grad():
+            model.eval()
+            _, train_embedding = model(train_sequences)
+            _, test_embedding = model(test_sequences)
+            train_embedding = F.normalize(train_embedding, dim=-1)
+            test_embedding = F.normalize(test_embedding, dim=-1)
+            centroids = _normalized_centroids(train_embedding, train_batch.dataset_names, train_batch.example_datasets)
+            seen_datasets = sorted(centroids.keys())
+            centroid_matrix = torch.stack([centroids[name] for name in seen_datasets], dim=0)
+            sims = test_embedding @ centroid_matrix.T
+            top_vals, top_idx = sims.max(dim=1)
+            votes: dict[str, int] = {}
+            for idx in top_idx.tolist():
+                name = seen_datasets[idx]
+                votes[name] = votes.get(name, 0) + 1
+            top_neighbor = max(votes, key=votes.get)
+            per_dataset.append(
+                {
+                    "held_out_dataset": held_out_dataset,
+                    "top_neighbor_dataset": top_neighbor,
+                    "top_neighbor_fraction": float(votes[top_neighbor] / len(top_idx)),
+                    "neighbor_vote_entropy": _entropy_from_counts(votes),
+                    "mean_top_similarity": float(top_vals.mean().item()),
+                    "min_top_similarity": float(top_vals.min().item()),
+                    "max_top_similarity": float(top_vals.max().item()),
+                    "neighbor_votes": votes,
+                }
+            )
+
+    return {
+        "encoder_kind": encoder_kind,
+        "per_dataset": per_dataset,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Prototype a task-conditioned LMA prior from task-context bootstrap summaries.")
     parser.add_argument("--analysis-dir", type=Path, required=True, help="Directory containing task_context_examples.csv")
     parser.add_argument("--encoder", choices=["transformer", "gru", "both"], default="both")
-    parser.add_argument("--mode", choices=["dataset_id", "leave_one_dataset_out_reconstruction"], default="dataset_id")
+    parser.add_argument(
+        "--mode",
+        choices=["dataset_id", "leave_one_dataset_out_reconstruction", "leave_one_dataset_out_similarity"],
+        default="dataset_id",
+    )
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
@@ -158,8 +240,18 @@ def main() -> None:
             result = _run_one(encoder_kind, batch=batch, epochs=args.epochs, lr=args.lr, weight_decay=args.weight_decay, device=device)
             summary["results"].append({k: v for k, v in result.items() if k != "history"})
             (args.output_dir / f"{encoder_kind}_history.json").write_text(json.dumps(result["history"], indent=2), encoding="utf-8")
-        else:
+        elif args.mode == "leave_one_dataset_out_reconstruction":
             result = _run_leave_one_dataset_out_reconstruction(
+                encoder_kind,
+                batch=batch,
+                epochs=args.epochs,
+                lr=args.lr,
+                weight_decay=args.weight_decay,
+                device=device,
+            )
+            summary["results"].append(result)
+        else:
+            result = _run_leave_one_dataset_out_similarity(
                 encoder_kind,
                 batch=batch,
                 epochs=args.epochs,

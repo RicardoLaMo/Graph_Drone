@@ -301,6 +301,64 @@ Current best next step:
 - normalize or reparameterize the task-context features before another encoder comparison
 - only then revisit encoder choice
 
+## Similar-task transfer framing
+
+Why the earlier held-out check used MSE:
+- that run was not scoring classification quality
+- it was scoring reconstruction of continuous task-context features
+- so `MSE` was only a surrogate for representation transfer, not a claim that classification itself should be judged by MSE
+
+That surrogate is still limited for the research question you raised.
+
+The better question is:
+- does a held-out dataset map coherently toward one or a few seen task prototypes?
+- and is that mapping stable enough to support “apply the prior to a similar next task”?
+
+## Similarity-aware held-out result
+
+Similarity-mode run:
+
+```bash
+PYTHONPATH=src python scripts/prototype_task_conditioned_lma.py \
+  --analysis-dir eval/afc_cross_dataset_lma_classification_bootstrap_v1 \
+  --encoder both \
+  --mode leave_one_dataset_out_similarity \
+  --epochs 150 \
+  --output-dir eval/afc_task_conditioned_lma_similarity_cls_v1
+```
+
+Artifact:
+- `eval/afc_task_conditioned_lma_similarity_cls_v1/summary.json`
+
+Result:
+- both encoders map each held-out dataset to exactly one seen dataset across all 24 bootstraps
+- transformer:
+  - `credit_g -> pendigits`
+  - `diabetes -> pendigits`
+  - `optdigits -> credit_g`
+  - `pendigits -> credit_g`
+- GRU:
+  - same neighbor pattern
+
+Read:
+- this is not yet a healthy notion of “similar-task transfer”
+- the prior is stable, but too collapsed
+- it does not discover a nuanced neighborhood structure
+- instead it acts like a hard prototype assignment with near-total confidence
+
+Interpretation:
+- your framing is correct: the right goal is not “one prior for all tasks”
+- it is “learn task characteristics, then transfer to the next similar task”
+- but the current representation still collapses that similarity relation too aggressively
+
+So the next bottleneck is now clearer:
+- we need a better similarity space before worrying about more encoder capacity
+
+Next likely fixes:
+- normalize task-context features so token magnitude and descriptor scale do not dominate
+- add contrastive or metric-learning structure, not only reconstruction
+- keep the task-conditioned prior, but move from hard prototype collapse toward softer task neighborhoods
+
 ## Initial analysis questions
 
 1. Do anchor views from different datasets cluster more tightly than random view pairs?

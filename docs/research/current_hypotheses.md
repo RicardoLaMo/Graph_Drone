@@ -3,7 +3,7 @@
 This file is generated from `docs/research/findings.jsonl`.
 It is the current research surface for scaling decisions, not an append-only history.
 
-Updated: 2026-03-23T17:25:43.001511+00:00
+Updated: 2026-03-23T17:32:05.358458+00:00
 
 ## How To Read This
 
@@ -34,6 +34,7 @@ Updated: 2026-03-23T17:25:43.001511+00:00
 | `afc-framework-cross-dataset-token-geometry` | `afc_framework` | Partially, but not in the simplest form. In the first mixed regression/classification slice, task type separated tokens more strongly than view family, so any future LMA prior should likely be hierarchical or task-conditioned rather than a single family-invariant prior. | `exp/afc-cross-dataset-lma` | `2026-03-23-afc-cross-dataset-lma-kickoff.md` |
 | `afc-framework-task-context-heldout-generalization` | `afc_framework` | Not reliably yet. In the first leave-one-dataset-out reconstruction check, both encoder families failed badly on optdigits while generalizing reasonably on the other held-out datasets. This keeps the task-conditioned direction alive, but shows that representation mismatch is still a major bottleneck. | `exp/afc-cross-dataset-lma` | `2026-03-23-afc-cross-dataset-lma-kickoff.md` |
 | `afc-framework-task-context-prototype-learnability` | `afc_framework` | Yes, on the current bootstrap task-context surface. Both the transformer and GRU prototypes fit the four-dataset classification context set, and the transformer converged to a lower final loss on the same examples. | `exp/afc-cross-dataset-lma` | `2026-03-23-afc-cross-dataset-lma-kickoff.md` |
+| `afc-framework-task-similarity-transfer-space` | `afc_framework` | Not yet. On the first similarity-aware held-out check, both encoders mapped each unseen dataset to exactly one seen prototype with near-total confidence, which is stable but too collapsed to count as a nuanced task-neighborhood space. | `exp/afc-cross-dataset-lma` | `2026-03-23-afc-cross-dataset-lma-kickoff.md` |
 | `afc-b-residual-usefulness-gap` | `afc_phase_b` | On cpu_act, yes. Both champion and challenger have positive best-available specialist advantage but negative attention-weighted specialist advantage; rotor narrows the gap slightly on validation but still worsens held-out RMSE. California remains unresolved due NaN usefulness diagnostics. | `exp/afc-b-frozen-router` | `2026-03-23-afc-phase-b-residual-usefulness.md` |
 | `afc-b-rotor-mechanism` | `afc_phase_b` | Rotor improves token alignment, but the current routing and integration design still does not convert that into a stable benchmark win. | `exp/afc-b-cayley-rotor` | `2026-03-23-afc-phase-b-claim-first.md` |
 
@@ -53,6 +54,7 @@ Updated: 2026-03-23T17:25:43.001511+00:00
 
 | Timestamp | Claim ID | Status | Summary |
 |---|---|---|---|
+| `2026-03-23T17:32:05.358173+00:00` | `afc-framework-task-similarity-transfer-space` | `open` | The task-conditioned prior now looks more like a hard prototype assigner than a useful similar-task transfer space. The next bottleneck is representation collapse, so the next work should target normalization and metric learning rather than only encoder choice. |
 | `2026-03-23T17:25:43.001231+00:00` | `afc-framework-task-context-heldout-generalization` | `open` | The task-conditioned prior is learnable but not yet robustly transferable: held-out reconstruction remains fragile and is dominated by the optdigits outlier, so the next work should target feature normalization and dataset mismatch before claiming encoder-level wins. |
 | `2026-03-23T17:19:23.203285+00:00` | `afc-framework-task-context-prototype-learnability` | `open` | The classification-first task-context prototype is learnable. Both encoders reached 100% accuracy on the current bootstrap dataset-identification task, with the transformer showing better final loss, so transformer should be the default baseline for the next stricter generalization check. |
 | `2026-03-23T17:11:56.304425+00:00` | `afc-framework-task-conditioned-lma-prior` | `partially_causal` | The cross-dataset token-bank results now support a task-conditioned or hierarchical LMA prior: classification geometry is much more coherent than regression, so a flat universal prior is less defensible than a regime-aware transformer/GRU-style conditioning layer. |
@@ -64,5 +66,4 @@ Updated: 2026-03-23T17:25:43.001511+00:00
 | `2026-03-23T13:41:40.482544+00:00` | `afc-b-residual-usefulness-gap` | `open` | The new residual-usefulness diagnostic showed that specialist value can exist while realized router value stays negative. Rotor slightly improved the validation usefulness score on cpu_act, but not enough to improve held-out quality, so allocation/objective mismatch remains the main live hypothesis. |
 | `2026-03-23T13:25:48.287059+00:00` | `afc-b-joint-training-interference` | `confounded` | The frozen-base rotor ablation weakened the joint-training-interference hypothesis: it was flat to slightly worse than the corrected non-frozen rotor challenger, though same-branch champion drift means the result should be treated as informative rather than final. |
 | `2026-03-23T04:08:57.496645+00:00` | `afc-b-reg-anchor-asymmetry` | `partially_causal` | Excluding anchor mass improved the rotor challenger much more than the champion path and largely removed the earlier strong negative result, but latency and remaining integration issues still block promotion. |
-| `2026-03-23T04:08:57.463397+00:00` | `afc-b-rotor-mechanism` | `open` | Phase B claim-first review supported the mechanism but left translation open due to circuit design and metric coupling questions. |
 
