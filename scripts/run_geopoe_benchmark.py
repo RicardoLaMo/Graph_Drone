@@ -573,6 +573,46 @@ def _win_rate(df: pd.DataFrame, metric: str, challenger: str, baselines: list[st
     return pd.DataFrame(rows)
 
 
+def _regression_fallback_summary(df: pd.DataFrame) -> pd.DataFrame:
+    required = {
+        "task_type",
+        "dataset",
+        "method",
+        "regression_router_fallback_stage",
+        "regression_router_fallback_reason",
+    }
+    if not required.issubset(df.columns):
+        return pd.DataFrame()
+    reg = df[df["task_type"] == "regression"].copy()
+    if reg.empty:
+        return pd.DataFrame()
+    reg["regression_router_fallback_stage"] = (
+        reg["regression_router_fallback_stage"].fillna("missing").astype(str)
+    )
+    reg["regression_router_fallback_reason"] = (
+        reg["regression_router_fallback_reason"].fillna("missing").astype(str)
+    )
+    summary = (
+        reg.groupby(
+            [
+                "dataset",
+                "method",
+                "regression_router_fallback_stage",
+                "regression_router_fallback_reason",
+            ],
+            dropna=False,
+        )
+        .size()
+        .reset_index(name="count")
+        .sort_values(
+            ["dataset", "method", "count", "regression_router_fallback_stage", "regression_router_fallback_reason"],
+            ascending=[True, True, False, True, True],
+        )
+        .reset_index(drop=True)
+    )
+    return summary
+
+
 def build_report(all_rows: list[dict], output_dir: Path):
     output_dir.mkdir(parents=True, exist_ok=True)
     df = pd.DataFrame(all_rows)
@@ -584,6 +624,9 @@ def build_report(all_rows: list[dict], output_dir: Path):
                     and pd.api.types.is_numeric_dtype(df[c])]
     agg = df.groupby(["dataset", "method", "task_type"])[numeric_cols].mean().reset_index()
     agg.to_csv(output_dir / "results_summary.csv", index=False)
+    fallback_summary = _regression_fallback_summary(df)
+    if not fallback_summary.empty:
+        fallback_summary.to_csv(output_dir / "regression_fallback_summary.csv", index=False)
 
     lines = [
         "=" * 80,
@@ -609,6 +652,22 @@ def build_report(all_rows: list[dict], output_dir: Path):
             lines.append("Win-rate (GraphDrone R² > TabPFN default, per dataset per fold)")
             lines.append(wr[["dataset", "vs", "win_rate", "delta_r2"]].to_string(index=False,
                 float_format="{:.3f}".format))
+            lines.append("")
+
+        if not fallback_summary.empty:
+            lines.append("Regression Fallback Summary")
+            lines.append("-" * 80)
+            lines.append(
+                fallback_summary[
+                    [
+                        "dataset",
+                        "method",
+                        "regression_router_fallback_stage",
+                        "regression_router_fallback_reason",
+                        "count",
+                    ]
+                ].to_string(index=False)
+            )
             lines.append("")
 
     # Classification table

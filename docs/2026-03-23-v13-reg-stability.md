@@ -85,6 +85,25 @@ Result:
 
 This closes the first stability-surface bug:
 - regression diagnostics are no longer being silently erased by a later mechanism pass
+
+## Second implemented change
+
+The benchmark runner now emits a regression-level fallback summary:
+- `eval/.../report/regression_fallback_summary.csv`
+- mirrored in the regression section of `report.txt`
+
+This matters because it separates:
+- true regression router fallback or instability states
+- safe non-fallback paths such as legitimacy-gate early exit
+
+Quick validation on `california` + `cpu_act` showed:
+- `california`: routed regression case with preserved training-side diagnostics
+- `cpu_act`: legitimacy-gate anchor-only path, not a regression router fallback
+
+So the lane now has the first dataset-level surface needed to distinguish:
+- routing instability
+- deliberate early exit
+- clean routed behavior
 ## First benchmark contract
 
 Use:
