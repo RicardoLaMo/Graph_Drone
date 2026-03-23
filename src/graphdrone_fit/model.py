@@ -97,6 +97,7 @@ class GraphDrone:
         self._n_classes: int = 1
         self._clf_uses_learned_router: bool = False
         self._router_fit_diagnostics: dict[str, float] = {}
+        self._router_training_force_anchor_only: bool = False
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
     def fit(
@@ -129,6 +130,7 @@ class GraphDrone:
 
         print(f"  -> Fitting GraphDrone ({self._problem_type}, n_classes={self._n_classes}) on {len(matrix)} samples...")
         self._router_fit_diagnostics = {}
+        self._router_training_force_anchor_only = False
         self._portfolio = fit_portfolio_from_specs(
             X_train=matrix,
             y_train=y_array,
@@ -353,11 +355,17 @@ class GraphDrone:
         params = [param for param in router.parameters() if param.requires_grad]
         if not params:
             print(f"  -> {label} has no trainable parameters, skipping optimization.")
+            self._router_fit_diagnostics["validation_router_training_nonfinite_flag"] = 0.0
             return
 
         optimizer = torch.optim.Adam(params, lr=1e-3)
+        best_state = {
+            name: tensor.detach().cpu().clone()
+            for name, tensor in router.state_dict().items()
+        }
         best_loss = float("inf")
         patience, wait = 25, 0
+        saw_nonfinite = False
         print(
             f"  -> Optimizing {label} on {self.device} "
             f"(Patience={patience}, MSE+ResidualPenalty, anchor_mse={anchor_mse_val:.6f})..."
@@ -377,16 +385,49 @@ class GraphDrone:
                 mse = F.mse_loss(integ.squeeze(), y_va_t)
                 aux_loss = out.aux_loss if out.aux_loss is not None else mse.new_zeros(())
                 loss = mse + 2.0 * F.relu(mse - anchor_mse_val) + aux_loss
+            if not torch.isfinite(loss):
+                saw_nonfinite = True
+                print(f"  -> {label} produced non-finite loss; restoring best router state.")
+                break
             loss.backward()
+            grad_is_finite = True
+            for param in params:
+                if param.grad is None:
+                    continue
+                if not torch.isfinite(param.grad).all():
+                    grad_is_finite = False
+                    break
+            if not grad_is_finite:
+                saw_nonfinite = True
+                print(f"  -> {label} produced non-finite gradients; restoring best router state.")
+                optimizer.zero_grad(set_to_none=True)
+                break
+            torch.nn.utils.clip_grad_norm_(params, max_norm=1.0)
             optimizer.step()
             self._post_optimizer_step()
+            params_are_finite = all(torch.isfinite(param).all() for param in params)
+            if not params_are_finite:
+                saw_nonfinite = True
+                print(f"  -> {label} produced non-finite parameters; restoring best router state.")
+                break
             if loss.item() < best_loss:
                 best_loss = loss.item()
+                best_state = {
+                    name: tensor.detach().cpu().clone()
+                    for name, tensor in router.state_dict().items()
+                }
                 wait = 0
             else:
                 wait += 1
                 if wait >= patience:
                     break
+        router.load_state_dict(best_state)
+        self._router_fit_diagnostics["validation_router_training_nonfinite_flag"] = float(saw_nonfinite)
+        self._router_fit_diagnostics["validation_router_best_objective"] = (
+            float(best_loss) if np.isfinite(best_loss) else float("nan")
+        )
+        if saw_nonfinite:
+            self._router_training_force_anchor_only = True
 
     def _sample_aux_rows(self, matrix: np.ndarray, max_rows: int = 1024) -> np.ndarray:
         if len(matrix) <= max_rows:
@@ -795,11 +836,45 @@ class GraphDrone:
         active_batch = batch if active_mask.all() else _slice_prediction_batch(batch, active_mask)
         active_matrix = matrix if active_mask.all() else matrix[active_mask]
 
+        if self._router_training_force_anchor_only:
+            preds = anchor_preds.copy()
+            preds[active_mask] = np.asarray(active_batch.predictions[:, active_batch.full_index], dtype=np.float32)
+            diagnostics = {
+                "router_kind": "router_training_nonfinite_anchor_only",
+                "mean_defer_prob": 0.0,
+                "effective_defer_rate": 0.0,
+                "full_index": int(active_batch.full_index),
+                "router_nonfinite_fallback": True,
+            }
+            diagnostics.update(self._portfolio_diagnostics(active_batch))
+            diagnostics.update(self._router_fit_diagnostics)
+            diagnostics.update(self._legitimacy_diagnostics(decision, router_skipped=False))
+            return preds.astype(np.float32), diagnostics
+
         tokens = self._build_regression_tokens(active_matrix, active_batch)
         self._router.eval()
         with torch.no_grad():
             token_tensor = tokens.tokens.to(self.device)
             router_out = self._router(token_tensor, full_index=active_batch.full_index)
+            router_has_nonfinite = (
+                (not torch.isfinite(router_out.specialist_weights).all())
+                or (not torch.isfinite(router_out.defer_prob).all())
+            )
+            if router_has_nonfinite:
+                fallback_preds = np.asarray(active_batch.predictions[:, active_batch.full_index], dtype=np.float32)
+                preds = anchor_preds.copy()
+                preds[active_mask] = fallback_preds
+                diagnostics = {
+                    "router_kind": f"{router_out.router_kind}_nonfinite_fallback",
+                    "mean_defer_prob": float(torch.nanmean(router_out.defer_prob).item()),
+                    "full_index": int(active_batch.full_index),
+                    "router_nonfinite_fallback": True,
+                    "effective_defer_rate": 0.0,
+                }
+                diagnostics.update(self._portfolio_diagnostics(active_batch))
+                diagnostics.update(self._router_fit_diagnostics)
+                diagnostics.update(self._legitimacy_diagnostics(decision, router_skipped=False))
+                return preds.astype(np.float32), diagnostics
             integration = integrate_predictions(expert_predictions=active_batch.predictions, router_outputs=router_out)
 
         preds = anchor_preds.copy()

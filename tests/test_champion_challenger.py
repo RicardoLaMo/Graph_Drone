@@ -75,6 +75,7 @@ def test_build_paired_task_table_computes_expected_signs():
                 "mae": 0.5,
                 "r2": 0.7,
                 "elapsed": 10.0,
+                "effective_defer_rate": 0.0,
                 "mean_attention_FULL": 0.8,
             },
             {
@@ -99,6 +100,7 @@ def test_build_paired_task_table_computes_expected_signs():
                 "mae": 0.45,
                 "r2": 0.72,
                 "elapsed": 8.0,
+                "effective_defer_rate": 0.25,
                 "mean_attention_FULL": 0.6,
             },
             {
@@ -119,6 +121,7 @@ def test_build_paired_task_table_computes_expected_signs():
     assert reg_row["rmse_rel_improvement"] > 0
     assert reg_row["r2_delta"] > 0
     assert reg_row["latency_improvement"] > 0
+    assert reg_row["effective_defer_rate_delta"] > 0
     assert reg_row["mean_attention_FULL_delta"] < 0
     assert clf_row["f1_delta"] > 0
     assert clf_row["log_loss_delta"] < 0
