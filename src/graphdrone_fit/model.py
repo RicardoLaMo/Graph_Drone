@@ -293,13 +293,71 @@ class GraphDrone:
         defer_prob: torch.Tensor,
         full_index: int,
     ) -> dict[str, float]:
+        stats = GraphDrone._regression_residual_usefulness_tensors(
+            expert_predictions=expert_predictions,
+            y_true=y_true,
+            specialist_weights=specialist_weights,
+            defer_prob=defer_prob,
+            full_index=full_index,
+        )
+        active = stats["active_mask"]
+        if not bool(active.any().item()):
+            return {}
+        return {
+            "validation_best_specialist_advantage_score": float(stats["best_advantage"][active].mean().item()),
+            "validation_weighted_specialist_advantage_score": float(
+                stats["weighted_advantage"][active].mean().item()
+            ),
+            "validation_defer_weighted_specialist_advantage_score": float(
+                stats["realized_advantage"][active].mean().item()
+            ),
+            "validation_top_specialist_advantage_score": float(stats["top_advantage"][active].mean().item()),
+            "validation_positive_specialist_mass": float(stats["positive_mass"][active].mean().item()),
+            "validation_top_specialist_positive_rate": float(
+                (stats["top_advantage"][active] > 0).float().mean().item()
+            ),
+            "validation_positive_specialist_opportunity_score": float(
+                stats["positive_opportunity"][active].mean().item()
+            ),
+            "validation_residual_usefulness_gap": float(
+                stats["residual_usefulness_gap"][active].mean().item()
+            ),
+        }
+
+    @staticmethod
+    def _regression_residual_usefulness_tensors(
+        *,
+        expert_predictions: torch.Tensor,
+        y_true: torch.Tensor,
+        specialist_weights: torch.Tensor,
+        defer_prob: torch.Tensor,
+        full_index: int,
+    ) -> dict[str, torch.Tensor]:
         if expert_predictions.ndim != 2:
             raise ValueError(f"Expected [N, E] expert predictions, got shape {tuple(expert_predictions.shape)}")
 
         non_anchor_mask = torch.ones(expert_predictions.shape[1], dtype=torch.bool, device=expert_predictions.device)
         non_anchor_mask[full_index] = False
         if int(non_anchor_mask.sum().item()) == 0:
-            return {}
+            zeros = torch.zeros(
+                expert_predictions.shape[0],
+                dtype=expert_predictions.dtype,
+                device=expert_predictions.device,
+            )
+            return {
+                "active_mask": torch.zeros(
+                    expert_predictions.shape[0],
+                    dtype=torch.bool,
+                    device=expert_predictions.device,
+                ),
+                "weighted_advantage": zeros,
+                "best_advantage": zeros,
+                "realized_advantage": zeros,
+                "top_advantage": zeros,
+                "positive_mass": zeros,
+                "positive_opportunity": zeros,
+                "residual_usefulness_gap": zeros,
+            }
 
         anchor_pred = expert_predictions[:, full_index]
         anchor_abs_err = (y_true - anchor_pred).abs().unsqueeze(1)
@@ -313,9 +371,6 @@ class GraphDrone:
         )
         specialist_weights_only = normalized_weights[:, non_anchor_mask]
         has_specialist_mass = specialist_mass.squeeze(1) > 0
-        if not bool(has_specialist_mass.any().item()):
-            return {}
-
         effective_defer = torch.where(
             specialist_mass > 0,
             defer_prob,
@@ -326,17 +381,18 @@ class GraphDrone:
         positive_mass = (specialist_weights_only * (advantage > 0).float()).sum(dim=1)
         top_indices = specialist_weights_only.argmax(dim=1, keepdim=True)
         top_advantage = advantage.gather(1, top_indices).squeeze(1)
-
-        active = has_specialist_mass
+        realized_advantage = effective_defer * weighted_advantage
+        positive_opportunity = torch.relu(best_advantage)
+        residual_usefulness_gap = torch.relu(positive_opportunity - realized_advantage)
         return {
-            "validation_best_specialist_advantage_score": float(best_advantage[active].mean().item()),
-            "validation_weighted_specialist_advantage_score": float(weighted_advantage[active].mean().item()),
-            "validation_defer_weighted_specialist_advantage_score": float(
-                (effective_defer[active] * weighted_advantage[active]).mean().item()
-            ),
-            "validation_top_specialist_advantage_score": float(top_advantage[active].mean().item()),
-            "validation_positive_specialist_mass": float(positive_mass[active].mean().item()),
-            "validation_top_specialist_positive_rate": float((top_advantage[active] > 0).float().mean().item()),
+            "active_mask": has_specialist_mass,
+            "weighted_advantage": weighted_advantage,
+            "best_advantage": best_advantage,
+            "realized_advantage": realized_advantage,
+            "top_advantage": top_advantage,
+            "positive_mass": positive_mass,
+            "positive_opportunity": positive_opportunity,
+            "residual_usefulness_gap": residual_usefulness_gap,
         }
 
     def _optimize_regression_router_module(
@@ -368,7 +424,9 @@ class GraphDrone:
         saw_nonfinite = False
         print(
             f"  -> Optimizing {label} on {self.device} "
-            f"(Patience={patience}, MSE+ResidualPenalty, anchor_mse={anchor_mse_val:.6f})..."
+            f"(Patience={patience}, MSE+ResidualPenalty"
+            f"{'+UsefulnessGap' if self.config.router.residual_usefulness_lambda > 0 else ''}, "
+            f"anchor_mse={anchor_mse_val:.6f})..."
         )
         autocast_enabled = self.device == "cuda"
         for _ in range(500):
@@ -385,6 +443,21 @@ class GraphDrone:
                 mse = F.mse_loss(integ.squeeze(), y_va_t)
                 aux_loss = out.aux_loss if out.aux_loss is not None else mse.new_zeros(())
                 loss = mse + 2.0 * F.relu(mse - anchor_mse_val) + aux_loss
+                if self.config.router.residual_usefulness_lambda > 0:
+                    usefulness = self._regression_residual_usefulness_tensors(
+                        expert_predictions=v_preds_t,
+                        y_true=y_va_t,
+                        specialist_weights=out.specialist_weights,
+                        defer_prob=out.defer_prob,
+                        full_index=full_index,
+                    )
+                    active = usefulness["active_mask"]
+                    if bool(active.any().item()):
+                        loss = (
+                            loss
+                            + self.config.router.residual_usefulness_lambda
+                            * usefulness["residual_usefulness_gap"][active].mean()
+                        )
             if not torch.isfinite(loss):
                 saw_nonfinite = True
                 print(f"  -> {label} produced non-finite loss; restoring best router state.")
@@ -678,10 +751,14 @@ class GraphDrone:
                 full_index=va_batch.full_index,
             )
         if self._router_fit_diagnostics:
+            self._router_fit_diagnostics["validation_residual_usefulness_lambda"] = float(
+                self.config.router.residual_usefulness_lambda
+            )
             print(
                 "  -> Regression router usefulness: "
                 f"weighted_adv={self._router_fit_diagnostics['validation_weighted_specialist_advantage_score']:.4f} "
                 f"best_adv={self._router_fit_diagnostics['validation_best_specialist_advantage_score']:.4f} "
+                f"gap={self._router_fit_diagnostics['validation_residual_usefulness_gap']:.4f} "
                 f"positive_mass={self._router_fit_diagnostics['validation_positive_specialist_mass']:.4f}"
             )
 

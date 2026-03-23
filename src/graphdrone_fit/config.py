@@ -45,6 +45,7 @@ class SetRouterConfig:
     ] = "bootstrap_full_only"
     sparse_top_k: int = 1
     alignment_lambda: float = 0.0
+    residual_usefulness_lambda: float = 0.0
     router_seed: int = 42
     freeze_base_router: bool = False
     ot_prototype_count: int = 32
@@ -64,6 +65,10 @@ class SetRouterConfig:
             raise ValueError(f"sparse_top_k must be positive, got {self.sparse_top_k}")
         if self.alignment_lambda < 0:
             raise ValueError(f"alignment_lambda must be non-negative, got {self.alignment_lambda}")
+        if self.residual_usefulness_lambda < 0:
+            raise ValueError(
+                f"residual_usefulness_lambda must be non-negative, got {self.residual_usefulness_lambda}"
+            )
         if self.router_seed < 0:
             raise ValueError(f"router_seed must be non-negative, got {self.router_seed}")
         if self.ot_prototype_count < 1:

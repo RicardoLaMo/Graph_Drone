@@ -32,6 +32,7 @@ def test_v120_champion_preset_disables_afc_features():
 def test_afc_preset_respects_router_seed_env(monkeypatch):
     monkeypatch.setenv("GRAPHDRONE_ROUTER_SEED", "123")
     monkeypatch.setenv("GRAPHDRONE_FREEZE_BASE_ROUTER", "1")
+    monkeypatch.setenv("GRAPHDRONE_RESIDUAL_USEFULNESS_LAMBDA", "0.35")
     config = build_graphdrone_config_from_preset(
         preset="afc_candidate",
         n_classes=1,
@@ -39,6 +40,7 @@ def test_afc_preset_respects_router_seed_env(monkeypatch):
     )
     assert config.router.router_seed == 123
     assert config.router.freeze_base_router is True
+    assert config.router.residual_usefulness_lambda == 0.35
 
 
 def test_router_seed_makes_initialization_reproducible():

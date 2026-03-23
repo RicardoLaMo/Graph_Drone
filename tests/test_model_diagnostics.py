@@ -37,8 +37,43 @@ def test_regression_residual_usefulness_diagnostics_reports_positive_mass():
     assert diagnostics["validation_weighted_specialist_advantage_score"] > 0.6
     assert diagnostics["validation_defer_weighted_specialist_advantage_score"] > 0.6
     assert diagnostics["validation_top_specialist_advantage_score"] > 0.99
+    assert diagnostics["validation_positive_specialist_opportunity_score"] > 0.99
+    assert np.isclose(diagnostics["validation_residual_usefulness_gap"], 0.1499999, atol=1e-6)
     assert np.isclose(diagnostics["validation_positive_specialist_mass"], 0.8819444, atol=1e-6)
     assert diagnostics["validation_top_specialist_positive_rate"] == 1.0
+
+
+def test_regression_residual_usefulness_gap_is_positive_when_router_misses_available_gain():
+    expert_predictions = torch.tensor(
+        [
+            [10.0, 9.0, 20.0],
+            [5.0, 4.0, 20.0],
+        ],
+        dtype=torch.float32,
+    )
+    y_true = torch.tensor([9.0, 4.0], dtype=torch.float32)
+    specialist_weights = torch.tensor(
+        [
+            [0.9, 0.1, 0.0],
+            [0.9, 0.1, 0.0],
+        ],
+        dtype=torch.float32,
+    )
+    defer_prob = torch.full((2, 1), 0.05, dtype=torch.float32)
+
+    stats = GraphDrone._regression_residual_usefulness_tensors(
+        expert_predictions=expert_predictions,
+        y_true=y_true,
+        specialist_weights=specialist_weights,
+        defer_prob=defer_prob,
+        full_index=0,
+    )
+
+    active = stats["active_mask"]
+    assert bool(active.all().item()) is True
+    assert float(stats["best_advantage"][active].mean().item()) > 0.99
+    assert float(stats["realized_advantage"][active].mean().item()) < 0.1
+    assert float(stats["residual_usefulness_gap"][active].mean().item()) > 0.9
 
 
 def test_regression_prediction_falls_back_to_anchor_when_training_nonfinite():

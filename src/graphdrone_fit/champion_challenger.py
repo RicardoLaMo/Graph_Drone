@@ -36,8 +36,11 @@ OPTIONAL_DELTA_COLUMNS = (
     "validation_weighted_specialist_advantage_score",
     "validation_defer_weighted_specialist_advantage_score",
     "validation_top_specialist_advantage_score",
+    "validation_positive_specialist_opportunity_score",
+    "validation_residual_usefulness_gap",
     "validation_positive_specialist_mass",
     "validation_top_specialist_positive_rate",
+    "validation_residual_usefulness_lambda",
 )
 
 
