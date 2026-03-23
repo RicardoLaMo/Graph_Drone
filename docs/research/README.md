@@ -28,8 +28,8 @@ This repo now keeps research memory in three layers:
   - GraphDrone-specific research-operations skill layer
   - explains how the repo’s run lineage, notes, and durable claim memory map into reusable project skills
 
-- `../skills/graphdrone-*`
-  - repo-tracked source of truth for the GraphDrone research-operation skills
+- `../skills/*`
+  - repo-tracked source of truth for both generic parent skills and GraphDrone-specific research-operation skills
   - install into `~/.codex/skills/` with `python scripts/sync_graphdrone_skills.py`
 
 ## Recording a new finding

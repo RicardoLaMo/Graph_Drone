@@ -14,11 +14,11 @@ def source_root() -> Path:
     return repo_root() / "skills"
 
 
-def graphdrone_skill_dirs(root: Path) -> list[Path]:
+def skill_dirs(root: Path) -> list[Path]:
     return sorted(
         path
         for path in root.iterdir()
-        if path.is_dir() and path.name.startswith("graphdrone-") and (path / "SKILL.md").exists()
+        if path.is_dir() and (path / "SKILL.md").exists()
     )
 
 
@@ -50,19 +50,19 @@ def main() -> None:
     args = parser.parse_args()
 
     src_root = source_root()
-    skill_dirs = graphdrone_skill_dirs(src_root)
-    if not skill_dirs:
-        raise SystemExit(f"No GraphDrone skill directories found under {src_root}")
+    repo_skill_dirs = skill_dirs(src_root)
+    if not repo_skill_dirs:
+        raise SystemExit(f"No repo skill directories found under {src_root}")
 
     if args.list_only:
-        for path in skill_dirs:
+        for path in repo_skill_dirs:
             print(path)
         return
 
     dest_root = Path(args.dest_root).expanduser().resolve()
     dest_root.mkdir(parents=True, exist_ok=True)
 
-    for src in skill_dirs:
+    for src in repo_skill_dirs:
         dest = sync_one(src, dest_root)
         print(f"synced {src.name} -> {dest}")
 

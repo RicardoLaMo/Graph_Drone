@@ -33,9 +33,25 @@ The gap described in `doc/for_skill.md` is real: a generic coding agent tends to
 
 The placeholder skill at `doc/layered-research-orchestrator/layered-research-orchestrator/SKILL.md` also points in the right direction, but it was still a scaffold with TODO sections and no binding to GraphDrone artifacts. The new repo `skills/` suite is the concrete, project-native version of that direction.
 
-## GraphDrone-Specific Skill Suite
+## Parent And Specialized Skills
 
-To close that gap, the repo now carries four project skills under `skills/`:
+The repo now carries two layers under `skills/`.
+
+Generic parent skills:
+
+1. `research-platform-ops`
+   generic research operating-system skill
+
+2. `mechanism-first-diagnosis`
+   generic local-win/global-loss diagnosis skill
+
+3. `research-memory-ledger`
+   generic durable-knowledge skill
+
+4. `benchmark-evidence-governance`
+   generic benchmark-contract and evidence-governance skill
+
+GraphDrone specializations:
 
 1. `graphdrone-research-ops`
    top-level operating skill for branch hygiene, benchmark contract control, evidence capture, and durable finding updates
@@ -49,7 +65,9 @@ To close that gap, the repo now carries four project skills under `skills/`:
 4. `graphdrone-benchmark-governance`
    benchmark-contract and evidence-governance skill for champion/challenger fairness, version discipline, and cache/provenance boundaries
 
-These are designed to sit on top of the existing generic skills, not replace them.
+The GraphDrone skills now sit on top of both:
+- the pre-existing installed generic skills
+- the new repo-tracked parent skills that can be carried to other projects
 
 ## Scope Of These Skills
 
@@ -80,10 +98,10 @@ Yes, but not all at the same level of portability.
 - Low portability without adaptation:
   - any references to GraphDrone-specific files like `docs/research/findings.jsonl`, `claim_report.json`, `promotion_decision.json`, `run_ledger.json`, or `scripts/run_champion_challenger.py`
 
-So the right framing is:
-- these are reusable patterns
-- but they are currently specialized to GraphDrone’s artifact model
-- for another project, either adapt the references and names, or extract a more generic parent skill and keep GraphDrone as one specialization
+So the right framing is now:
+- the parent skills are directly portable
+- the GraphDrone skills are project-specific specializations
+- another project can either reuse the parent skills as-is or create its own specialization layer
 
 ## Why This Is Better Than A Metric-Only Loop
 
@@ -104,4 +122,4 @@ The tracked source of truth is the repo `skills/` directory. To publish the curr
 python scripts/sync_graphdrone_skills.py
 ```
 
-This copies the repo skill directories into `~/.codex/skills/`.
+This copies all repo skill directories, both parent and GraphDrone-specific, into `~/.codex/skills/`.
