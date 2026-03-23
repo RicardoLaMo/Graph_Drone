@@ -60,6 +60,7 @@ def build_graphdrone_config_from_preset(
     preset: str,
     n_classes: int = 1,
     default_router_kind: str,
+    task_prior_dataset_key: str | None = None,
 ) -> GraphDroneConfig:
     resolved_preset = resolve_graphdrone_preset_name(preset)
 
@@ -92,6 +93,8 @@ def build_graphdrone_config_from_preset(
             task_prior_bank_dir=_env_str("GRAPHDRONE_TASK_PRIOR_BANK_DIR", None),
             task_prior_encoder_kind=_env_str("GRAPHDRONE_TASK_PRIOR_ENCODER_KIND", "transformer") or "transformer",
             task_prior_strength=_env_float("GRAPHDRONE_TASK_PRIOR_STRENGTH", 0.5),
+            task_prior_dataset_key=task_prior_dataset_key or _env_str("GRAPHDRONE_TASK_PRIOR_DATASET_KEY", None),
+            task_prior_exact_reuse_blend=_env_float("GRAPHDRONE_TASK_PRIOR_EXACT_REUSE_BLEND", 0.5),
         ),
         legitimacy_gate=LegitimacyGateConfig(
             enabled=_env_flag("GRAPHDRONE_ENABLE_LEGITIMACY_GATE", True),

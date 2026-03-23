@@ -686,6 +686,7 @@ def compute_task_prior_from_bank(
     device: str = "cpu",
     query_dataset: str = "__query__",
     top_k: int = 3,
+    exact_reuse_blend: float = 0.0,
 ) -> dict[str, Any]:
     bank_root = Path(bank_dir)
     bank = load_task_prototype_bank(bank_root / f"{encoder_kind}_prototype_bank.json")
@@ -712,6 +713,11 @@ def compute_task_prior_from_bank(
     )
     centroid_matrix = torch.stack([bank.centroids[name] for name in centroid_names], dim=0)
     prior_vector = (probs.unsqueeze(-1) * centroid_matrix).sum(dim=0)
+    exact_reuse_used = False
+    if exact_reuse_blend > 0 and query_result.get("exact_reuse_available", False) and query_dataset in bank.centroids:
+        exact_centroid = bank.centroids[query_dataset]
+        prior_vector = (1.0 - exact_reuse_blend) * prior_vector + exact_reuse_blend * exact_centroid
+        exact_reuse_used = True
     prior_vector = F.normalize(prior_vector.unsqueeze(0), dim=-1).squeeze(0)
     return {
         "bank": bank,
@@ -721,4 +727,6 @@ def compute_task_prior_from_bank(
         "prior_vector": prior_vector,
         "training_objective": bank.training_objective,
         "encoder_kind": encoder_kind,
+        "exact_reuse_blend": float(exact_reuse_blend),
+        "exact_reuse_used": exact_reuse_used,
     }

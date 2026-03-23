@@ -87,11 +87,12 @@ GRAPHDRONE_VERSION = os.getenv("GRAPHDRONE_VERSION_OVERRIDE", "v1-geopoe-2026.03
 GRAPHDRONE_PRESET = os.getenv("GRAPHDRONE_PRESET", "afc_candidate")
 
 
-def _graphdrone_config(*, n_classes: int = 1, default_router_kind: str) -> GraphDroneConfig:
+def _graphdrone_config(*, n_classes: int = 1, default_router_kind: str, dataset_key: str | None = None) -> GraphDroneConfig:
     return build_graphdrone_config_from_preset(
         preset=GRAPHDRONE_PRESET,
         n_classes=n_classes,
         default_router_kind=default_router_kind,
+        task_prior_dataset_key=dataset_key,
     )
 
 
@@ -240,12 +241,15 @@ def _diagnostic_payload(diagnostics: dict[str, object]) -> dict[str, object]:
         "task_prior_norm",
         "task_prior_training_objective",
         "task_prior_encoder_kind",
+        "task_prior_query_dataset",
         "task_prior_top_neighbor",
         "task_prior_top_neighbor_prob",
         "task_prior_base_top_neighbor",
         "task_prior_base_top_neighbor_prob",
         "task_prior_entropy",
         "task_prior_exact_reuse_available",
+        "task_prior_exact_reuse_blend",
+        "task_prior_exact_reuse_used",
         "task_prior_feedback_used",
         "task_prior_feedback_top_source",
         "task_prior_feedback_top_source_weight",
@@ -288,7 +292,7 @@ def _diagnostic_payload(diagnostics: dict[str, object]) -> dict[str, object]:
     return payload
 
 
-def run_graphdrone(X_tr, y_tr, X_te, task_type: str, seed: int = 42, n_classes: int = None):
+def run_graphdrone(X_tr, y_tr, X_te, task_type: str, *, dataset: str, seed: int = 42, n_classes: int = None):
     """
     Two independent engines:
     - Regression: FULL + 3×SUB TabPFN views, GORA observers, contextual_transformer
@@ -335,7 +339,7 @@ def run_graphdrone(X_tr, y_tr, X_te, task_type: str, seed: int = 42, n_classes: 
                 model_params=params_fp,
             ))
         specs = (full_spec, *sub_specs)
-        cfg = _graphdrone_config(default_router_kind="contextual_transformer")
+        cfg = _graphdrone_config(default_router_kind="contextual_transformer", dataset_key=dataset)
     else:
         # GeoPOE classification: multi-view SUB portfolio + static anchor-boosted GeoPOE
         # 3 SUB views with different seeds/subspace sizes → richer ensemble diversity
@@ -367,7 +371,7 @@ def run_graphdrone(X_tr, y_tr, X_te, task_type: str, seed: int = 42, n_classes: 
                 model_params=params_fp,
             ))
         specs = (full_spec, *sub_specs)
-        cfg = _graphdrone_config(n_classes=n_classes, default_router_kind="bootstrap_full_only")
+        cfg = _graphdrone_config(n_classes=n_classes, default_router_kind="bootstrap_full_only", dataset_key=dataset)
 
     gd = GraphDrone(cfg)
     # Pass problem_type explicitly so integer-valued regression targets (e.g. cpu_act)
@@ -434,7 +438,7 @@ def run_task(dataset: str, fold: int, cache_dir: Path, max_samples: int, methods
             if method == "tabpfn":
                 out = run_tabpfn(X_tr, y_tr, X_te, task_type)
             else:
-                out = run_graphdrone(X_tr, y_tr, X_te, task_type, seed=42, n_classes=global_n_classes)
+                out = run_graphdrone(X_tr, y_tr, X_te, task_type, dataset=dataset, seed=42, n_classes=global_n_classes)
 
             elapsed = time.time() - t0
 

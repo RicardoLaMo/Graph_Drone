@@ -718,16 +718,18 @@ class GraphDrone:
         task_context_df = build_task_context_frame_from_router_tokens(
             tokens=tokens,
             descriptors=descriptors,
-            dataset_name="__current__",
+            dataset_name=router_cfg.task_prior_dataset_key or "__current__",
             task_type=task_type,
         )
+        query_dataset = router_cfg.task_prior_dataset_key or "__current__"
         prior_bundle = compute_task_prior_from_bank(
             bank_dir=router_cfg.task_prior_bank_dir,
             task_context_df=task_context_df,
             encoder_kind=router_cfg.task_prior_encoder_kind,
             device=self.device,
-            query_dataset="__current__",
+            query_dataset=query_dataset,
             top_k=3,
+            exact_reuse_blend=router_cfg.task_prior_exact_reuse_blend,
         )
         conditioned = TaskConditionedRouter(
             token_dim=tokens.shape[-1],
@@ -750,6 +752,9 @@ class GraphDrone:
             "task_prior_base_top_neighbor_prob": float(base_neighbor_probs.get(base_top_neighbor, float("nan"))),
             "task_prior_entropy": float(query_result.get("soft_neighbor_entropy", float("nan"))),
             "task_prior_exact_reuse_available": bool(query_result.get("exact_reuse_available", False)),
+            "task_prior_exact_reuse_blend": float(prior_bundle.get("exact_reuse_blend", 0.0)),
+            "task_prior_exact_reuse_used": bool(prior_bundle.get("exact_reuse_used", False)),
+            "task_prior_query_dataset": query_dataset,
             "task_prior_feedback_used": bool(query_result.get("feedback_used", False)),
             "task_prior_feedback_top_source": (
                 query_result.get("top_source_datasets", [{}])[0].get("dataset", "")

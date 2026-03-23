@@ -56,6 +56,8 @@ class SetRouterConfig:
     task_prior_bank_dir: str | None = None
     task_prior_encoder_kind: Literal["transformer", "gru"] = "transformer"
     task_prior_strength: float = 0.5
+    task_prior_dataset_key: str | None = None
+    task_prior_exact_reuse_blend: float = 0.5
 
     def validate(self) -> "SetRouterConfig":
         normalized_kind = ROUTER_KIND_ALIASES.get(self.kind, self.kind)
@@ -82,8 +84,14 @@ class SetRouterConfig:
             raise ValueError(f"ot_max_iter must be positive, got {self.ot_max_iter}")
         if self.task_prior_strength < 0:
             raise ValueError(f"task_prior_strength must be non-negative, got {self.task_prior_strength}")
+        if not 0.0 <= self.task_prior_exact_reuse_blend <= 1.0:
+            raise ValueError(
+                f"task_prior_exact_reuse_blend must be in [0, 1], got {self.task_prior_exact_reuse_blend}"
+            )
         if self.task_prior_bank_dir is not None and not str(self.task_prior_bank_dir).strip():
             raise ValueError("task_prior_bank_dir must be non-empty when provided")
+        if self.task_prior_dataset_key is not None and not str(self.task_prior_dataset_key).strip():
+            raise ValueError("task_prior_dataset_key must be non-empty when provided")
         return replace(self, kind=normalized_kind)
 
 

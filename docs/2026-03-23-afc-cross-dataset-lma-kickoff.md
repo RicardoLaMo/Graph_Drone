@@ -899,3 +899,82 @@ Most important interpretation:
 So the next bottleneck is narrower now:
 - not whether the bank can learn from outcomes
 - but whether live GraphDrone should query the bank with a persistent task signature or key, rather than only an anonymous per-run context
+
+## Persistent task key and exact-reuse blend
+
+The next fix was to stop querying the bank as `__current__` and pass the real benchmark dataset key through the live GraphDrone config.
+
+Changes:
+- benchmark runners now pass `dataset_key=<dataset>`
+- live diagnostics now expose:
+  - `task_prior_query_dataset`
+  - `task_prior_exact_reuse_available`
+  - `task_prior_exact_reuse_used`
+  - `task_prior_exact_reuse_blend`
+
+### Exact key only
+
+Live rerun:
+
+```bash
+GRAPHDRONE_TASK_PRIOR_BANK_DIR=eval/afc_task_prototype_bank_cls_feedback_v1 \
+GRAPHDRONE_TASK_PRIOR_ENCODER_KIND=transformer \
+GRAPHDRONE_TASK_PRIOR_STRENGTH=0.5 \
+PYTHONPATH=src python scripts/run_champion_challenger.py \
+  --task classification \
+  --datasets credit_g diabetes \
+  --folds 0 \
+  --max-samples 384 \
+  --champion-version champion-bin-no-prior-v7 \
+  --challenger-version challenger-bin-task-prior-feedback-exact-v7 \
+  --output-dir eval/afc_live_task_prior_binary_feedback_exact_v7
+```
+
+Read:
+- exact reuse became live:
+  - `task_prior_query_dataset=credit_g|diabetes`
+  - `task_prior_exact_reuse_available=1`
+- but the bank still ranked `pendigits` as top neighbor on both datasets
+- conclusion: knowing the task key is necessary but not sufficient; the live prior still remained dominated by neighborhood mix
+
+### Exact-reuse blend
+
+To make known-task memory explicit rather than implicit, the prior vector now blends:
+- similarity-weighted neighborhood prior
+- exact task centroid when available
+
+Rerun:
+
+```bash
+GRAPHDRONE_TASK_PRIOR_BANK_DIR=eval/afc_task_prototype_bank_cls_feedback_v1 \
+GRAPHDRONE_TASK_PRIOR_ENCODER_KIND=transformer \
+GRAPHDRONE_TASK_PRIOR_STRENGTH=0.5 \
+GRAPHDRONE_TASK_PRIOR_EXACT_REUSE_BLEND=0.75 \
+PYTHONPATH=src python scripts/run_champion_challenger.py \
+  --task classification \
+  --datasets credit_g diabetes \
+  --folds 0 \
+  --max-samples 384 \
+  --champion-version champion-bin-no-prior-v8 \
+  --challenger-version challenger-bin-task-prior-feedback-exactblend-v8 \
+  --output-dir eval/afc_live_task_prior_binary_feedback_exactblend_v8
+```
+
+Result:
+- decision still `hold`
+- mean log-loss guardrail improved slightly to `-0.001478`
+- `task_prior_exact_reuse_used=1` on both datasets
+
+Dataset read:
+- `credit_g`: slightly worse than the prior feedback-only run
+- `diabetes`: better than the prior feedback-only run
+- F1 still flat
+- defer still saturated near `1.0`
+
+Interpretation:
+- persistent task identity now works
+- explicit exact-reuse blending is active
+- this is another real architectural step: the live model is no longer limited to anonymous neighborhood borrowing
+- but the remaining blocker is now even clearer:
+  - the binary routing objective still pushes almost all mass into defer
+  - so better task priors mostly show up as small calibration/log-loss shifts rather than a new routing policy

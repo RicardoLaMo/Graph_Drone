@@ -12,6 +12,8 @@ def test_binary_classification_router_config_preserves_task_prior_fields() -> No
                 task_prior_bank_dir="/tmp/task-bank",
                 task_prior_encoder_kind="transformer",
                 task_prior_strength=0.7,
+                task_prior_dataset_key="credit_g",
+                task_prior_exact_reuse_blend=0.8,
             )
         )
     )
@@ -22,3 +24,5 @@ def test_binary_classification_router_config_preserves_task_prior_fields() -> No
     assert cfg.task_prior_bank_dir == "/tmp/task-bank"
     assert cfg.task_prior_encoder_kind == "transformer"
     assert cfg.task_prior_strength == 0.7
+    assert cfg.task_prior_dataset_key == "credit_g"
+    assert cfg.task_prior_exact_reuse_blend == 0.8

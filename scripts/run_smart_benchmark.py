@@ -91,11 +91,12 @@ GRAPHDRONE_VERSION = os.getenv("GRAPHDRONE_VERSION_OVERRIDE", "2026.03.22-clf-af
 GRAPHDRONE_PRESET = os.getenv("GRAPHDRONE_PRESET", "afc_candidate")
 
 
-def _graphdrone_config(*, n_classes: int = 1, default_router_kind: str) -> GraphDroneConfig:
+def _graphdrone_config(*, n_classes: int = 1, default_router_kind: str, dataset_key: str | None = None) -> GraphDroneConfig:
     return build_graphdrone_config_from_preset(
         preset=GRAPHDRONE_PRESET,
         n_classes=n_classes,
         default_router_kind=default_router_kind,
+        task_prior_dataset_key=dataset_key,
     )
 
 
@@ -248,12 +249,15 @@ def _diagnostic_payload(diagnostics: dict[str, object]) -> dict[str, object]:
         "task_prior_norm",
         "task_prior_training_objective",
         "task_prior_encoder_kind",
+        "task_prior_query_dataset",
         "task_prior_top_neighbor",
         "task_prior_top_neighbor_prob",
         "task_prior_base_top_neighbor",
         "task_prior_base_top_neighbor_prob",
         "task_prior_entropy",
         "task_prior_exact_reuse_available",
+        "task_prior_exact_reuse_blend",
+        "task_prior_exact_reuse_used",
         "task_prior_feedback_used",
         "task_prior_feedback_top_source",
         "task_prior_feedback_top_source_weight",
@@ -296,7 +300,7 @@ def _diagnostic_payload(diagnostics: dict[str, object]) -> dict[str, object]:
     return payload
 
 
-def run_graphdrone(X_tr, y_tr, X_te, task_type: str, seed: int = 42, n_classes: int = None):
+def run_graphdrone(X_tr, y_tr, X_te, task_type: str, *, dataset: str, seed: int = 42, n_classes: int = None):
     n = X_tr.shape[1]
     full_idx = tuple(range(n))
     dev = _device()
@@ -327,7 +331,7 @@ def run_graphdrone(X_tr, y_tr, X_te, task_type: str, seed: int = 42, n_classes: 
                 model_params=params_fp,
             ),
         )
-        cfg = _graphdrone_config(default_router_kind="noise_gate_router")
+        cfg = _graphdrone_config(default_router_kind="noise_gate_router", dataset_key=dataset)
         gd = GraphDrone(cfg)
         gd.fit(X_tr, y_tr, expert_specs=specs, problem_type="regression")
     else:
@@ -337,7 +341,7 @@ def run_graphdrone(X_tr, y_tr, X_te, task_type: str, seed: int = 42, n_classes: 
         # n_classes pinned from full y to handle missing-class splits.
         if n_classes is None:
             n_classes = int(len(np.unique(y_tr)))
-        cfg = _graphdrone_config(n_classes=n_classes, default_router_kind="bootstrap_full_only")
+        cfg = _graphdrone_config(n_classes=n_classes, default_router_kind="bootstrap_full_only", dataset_key=dataset)
         gd = GraphDrone(cfg)
         gd.fit(X_tr, y_tr, problem_type="classification")
 
@@ -401,7 +405,7 @@ def run_task(dataset: str, fold: int, cache_dir: Path, max_samples: int, methods
             if method == "tabpfn":
                 out = run_tabpfn(X_tr, y_tr, X_te, task_type)
             else:
-                out = run_graphdrone(X_tr, y_tr, X_te, task_type, seed=42, n_classes=global_n_classes)
+                out = run_graphdrone(X_tr, y_tr, X_te, task_type, dataset=dataset, seed=42, n_classes=global_n_classes)
 
             elapsed = time.time() - t0
 
