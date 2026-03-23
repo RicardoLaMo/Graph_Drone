@@ -133,10 +133,55 @@ def _grouped_similarity_summary(similarity_df: pd.DataFrame) -> pd.DataFrame:
     return grouped
 
 
-def _dataset_rows(datasets: Iterable[str], *, fold: int, max_samples: int, sample_rows: int, preset: str) -> tuple[list[dict], list[dict], list[dict]]:
+def _append_task_context_examples(
+    rows: list[dict],
+    *,
+    dataset: str,
+    task_type: str,
+    descriptors,
+    tokens: np.ndarray,
+    bootstrap_summaries: int,
+) -> None:
+    if bootstrap_summaries < 1:
+        return
+    n_rows = tokens.shape[0]
+    rng = np.random.RandomState(42)
+    for bootstrap_id in range(bootstrap_summaries):
+        sample_idx = np.arange(n_rows) if bootstrap_summaries == 1 else rng.choice(n_rows, size=n_rows, replace=True)
+        for expert_idx, descriptor in enumerate(descriptors):
+            expert_tokens = tokens[sample_idx, expert_idx, :]
+            mean_vec = expert_tokens.mean(axis=0)
+            rows.append(
+                {
+                    "dataset": dataset,
+                    "task_type": task_type,
+                    "bootstrap_id": bootstrap_id,
+                    "expert_id": descriptor.expert_id,
+                    "family": descriptor.family,
+                    "projection_kind": descriptor.projection_kind,
+                    "input_dim": descriptor.input_dim,
+                    "preferred_k": descriptor.preferred_k,
+                    "is_anchor": int(descriptor.is_anchor),
+                    "mean_norm": float(np.linalg.norm(mean_vec)),
+                    "std_norm": float(np.linalg.norm(expert_tokens.std(axis=0))),
+                    "mean_token_json": json.dumps(mean_vec.tolist()),
+                }
+            )
+
+
+def _dataset_rows(
+    datasets: Iterable[str],
+    *,
+    fold: int,
+    max_samples: int,
+    sample_rows: int,
+    preset: str,
+    bootstrap_summaries: int,
+) -> tuple[list[dict], list[dict], list[dict], list[dict]]:
     descriptor_rows: list[dict] = []
     token_rows: list[dict] = []
     similarity_rows: list[dict] = []
+    task_context_rows: list[dict] = []
     mean_vectors: dict[tuple[str, str], np.ndarray] = {}
     meta_by_key: dict[tuple[str, str], dict] = {}
 
@@ -163,6 +208,14 @@ def _dataset_rows(datasets: Iterable[str], *, fold: int, max_samples: int, sampl
             else model._build_classification_tokens(X_sample, batch)
         )
         tokens = token_batch.tokens.detach().cpu().numpy()
+        _append_task_context_examples(
+            task_context_rows,
+            dataset=dataset,
+            task_type=task_type,
+            descriptors=batch.descriptors,
+            tokens=tokens,
+            bootstrap_summaries=bootstrap_summaries,
+        )
 
         for expert_idx, descriptor in enumerate(batch.descriptors):
             descriptor_rows.append(
@@ -232,7 +285,7 @@ def _dataset_rows(datasets: Iterable[str], *, fold: int, max_samples: int, sampl
                 }
             )
 
-    return descriptor_rows, token_rows, similarity_rows
+    return descriptor_rows, token_rows, similarity_rows, task_context_rows
 
 
 def main() -> None:
@@ -241,28 +294,33 @@ def main() -> None:
     parser.add_argument("--fold", type=int, default=0)
     parser.add_argument("--max-samples", type=int, default=1000)
     parser.add_argument("--sample-rows", type=int, default=128)
+    parser.add_argument("--bootstrap-summaries", type=int, default=0)
     parser.add_argument("--preset", default="v1_20_champion")
     parser.add_argument("--output-dir", type=Path, default=ROOT / "eval" / "afc_cross_dataset_lma")
     args = parser.parse_args()
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    descriptor_rows, token_rows, similarity_rows = _dataset_rows(
+    descriptor_rows, token_rows, similarity_rows, task_context_rows = _dataset_rows(
         args.datasets,
         fold=args.fold,
         max_samples=args.max_samples,
         sample_rows=args.sample_rows,
         preset=args.preset,
+        bootstrap_summaries=args.bootstrap_summaries,
     )
 
     descriptor_df = pd.DataFrame(descriptor_rows)
     token_df = pd.DataFrame(token_rows)
     similarity_df = pd.DataFrame(similarity_rows)
     grouped_df = _grouped_similarity_summary(similarity_df)
+    task_context_df = pd.DataFrame(task_context_rows)
 
     descriptor_df.to_csv(args.output_dir / "descriptor_inventory.csv", index=False)
     token_df.to_csv(args.output_dir / "token_summary.csv", index=False)
     similarity_df.to_csv(args.output_dir / "pairwise_similarity.csv", index=False)
     grouped_df.to_csv(args.output_dir / "grouped_similarity_summary.csv", index=False)
+    if not task_context_df.empty:
+        task_context_df.to_csv(args.output_dir / "task_context_examples.csv", index=False)
 
     summary = {
         "datasets": args.datasets,
@@ -270,8 +328,10 @@ def main() -> None:
         "preset": args.preset,
         "max_samples": args.max_samples,
         "sample_rows": args.sample_rows,
+        "bootstrap_summaries": args.bootstrap_summaries,
         "n_descriptor_rows": int(len(descriptor_df)),
         "n_similarity_rows": int(len(similarity_df)),
+        "n_task_context_rows": int(len(task_context_df)),
     }
     if not similarity_df.empty:
         summary["mean_cosine_same_family"] = float(similarity_df.loc[similarity_df["same_family"] == 1, "cosine_similarity"].mean())

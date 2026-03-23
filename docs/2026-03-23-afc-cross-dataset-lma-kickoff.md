@@ -198,6 +198,63 @@ Current recommendation:
 - use a small transformer encoder if permutation robustness over view order matters
 - use a GRU only if we intentionally define and trust a canonical expert sequence and want a lighter recurrent prior
 
+## Prototype: task-context encoder baselines
+
+New prototype modules:
+- `src/graphdrone_fit/task_conditioned_prior.py`
+- `scripts/prototype_task_conditioned_lma.py`
+
+These do not modify the live GraphDrone path yet.
+They provide an offline prior-learning scaffold:
+- input: dataset-level view-summary sequences from `task_context_examples.csv`
+- encoders:
+  - transformer
+  - GRU
+- output: a task embedding and a simple dataset-classification head
+
+Bootstrap classification extractor:
+
+```bash
+PYTHONPATH=src python scripts/analyze_cross_dataset_view_tokens.py \
+  --datasets pendigits diabetes credit_g optdigits \
+  --max-samples 384 \
+  --sample-rows 48 \
+  --bootstrap-summaries 24 \
+  --output-dir eval/afc_cross_dataset_lma_classification_bootstrap_v1
+```
+
+Prototype run:
+
+```bash
+PYTHONPATH=src python scripts/prototype_task_conditioned_lma.py \
+  --analysis-dir eval/afc_cross_dataset_lma_classification_bootstrap_v1 \
+  --encoder both \
+  --epochs 120 \
+  --output-dir eval/afc_task_conditioned_lma_proto_cls_v1
+```
+
+Result:
+- examples: `96`
+- sequence length: `4`
+- input dimension: `28`
+- transformer: loss `0.00399`, accuracy `1.00`
+- GRU: loss `0.01139`, accuracy `1.00`
+
+Interpretation:
+- the task-conditioned prior is learnable on the classification-first bootstrap context surface
+- both encoders can fit the current small prototype task
+- the transformer converged a bit better than the GRU on the same artifact
+
+Important limit:
+- this is only a learnability/prototype check
+- it does **not** yet show held-out generalization across unseen datasets
+- it does **not** yet show end-to-end GraphDrone improvement
+
+Still, it is enough to justify the next research step:
+- keep the classification-first task-conditioned direction
+- prefer transformer as the default baseline
+- move next to a stricter generalization test, not immediate integration
+
 ## Initial analysis questions
 
 1. Do anchor views from different datasets cluster more tightly than random view pairs?
