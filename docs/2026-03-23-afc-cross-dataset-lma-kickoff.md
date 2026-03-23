@@ -75,6 +75,49 @@ Read:
 - but this tiny smoke does **not** yet show clean family-level separation
 - that is useful, because it means the next step should control for trivial descriptor and dataset effects before assuming a shared manifold is already obvious
 
+## Mixed-slice controlled result
+
+Controlled mixed slice:
+
+```bash
+PYTHONPATH=src python scripts/analyze_cross_dataset_view_tokens.py \
+  --datasets california cpu_act pendigits diabetes \
+  --max-samples 384 \
+  --sample-rows 48 \
+  --output-dir eval/afc_cross_dataset_lma_mixed_slice_v1
+```
+
+Artifacts:
+- `eval/afc_cross_dataset_lma_mixed_slice_v1/summary.json`
+- `eval/afc_cross_dataset_lma_mixed_slice_v1/grouped_similarity_summary.csv`
+- `eval/afc_cross_dataset_lma_mixed_slice_v1/pairwise_similarity.csv`
+
+Headline summary:
+- `mean_cosine_same_family = 0.7725`
+- `mean_cosine_cross_family = 0.7777`
+- `mean_cosine_same_task_type = 0.8216`
+- `mean_cosine_cross_task_type = 0.7335`
+
+Grouped read:
+- same-task-type pairs are clearly more similar than cross-task-type pairs
+- same-family pairs do **not** globally beat cross-family pairs
+- cross-dataset same-family/same-anchor pairs still retain some structure:
+  - same task type: `0.7124`
+  - cross task type: `0.7399`
+
+Interpretation:
+- there is nontrivial cross-dataset token geometry
+- but the dominant axis in this first controlled slice is task type, not family
+- this weakens the naïve version of the hypothesis that a single family-level prior is already obvious
+- it strengthens a narrower design direction:
+  - any future LMA prior should likely be hierarchical or conditioned by task type
+  - only after that should it try to learn finer family-level alignment
+
+So the current branch should not jump straight to a single universal hyper-router.
+The more defensible next step is:
+- regression-only and classification-only token-bank analysis
+- then test whether family-level structure becomes cleaner within each task regime
+
 ## Initial analysis questions
 
 1. Do anchor views from different datasets cluster more tightly than random view pairs?

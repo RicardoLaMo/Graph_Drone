@@ -97,6 +97,42 @@ def _safe_cosine(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.dot(a, b) / (a_norm * b_norm))
 
 
+def _grouped_similarity_summary(similarity_df: pd.DataFrame) -> pd.DataFrame:
+    if similarity_df.empty:
+        return pd.DataFrame(
+            columns=[
+                "same_task_type",
+                "same_family",
+                "same_anchor_flag",
+                "same_dataset",
+                "pair_count",
+                "mean_cosine_similarity",
+                "median_cosine_similarity",
+            ]
+        )
+    grouped = (
+        similarity_df.groupby(
+            ["same_task_type", "same_family", "same_anchor_flag", "same_dataset"],
+            dropna=False,
+        )["cosine_similarity"]
+        .agg(["count", "mean", "median"])
+        .reset_index()
+        .rename(
+            columns={
+                "count": "pair_count",
+                "mean": "mean_cosine_similarity",
+                "median": "median_cosine_similarity",
+            }
+        )
+        .sort_values(
+            by=["same_task_type", "same_family", "same_anchor_flag", "same_dataset"],
+            ascending=[False, False, False, True],
+        )
+        .reset_index(drop=True)
+    )
+    return grouped
+
+
 def _dataset_rows(datasets: Iterable[str], *, fold: int, max_samples: int, sample_rows: int, preset: str) -> tuple[list[dict], list[dict], list[dict]]:
     descriptor_rows: list[dict] = []
     token_rows: list[dict] = []
@@ -179,14 +215,17 @@ def _dataset_rows(datasets: Iterable[str], *, fold: int, max_samples: int, sampl
             similarity_rows.append(
                 {
                     "dataset_a": meta_a["dataset"],
+                    "task_type_a": meta_a["task_type"],
                     "expert_id_a": meta_a["expert_id"],
                     "family_a": meta_a["family"],
                     "is_anchor_a": meta_a["is_anchor"],
                     "dataset_b": meta_b["dataset"],
+                    "task_type_b": meta_b["task_type"],
                     "expert_id_b": meta_b["expert_id"],
                     "family_b": meta_b["family"],
                     "is_anchor_b": meta_b["is_anchor"],
                     "same_dataset": int(meta_a["dataset"] == meta_b["dataset"]),
+                    "same_task_type": int(meta_a["task_type"] == meta_b["task_type"]),
                     "same_family": int(meta_a["family"] == meta_b["family"]),
                     "same_anchor_flag": int(meta_a["is_anchor"] == meta_b["is_anchor"]),
                     "cosine_similarity": _safe_cosine(mean_vectors[key_a], mean_vectors[key_b]),
@@ -218,10 +257,12 @@ def main() -> None:
     descriptor_df = pd.DataFrame(descriptor_rows)
     token_df = pd.DataFrame(token_rows)
     similarity_df = pd.DataFrame(similarity_rows)
+    grouped_df = _grouped_similarity_summary(similarity_df)
 
     descriptor_df.to_csv(args.output_dir / "descriptor_inventory.csv", index=False)
     token_df.to_csv(args.output_dir / "token_summary.csv", index=False)
     similarity_df.to_csv(args.output_dir / "pairwise_similarity.csv", index=False)
+    grouped_df.to_csv(args.output_dir / "grouped_similarity_summary.csv", index=False)
 
     summary = {
         "datasets": args.datasets,
@@ -235,12 +276,19 @@ def main() -> None:
     if not similarity_df.empty:
         summary["mean_cosine_same_family"] = float(similarity_df.loc[similarity_df["same_family"] == 1, "cosine_similarity"].mean())
         summary["mean_cosine_cross_family"] = float(similarity_df.loc[similarity_df["same_family"] == 0, "cosine_similarity"].mean())
+        summary["mean_cosine_same_task_type"] = float(similarity_df.loc[similarity_df["same_task_type"] == 1, "cosine_similarity"].mean())
+        summary["mean_cosine_cross_task_type"] = float(similarity_df.loc[similarity_df["same_task_type"] == 0, "cosine_similarity"].mean())
         summary["mean_cosine_anchor_anchor"] = float(
             similarity_df.loc[(similarity_df["is_anchor_a"] == 1) & (similarity_df["is_anchor_b"] == 1), "cosine_similarity"].mean()
         )
         summary["mean_cosine_subspace_subspace"] = float(
             similarity_df.loc[(similarity_df["family_a"] == "structural_subspace") & (similarity_df["family_b"] == "structural_subspace"), "cosine_similarity"].mean()
         )
+        control_rows = grouped_df.loc[(grouped_df["same_dataset"] == 0)]
+        if not control_rows.empty:
+            summary["best_cross_dataset_group"] = control_rows.sort_values(
+                by="mean_cosine_similarity", ascending=False
+            ).iloc[0].to_dict()
     (args.output_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
     print(json.dumps(summary, indent=2))
