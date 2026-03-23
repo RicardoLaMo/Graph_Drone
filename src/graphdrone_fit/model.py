@@ -574,6 +574,12 @@ class GraphDrone:
         autocast_enabled = self.device == "cuda"
         defer_penalty_lambda = float(router_cfg.defer_penalty_lambda)
         defer_target = float(router_cfg.defer_target)
+        # Defer penalty is gated by task-prior confidence: only applies when the prior
+        # has accumulated feedback on this dataset (confidence > 0). Without a task prior
+        # or without prior feedback, confidence = 0 → penalty is inactive, preserving
+        # champion routing behavior. Unconditional defer penalty has been shown to hurt
+        # credit_g across all tested lambda values (2026-03-23 sweep).
+        task_prior_confidence = self._task_prior_confidence_scale()
         for _ in range(500):
             self._router.train()
             optimizer.zero_grad()
@@ -585,9 +591,9 @@ class GraphDrone:
                 blend_nll = F.nll_loss(F.log_softmax(log_q, dim=-1), y_va_t)
                 aux_loss = out.aux_loss if out.aux_loss is not None else blend_nll.new_zeros(())
                 loss = blend_nll + 2.0 * F.relu(blend_nll - anchor_nll_val) + aux_loss
-                if defer_penalty_lambda > 0:
+                if defer_penalty_lambda > 0 and task_prior_confidence > 0:
                     mean_defer = out.defer_prob.mean()
-                    loss = loss + defer_penalty_lambda * (mean_defer - defer_target) ** 2
+                    loss = loss + defer_penalty_lambda * task_prior_confidence * (mean_defer - defer_target) ** 2
             loss.backward()
             optimizer.step()
             self._post_optimizer_step()
