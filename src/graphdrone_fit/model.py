@@ -166,7 +166,6 @@ class GraphDrone:
 
         if is_classification:
             model_kind = "foundation_classifier_bagged" if is_binary else "foundation_classifier"
-            skip_subs = is_binary and (len(matrix) < 500 and matrix.shape[1] < 25)
             full_spec = ExpertBuildSpec(
                 descriptor=ViewDescriptor(
                     expert_id=self.config.full_expert_id,
@@ -181,36 +180,26 @@ class GraphDrone:
                 model_params=params,
             )
             sub_specs: list[ExpertBuildSpec] = []
-            if not skip_subs:
-                if is_binary and matrix.shape[1] < 25:
-                    sub_specs_config = [(0, 0.5)]
-                else:
-                    n_features = matrix.shape[1]
-                    if n_features <= 10:
-                        sub_specs_config = []
-                    elif n_features <= 14:
-                        sub_specs_config = [(0, 0.6)]
-                    else:
-                        sub_specs_config = [(0, 0.8), (1, 0.85), (2, 0.9)]
-
-                for sub_seed, sub_frac in sub_specs_config:
-                    rng_i = np.random.RandomState(sub_seed)
-                    sz_i = max(1, int(matrix.shape[1] * sub_frac))
-                    idx_i = tuple(sorted(rng_i.choice(matrix.shape[1], sz_i, replace=False).tolist()))
-                    sub_specs.append(
-                        ExpertBuildSpec(
-                            descriptor=ViewDescriptor(
-                                expert_id=f"SUB{sub_seed}",
-                                family="structural_subspace",
-                                view_name=f"Foundation Sub {sub_seed}",
-                                input_dim=sz_i,
-                                input_indices=idx_i,
-                            ),
-                            model_kind=model_kind,
-                            input_adapter=IdentitySelectorAdapter(indices=idx_i),
-                            model_params=params,
-                        )
+            subspace_indices = (
+                self._binary_classification_subspaces(matrix.shape[1])
+                if is_binary
+                else self._multiclass_subspaces(matrix.shape[1])
+            )
+            for sub_idx, idx_i in enumerate(subspace_indices):
+                sub_specs.append(
+                    ExpertBuildSpec(
+                        descriptor=ViewDescriptor(
+                            expert_id=f"SUB{sub_idx}",
+                            family="structural_subspace",
+                            view_name=f"Foundation Sub {sub_idx}",
+                            input_dim=len(idx_i),
+                            input_indices=idx_i,
+                        ),
+                        model_kind=model_kind,
+                        input_adapter=IdentitySelectorAdapter(indices=idx_i),
+                        model_params=params,
                     )
+                )
             return (full_spec, *sub_specs)
 
         return (
@@ -228,6 +217,43 @@ class GraphDrone:
                 model_params=params,
             ),
         )
+
+    @staticmethod
+    def _multiclass_subspaces(n_features: int) -> tuple[tuple[int, ...], ...]:
+        if n_features <= 10:
+            return ()
+        if n_features <= 14:
+            rng_i = np.random.RandomState(0)
+            sz_i = max(1, int(n_features * 0.6))
+            idx_i = tuple(sorted(rng_i.choice(n_features, sz_i, replace=False).tolist()))
+            return (idx_i,)
+        configs = []
+        for sub_seed, sub_frac in [(0, 0.8), (1, 0.85), (2, 0.9)]:
+            rng_i = np.random.RandomState(sub_seed)
+            sz_i = max(1, int(n_features * sub_frac))
+            idx_i = tuple(sorted(rng_i.choice(n_features, sz_i, replace=False).tolist()))
+            configs.append(idx_i)
+        return tuple(configs)
+
+    @staticmethod
+    def _binary_classification_subspaces(n_features: int) -> tuple[tuple[int, ...], ...]:
+        if n_features <= 2:
+            return ()
+        all_idx = np.arange(n_features)
+        split = max(1, n_features // 2)
+        lower = tuple(all_idx[:split].tolist())
+        upper = tuple(all_idx[-split:].tolist())
+        views: list[tuple[int, ...]] = []
+        for idx in (lower, upper):
+            if len(idx) < n_features and idx not in views:
+                views.append(idx)
+        for seed, frac in [(0, 0.75), (1, 0.6)]:
+            rng = np.random.RandomState(seed)
+            sz = min(n_features - 1, max(2, int(round(n_features * frac))))
+            idx = tuple(sorted(rng.choice(n_features, sz, replace=False).tolist()))
+            if len(idx) < n_features and idx not in views:
+                views.append(idx)
+        return tuple(views)
 
     def _seed_router_training(self) -> None:
         _seed_torch_generators(self.config.router.router_seed)
@@ -713,13 +739,28 @@ class GraphDrone:
         conditioned.set_task_prior_context(prior_bundle["prior_vector"].to(self.device))
         query_result = prior_bundle["query_result"]
         top_neighbors = query_result.get("top_neighbors", [])
+        base_neighbor_probs = query_result.get("base_neighbor_probabilities", {})
+        base_top_neighbor = max(base_neighbor_probs, key=base_neighbor_probs.get) if base_neighbor_probs else ""
         self._task_prior_diagnostics = {
             "task_prior_training_objective": str(prior_bundle["training_objective"]),
             "task_prior_encoder_kind": str(prior_bundle["encoder_kind"]),
             "task_prior_top_neighbor": top_neighbors[0]["dataset"] if top_neighbors else "",
             "task_prior_top_neighbor_prob": float(top_neighbors[0]["probability"]) if top_neighbors else float("nan"),
+            "task_prior_base_top_neighbor": base_top_neighbor,
+            "task_prior_base_top_neighbor_prob": float(base_neighbor_probs.get(base_top_neighbor, float("nan"))),
             "task_prior_entropy": float(query_result.get("soft_neighbor_entropy", float("nan"))),
             "task_prior_exact_reuse_available": bool(query_result.get("exact_reuse_available", False)),
+            "task_prior_feedback_used": bool(query_result.get("feedback_used", False)),
+            "task_prior_feedback_top_source": (
+                query_result.get("top_source_datasets", [{}])[0].get("dataset", "")
+                if query_result.get("top_source_datasets")
+                else ""
+            ),
+            "task_prior_feedback_top_source_weight": (
+                float(query_result.get("top_source_datasets", [{}])[0].get("weight", float("nan")))
+                if query_result.get("top_source_datasets")
+                else float("nan")
+            ),
         }
         return conditioned
 

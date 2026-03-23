@@ -23,6 +23,7 @@ from graphdrone_fit.task_conditioned_prior import (
     slice_batch_by_datasets,
     split_batch_by_dataset,
     supervised_contrastive_loss,
+    update_task_prototype_bank_feedback,
 )
 
 
@@ -205,3 +206,90 @@ def test_build_task_context_frame_from_router_tokens_uses_descriptors_not_names(
     assert list(frame["dataset"].unique()) == ["opaque_dataset_name"]
     assert set(frame["expert_id"]) == {"FULL", "SUB0", "SUB1"}
     assert "mean_token_json" in frame.columns
+
+
+def test_task_context_batch_uses_schema_stable_token_summaries() -> None:
+    batch = build_task_context_batch(_task_context_frame())
+    assert "token_mean" in batch.feature_names
+    assert "token_dim" in batch.feature_names
+    assert all(not name.startswith("mean_token_") for name in batch.feature_names)
+
+
+def test_task_prototype_bank_feedback_is_saved_and_loaded(tmp_path) -> None:
+    batch = build_task_context_batch(_task_context_frame())
+    embeddings = torch.tensor(
+        [
+            [1.0, 0.0],
+            [0.9, 0.1],
+            [0.0, 1.0],
+            [0.1, 0.9],
+        ],
+        dtype=torch.float32,
+    )
+    bank = build_task_prototype_bank(
+        embeddings=embeddings,
+        batch=batch,
+        encoder_kind="transformer",
+        hidden_dim=2,
+        normalize_features=False,
+        normalization=None,
+    )
+    updated = update_task_prototype_bank_feedback(
+        bank,
+        query_dataset="a",
+        query_embeddings=embeddings[:2],
+        reward=0.2,
+        neighbor_rewards={"b": 0.15},
+    )
+    path = tmp_path / "bank.json"
+    save_task_prototype_bank(updated, path)
+    loaded = load_task_prototype_bank(path)
+    assert loaded.dataset_feedback["a"]["updates"] == 1
+    assert loaded.dataset_feedback["a"]["neighbor_rewards"]["b"]["count"] == 1
+    assert loaded.dataset_feedback["a"]["neighbor_rewards"]["b"]["reward_sum"] == 0.15
+
+
+def test_query_task_prototype_bank_uses_feedback_bias_for_similar_queries() -> None:
+    batch = build_task_context_batch(_task_context_frame())
+    embeddings = torch.tensor(
+        [
+            [1.0, 0.0],
+            [0.95, 0.05],
+            [0.0, 1.0],
+            [0.05, 0.95],
+        ],
+        dtype=torch.float32,
+    )
+    base_bank = build_task_prototype_bank(
+        embeddings=embeddings,
+        batch=batch,
+        encoder_kind="transformer",
+        hidden_dim=2,
+        normalize_features=False,
+        normalization=None,
+    )
+    feedback_bank = update_task_prototype_bank_feedback(
+        base_bank,
+        query_dataset="a",
+        query_embeddings=embeddings[:2],
+        reward=0.4,
+        neighbor_rewards={"b": 0.4},
+    )
+    feedback_bank = type(feedback_bank)(
+        dataset_names=feedback_bank.dataset_names,
+        centroids=feedback_bank.centroids,
+        counts=feedback_bank.counts,
+        feature_names=feedback_bank.feature_names,
+        encoder_kind=feedback_bank.encoder_kind,
+        hidden_dim=feedback_bank.hidden_dim,
+        normalize_features=feedback_bank.normalize_features,
+        training_objective=feedback_bank.training_objective,
+        normalization=feedback_bank.normalization,
+        feedback_blend=1.0,
+        feedback_temperature=0.1,
+        dataset_feedback=feedback_bank.dataset_feedback,
+    )
+    query = torch.tensor([[0.98, 0.02]], dtype=torch.float32)
+    result = query_task_prototype_bank(feedback_bank, query, query_dataset="unseen", top_k=2)
+    assert result["feedback_used"] is True
+    assert result["neighbor_probabilities"]["b"] > result["base_neighbor_probabilities"]["b"]

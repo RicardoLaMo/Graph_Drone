@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 from pathlib import Path
 from typing import Any, Sequence
@@ -52,6 +52,9 @@ class TaskPrototypeBank:
     normalize_features: bool
     training_objective: str = "reconstruction"
     normalization: TaskContextNormalization | None = None
+    feedback_blend: float = 0.0
+    feedback_temperature: float = 0.2
+    dataset_feedback: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 def _dataset_indices(batch: TaskContextBatch) -> dict[str, list[int]]:
@@ -71,8 +74,41 @@ def _feature_row(row: pd.Series) -> tuple[list[float], list[str]]:
     for projection in CANONICAL_PROJECTION_ORDER:
         values.append(1.0 if row["projection_kind"] == projection else 0.0)
         names.append(f"projection_{projection}")
-    values.extend(float(v) for v in mean_token)
-    names.extend(f"mean_token_{idx}" for idx in range(len(mean_token)))
+    token_values, token_names = _mean_token_summary_features(mean_token)
+    values.extend(token_values)
+    names.extend(token_names)
+    return values, names
+
+
+def _mean_token_summary_features(mean_token: Sequence[float]) -> tuple[list[float], list[str]]:
+    arr = torch.as_tensor(list(mean_token), dtype=torch.float32)
+    if arr.numel() == 0:
+        arr = torch.zeros(1, dtype=torch.float32)
+    mid = max(1, arr.numel() // 2)
+    head = arr[:mid]
+    tail = arr[-mid:]
+    values = [
+        float(arr.mean().item()),
+        float(arr.std(unbiased=False).item()),
+        float(arr.min().item()),
+        float(arr.max().item()),
+        float(arr.norm().item()),
+        float(arr.abs().mean().item()),
+        float(head.mean().item()),
+        float(tail.mean().item()),
+        float(arr.numel()),
+    ]
+    names = [
+        "token_mean",
+        "token_std",
+        "token_min",
+        "token_max",
+        "token_l2_norm",
+        "token_abs_mean",
+        "token_head_mean",
+        "token_tail_mean",
+        "token_dim",
+    ]
     return values, names
 
 
@@ -371,6 +407,9 @@ def save_task_prototype_bank(bank: TaskPrototypeBank, path: str | Path) -> None:
         "normalize_features": bank.normalize_features,
         "training_objective": bank.training_objective,
         "normalization": _normalization_to_jsonable(bank.normalization),
+        "feedback_blend": bank.feedback_blend,
+        "feedback_temperature": bank.feedback_temperature,
+        "dataset_feedback": bank.dataset_feedback,
     }
     target.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
@@ -387,7 +426,52 @@ def load_task_prototype_bank(path: str | Path) -> TaskPrototypeBank:
         normalize_features=bool(payload["normalize_features"]),
         training_objective=str(payload.get("training_objective", "reconstruction")),
         normalization=_normalization_from_jsonable(payload.get("normalization")),
+        feedback_blend=float(payload.get("feedback_blend", 0.0)),
+        feedback_temperature=float(payload.get("feedback_temperature", 0.2)),
+        dataset_feedback={str(k): v for k, v in payload.get("dataset_feedback", {}).items()},
     )
+
+
+def _feedback_bias_from_bank(
+    bank: TaskPrototypeBank,
+    *,
+    query_embeddings: torch.Tensor,
+    centroid_names: Sequence[str],
+    centroid_matrix: torch.Tensor,
+) -> tuple[torch.Tensor, dict[str, Any]]:
+    if not bank.dataset_feedback or bank.feedback_blend <= 0:
+        return (
+            torch.zeros(len(centroid_names), dtype=query_embeddings.dtype, device=query_embeddings.device),
+            {"feedback_used": False, "top_source_datasets": []},
+        )
+    query_centroid = F.normalize(query_embeddings.mean(dim=0, keepdim=True), dim=-1).squeeze(0)
+    source_logits = (query_centroid @ centroid_matrix.T) / max(bank.feedback_temperature, 1e-6)
+    source_weights = torch.softmax(source_logits, dim=-1)
+    name_to_idx = {name: idx for idx, name in enumerate(centroid_names)}
+    bias = torch.zeros(len(centroid_names), dtype=query_embeddings.dtype, device=query_embeddings.device)
+    top_source_vals, top_source_idx = torch.topk(source_weights, k=min(3, len(centroid_names)))
+    for source_name, source_idx in name_to_idx.items():
+        feedback = bank.dataset_feedback.get(source_name)
+        if not feedback:
+            continue
+        source_weight = source_weights[source_idx]
+        updates = max(int(feedback.get("updates", 0)), 1)
+        reward_sum = float(feedback.get("reward_sum", 0.0))
+        bias[source_idx] += 0.5 * source_weight * (reward_sum / updates)
+        for neighbor_name, neighbor_stats in feedback.get("neighbor_rewards", {}).items():
+            neighbor_idx = name_to_idx.get(str(neighbor_name))
+            if neighbor_idx is None:
+                continue
+            count = max(int(neighbor_stats.get("count", 0)), 1)
+            avg_reward = float(neighbor_stats.get("reward_sum", 0.0)) / count
+            bias[neighbor_idx] += source_weight * avg_reward
+    return bias, {
+        "feedback_used": True,
+        "top_source_datasets": [
+            {"dataset": centroid_names[idx], "weight": float(val)}
+            for val, idx in zip(top_source_vals.tolist(), top_source_idx.tolist())
+        ],
+    }
 
 
 def query_task_prototype_bank(
@@ -405,14 +489,25 @@ def query_task_prototype_bank(
     centroid_names = sorted(bank.centroids.keys())
     centroid_matrix = torch.stack([bank.centroids[name] for name in centroid_names], dim=0)
     similarities = query_embeddings @ centroid_matrix.T
-    probs = torch.softmax(similarities, dim=-1).mean(dim=0)
+    base_logits = similarities.mean(dim=0)
+    feedback_bias, feedback_meta = _feedback_bias_from_bank(
+        bank,
+        query_embeddings=query_embeddings,
+        centroid_names=centroid_names,
+        centroid_matrix=centroid_matrix,
+    )
+    blended_logits = base_logits + bank.feedback_blend * feedback_bias
+    probs = torch.softmax(blended_logits, dim=-1)
     probs = probs / probs.sum()
+    base_probs = torch.softmax(base_logits, dim=-1)
     top_values, top_indices = torch.topk(probs, k=min(top_k, probs.shape[0]))
     top_neighbors = [
         {
             "dataset": centroid_names[idx],
             "probability": float(prob),
             "mean_similarity": float(similarities[:, idx].mean().item()),
+            "base_probability": float(base_probs[idx].item()),
+            "feedback_bias": float(feedback_bias[idx].item()),
         }
         for prob, idx in zip(top_values.tolist(), top_indices.tolist())
     ]
@@ -429,7 +524,74 @@ def query_task_prototype_bank(
         "top_neighbors": top_neighbors,
         "similar_neighbors_excluding_exact": similar_neighbors,
         "soft_neighbor_entropy": float(-(probs * torch.log(probs + 1e-12)).sum().item()),
+        "neighbor_probabilities": {name: float(probs[idx].item()) for idx, name in enumerate(centroid_names)},
+        "base_neighbor_probabilities": {name: float(base_probs[idx].item()) for idx, name in enumerate(centroid_names)},
+        "feedback_blend": float(bank.feedback_blend),
+        "feedback_bias_by_dataset": {name: float(feedback_bias[idx].item()) for idx, name in enumerate(centroid_names)},
+        **feedback_meta,
     }
+
+
+def update_task_prototype_bank_feedback(
+    bank: TaskPrototypeBank,
+    *,
+    query_dataset: str,
+    query_embeddings: torch.Tensor,
+    reward: float,
+    neighbor_rewards: dict[str, float],
+) -> TaskPrototypeBank:
+    query_embeddings = torch.as_tensor(query_embeddings, dtype=torch.float32)
+    if query_embeddings.ndim != 2:
+        raise ValueError(f"query_embeddings must be 2D, got shape={tuple(query_embeddings.shape)}")
+    query_centroid = F.normalize(query_embeddings.mean(dim=0, keepdim=True), dim=-1).squeeze(0).cpu()
+
+    centroids = dict(bank.centroids)
+    counts = dict(bank.counts)
+    dataset_names = list(bank.dataset_names)
+    if query_dataset in centroids:
+        prev_count = max(int(counts.get(query_dataset, 0)), 1)
+        blended = F.normalize(
+            (centroids[query_dataset] * prev_count + query_centroid) / float(prev_count + 1),
+            dim=-1,
+        )
+        centroids[query_dataset] = blended.cpu()
+        counts[query_dataset] = prev_count + 1
+    else:
+        centroids[query_dataset] = query_centroid
+        counts[query_dataset] = 1
+        dataset_names.append(query_dataset)
+
+    dataset_feedback = json.loads(json.dumps(bank.dataset_feedback))
+    entry = dataset_feedback.setdefault(
+        query_dataset,
+        {
+            "updates": 0,
+            "reward_sum": 0.0,
+            "neighbor_rewards": {},
+        },
+    )
+    entry["updates"] = int(entry.get("updates", 0)) + 1
+    entry["reward_sum"] = float(entry.get("reward_sum", 0.0)) + float(reward)
+    neighbor_bucket = entry.setdefault("neighbor_rewards", {})
+    for neighbor_name, neighbor_reward in neighbor_rewards.items():
+        bucket = neighbor_bucket.setdefault(str(neighbor_name), {"count": 0, "reward_sum": 0.0})
+        bucket["count"] = int(bucket.get("count", 0)) + 1
+        bucket["reward_sum"] = float(bucket.get("reward_sum", 0.0)) + float(neighbor_reward)
+
+    return TaskPrototypeBank(
+        dataset_names=tuple(sorted(dataset_names)),
+        centroids=centroids,
+        counts=counts,
+        feature_names=bank.feature_names,
+        encoder_kind=bank.encoder_kind,
+        hidden_dim=bank.hidden_dim,
+        normalize_features=bank.normalize_features,
+        training_objective=bank.training_objective,
+        normalization=bank.normalization,
+        feedback_blend=bank.feedback_blend,
+        feedback_temperature=bank.feedback_temperature,
+        dataset_feedback=dataset_feedback,
+    )
 
 
 class TaskContextTransformerEncoder(nn.Module):
@@ -544,10 +706,11 @@ def compute_task_prior_from_bank(
         embedding = F.normalize(embedding, dim=-1).cpu()
     query_result = query_task_prototype_bank(bank, embedding, query_dataset=query_dataset, top_k=top_k)
     centroid_names = sorted(bank.centroids.keys())
+    probs = torch.tensor(
+        [query_result["neighbor_probabilities"][name] for name in centroid_names],
+        dtype=torch.float32,
+    )
     centroid_matrix = torch.stack([bank.centroids[name] for name in centroid_names], dim=0)
-    similarities = embedding @ centroid_matrix.T
-    probs = torch.softmax(similarities, dim=-1).mean(dim=0)
-    probs = probs / probs.sum()
     prior_vector = (probs.unsqueeze(-1) * centroid_matrix).sum(dim=0)
     prior_vector = F.normalize(prior_vector.unsqueeze(0), dim=-1).squeeze(0)
     return {

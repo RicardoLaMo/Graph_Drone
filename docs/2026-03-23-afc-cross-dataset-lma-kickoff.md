@@ -822,3 +822,80 @@ If none of that appears, the branch should not escalate directly into a hyper-ro
 1. Run the token-bank extractor on a small mix of regression and classification datasets.
 2. Inspect whether similarity structure is driven only by trivial descriptors such as `input_dim` or `is_anchor`.
 3. If the signal survives that control, design a minimal shared prior over view families before any end-to-end hyper-router training.
+
+## Feedback-updated task bank (first closed loop)
+
+This branch now has a first explicit outcome-feedback loop for the task bank.
+
+New pieces:
+- `scripts/update_task_prototype_bank_feedback.py`
+- feedback-aware bank state inside `src/graphdrone_fit/task_conditioned_prior.py`
+- live diagnostics for:
+  - `task_prior_base_top_neighbor`
+  - `task_prior_feedback_used`
+  - `task_prior_feedback_top_source`
+
+Contract:
+- start from the metadata-guided classification bank
+- run a live binary champion/challenger task-prior benchmark
+- ingest `paired_task_deltas.csv`
+- update the bank with outcome-weighted neighbor feedback
+- rerun the same live contract with the new bank
+
+First update artifact:
+
+```bash
+PYTHONPATH=src python scripts/update_task_prototype_bank_feedback.py \
+  --analysis-dir eval/afc_cross_dataset_lma_classification_bootstrap_v2 \
+  --bank-dir eval/afc_task_prototype_bank_cls_taxonomy_v2 \
+  --comparison-csv eval/afc_live_task_prior_binary_v5/comparison/paired_task_deltas.csv \
+  --output-dir eval/afc_task_prototype_bank_cls_feedback_v1 \
+  --encoder-kind transformer \
+  --feedback-blend 0.75
+```
+
+Artifacts:
+- `eval/afc_task_prototype_bank_cls_feedback_v1/transformer_prototype_bank.json`
+- `eval/afc_task_prototype_bank_cls_feedback_v1/feedback_update_summary.json`
+
+Offline retrieval effect:
+- exact dataset reuse now shifts according to prior outcome evidence rather than using only geometry
+- `credit_g` gains positive self-bias and a smaller positive pull toward `pendigits`
+- `diabetes` receives a small negative self-bias because its earlier reward was slightly negative
+
+Live rerun:
+
+```bash
+GRAPHDRONE_TASK_PRIOR_BANK_DIR=eval/afc_task_prototype_bank_cls_feedback_v1 \
+GRAPHDRONE_TASK_PRIOR_ENCODER_KIND=transformer \
+GRAPHDRONE_TASK_PRIOR_STRENGTH=0.5 \
+PYTHONPATH=src python scripts/run_champion_challenger.py \
+  --task classification \
+  --datasets credit_g diabetes \
+  --folds 0 \
+  --max-samples 384 \
+  --champion-version champion-bin-no-prior-v6 \
+  --challenger-version challenger-bin-task-prior-feedback-v6 \
+  --output-dir eval/afc_live_task_prior_binary_feedback_v6
+```
+
+Result:
+- decision remains `hold`
+- headline improvement dropped from `0.004135` to `0.002459`
+- mean log-loss guardrail still passed and improved slightly
+
+Dataset read:
+- `credit_g` got slightly worse log-loss than the static-bank run
+- `diabetes` got slightly better log-loss than the static-bank run
+- F1 stayed unchanged on both
+- defer remained saturated near `1.0`
+
+Most important interpretation:
+- the bank is no longer static; prediction outcomes can now reshape future prior lookup
+- this is real architectural progress even though the current benchmark delta is still small
+- but the live route still queries the bank as an anonymous `__current__` task, so exact reuse is not fully activated during routing
+- the current gain path is therefore mainly similarity-propagated feedback, not true stable dataset reuse in the live model
+
+So the next bottleneck is narrower now:
+- not whether the bank can learn from outcomes
+- but whether live GraphDrone should query the bank with a persistent task signature or key, rather than only an anonymous per-run context
