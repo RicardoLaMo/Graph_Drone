@@ -978,3 +978,111 @@ Interpretation:
 - but the remaining blocker is now even clearer:
   - the binary routing objective still pushes almost all mass into defer
   - so better task priors mostly show up as small calibration/log-loss shifts rather than a new routing policy
+
+## Binary task-prior-aware defer regularization
+
+Once exact reuse was live, the next question became:
+
+> Is the remaining blocker really defer saturation, and can task-prior-aware regularization unlock the stronger prior without destroying binary quality?
+
+The binary learned-router loss now includes an optional defer regularizer:
+- active only on the binary learned-router path
+- weighted by task-prior confidence
+- pushes average defer toward a target rather than allowing the route to saturate at `~1.0`
+
+New controls:
+- `GRAPHDRONE_TASK_PRIOR_DEFER_PENALTY_LAMBDA`
+- `GRAPHDRONE_TASK_PRIOR_DEFER_TARGET`
+
+### Strong penalty probe
+
+```bash
+GRAPHDRONE_TASK_PRIOR_BANK_DIR=eval/afc_task_prototype_bank_cls_feedback_v1 \
+GRAPHDRONE_TASK_PRIOR_ENCODER_KIND=transformer \
+GRAPHDRONE_TASK_PRIOR_STRENGTH=0.5 \
+GRAPHDRONE_TASK_PRIOR_EXACT_REUSE_BLEND=0.75 \
+GRAPHDRONE_TASK_PRIOR_DEFER_PENALTY_LAMBDA=0.5 \
+GRAPHDRONE_TASK_PRIOR_DEFER_TARGET=0.75 \
+PYTHONPATH=src python scripts/run_champion_challenger.py \
+  --task classification \
+  --datasets credit_g diabetes \
+  --folds 0 \
+  --max-samples 384 \
+  --champion-version champion-bin-no-prior-v9 \
+  --challenger-version challenger-bin-task-prior-deferpen-v9 \
+  --output-dir eval/afc_live_task_prior_binary_deferpen_v9
+```
+
+Artifacts:
+- `eval/afc_live_task_prior_binary_deferpen_v9/comparison/promotion_decision.json`
+- `eval/afc_live_task_prior_binary_deferpen_v9/comparison/paired_task_deltas.csv`
+
+Observed effect:
+- defer dropped from `~0.999` to about `0.81`
+- log-loss improved on both datasets
+- F1 fell enough to fail the guardrails
+
+Read:
+- this directly supported the defer-saturation hypothesis
+- but it also showed that breaking defer too aggressively damages the fixed-threshold classification path
+
+### Milder penalty run
+
+```bash
+GRAPHDRONE_TASK_PRIOR_BANK_DIR=eval/afc_task_prototype_bank_cls_feedback_v1 \
+GRAPHDRONE_TASK_PRIOR_ENCODER_KIND=transformer \
+GRAPHDRONE_TASK_PRIOR_STRENGTH=0.5 \
+GRAPHDRONE_TASK_PRIOR_EXACT_REUSE_BLEND=0.75 \
+GRAPHDRONE_TASK_PRIOR_DEFER_PENALTY_LAMBDA=0.2 \
+GRAPHDRONE_TASK_PRIOR_DEFER_TARGET=0.85 \
+PYTHONPATH=src python scripts/run_champion_challenger.py \
+  --task classification \
+  --datasets credit_g diabetes \
+  --folds 0 \
+  --max-samples 384 \
+  --champion-version champion-bin-no-prior-v10 \
+  --challenger-version challenger-bin-task-prior-deferpen-l02-v10 \
+  --output-dir eval/afc_live_task_prior_binary_deferpen_l02_v10
+```
+
+Artifacts:
+- `eval/afc_live_task_prior_binary_deferpen_l02_v10/comparison/promotion_decision.json`
+- `eval/afc_live_task_prior_binary_deferpen_l02_v10/raw/challenger/classification/report/results_granular.csv`
+
+Decision:
+- overall status: `promote`
+- `headline_improvement=PASS (0.006216)`
+- `mean_log_loss_guardrail=PASS (-0.002678)`
+- `worst_dataset_f1_guardrail=PASS (0.000000)`
+- `worst_dataset_log_loss_guardrail=PASS (0.000837)`
+
+Challenger diagnostics:
+- `credit_g`
+  - `router_kind = noise_gate_router_task_prior`
+  - `task_prior_query_dataset = credit_g`
+  - `task_prior_exact_reuse_available = 1`
+  - `task_prior_exact_reuse_used = 1`
+  - `mean_defer_prob = 0.9220`
+- `diabetes`
+  - `router_kind = noise_gate_router_task_prior`
+  - `task_prior_query_dataset = diabetes`
+  - `task_prior_exact_reuse_available = 1`
+  - `task_prior_exact_reuse_used = 1`
+  - `mean_defer_prob = 0.9476`
+
+Interpretation:
+- the stronger task prior was never the last missing piece by itself
+- the real remaining blocker was policy saturation
+- a milder task-prior-aware defer penalty is the first live binary result on this branch that both:
+  - materially changes routing behavior
+  - clears the current champion/challenger guardrails on the tested binary slice
+
+Current read:
+- task-prior memory, exact reuse, and feedback are now live end-to-end
+- defer regularization provides the first controlled path from better prior to better routing behavior
+- this is still a narrow binary-slice result, not yet a broad classification conclusion
+
+Next checks:
+- expand from `credit_g` and `diabetes` to a broader binary slice
+- inspect threshold sensitivity so the F1/log-loss tradeoff is explicit
+- test whether the same regularizer remains beneficial when exact reuse is unavailable and only neighborhood prior is present

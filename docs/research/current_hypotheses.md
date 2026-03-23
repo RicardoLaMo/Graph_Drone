@@ -3,7 +3,7 @@
 This file is generated from `docs/research/findings.jsonl`.
 It is the current research surface for scaling decisions, not an append-only history.
 
-Updated: 2026-03-23T19:27:38.270353+00:00
+Updated: 2026-03-23T19:43:50.595054+00:00
 
 ## How To Read This
 
@@ -31,6 +31,7 @@ Updated: 2026-03-23T19:27:38.270353+00:00
 | `afc-framework-normalized-task-neighborhoods` | `afc_framework` | Yes, partially. On the six-dataset normalized classification bank, the held-out similarity space no longer collapsed to one deterministic prototype in every case. Several datasets now distribute probability across a small neighborhood of plausible related tasks, which is much closer to the intended transfer behavior. | `exp/afc-cross-dataset-lma` | `2026-03-23-afc-cross-dataset-lma-kickoff.md` |
 | `afc-framework-persistent-task-prototype-bank` | `afc_framework` | Yes for exact dataset reuse, and partially for unseen-task lookup. The persistent prototype bank returns strong exact matches for known datasets and meaningful soft neighbors for unseen segment, though the neighborhood semantics are not yet sharp enough to count as a clean task taxonomy. | `exp/afc-cross-dataset-lma` | `2026-03-23-afc-cross-dataset-lma-kickoff.md` |
 | `afc-framework-task-conditioned-lma-prior` | `afc_framework` | Probably yes. The within-task token-bank splits show classification has much tighter cross-dataset geometry than regression, while the mixed slice showed task type dominates family. That makes task type a real design axis for the next prior rather than a detail to ignore. | `exp/afc-cross-dataset-lma` | `2026-03-23-afc-cross-dataset-lma-kickoff.md` |
+| `afc-framework-task-prior-defer-regularization` | `afc_framework` | Yes, partially. Task-prior-aware defer regularization is the first live binary mechanism on this branch that both desaturates defer materially and clears the current champion/challenger guardrails on the credit_g+diabetes slice. Strong regularization overcorrects and hurts F1, while a milder setting preserves the binary guardrails. This supports the policy-saturation hypothesis without yet establishing broad classification generalization. | `exp/afc-cross-dataset-lma` | `2026-03-23-afc-cross-dataset-lma-kickoff.md` |
 | `afc-b-reg-anchor-asymmetry` | `afc_phase_b` | Yes. The asymmetry was real and partly causal, but fixing it was not sufficient to make Phase B promotable. | `exp/afc-b-reg-anchor-exclusion` | `2026-03-23-afc-phase-b-anchor-exclusion.md` |
 
 ## Open
@@ -61,6 +62,7 @@ Updated: 2026-03-23T19:27:38.270353+00:00
 
 | Timestamp | Claim ID | Status | Summary |
 |---|---|---|---|
+| `2026-03-23T19:43:50.594637+00:00` | `afc-framework-task-prior-defer-regularization` | `partially_causal` | Once task-bank identity and exact reuse were live, the remaining blocker proved to be defer saturation rather than prior availability. A task-prior-aware defer penalty moved mean defer out of the ~0.999 regime, and a mild setting produced the first promoted binary slice on this branch. |
 | `2026-03-23T19:27:38.270058+00:00` | `afc-framework-live-task-exact-reuse` | `partially_causal` | Persistent task identity and exact-reuse blending are now active on the live binary route. That clears the bank/query identity bottleneck, but the remaining limiter is the binary defer policy rather than task-prior availability. |
 | `2026-03-23T19:14:46.203797+00:00` | `afc-framework-feedback-updated-task-bank-loop` | `partially_causal` | The first feedback-updated bank iteration changed task-prior lookup and slightly improved the mean log-loss guardrail on the binary live rerun, but F1 stayed flat and defer remained saturated. This establishes a real closed loop without yet solving the live routing policy. |
 | `2026-03-23T18:38:39.263083+00:00` | `afc-framework-live-task-prior-activation-surface` | `partially_causal` | The first live classification prototype showed that the task-prior bank is ready but the current GraphDrone classification architecture does not reliably expose an activation surface for it. The limiting factor moved from prior quality to router-stage availability. |
@@ -72,5 +74,4 @@ Updated: 2026-03-23T19:27:38.270353+00:00
 | `2026-03-23T17:25:43.001231+00:00` | `afc-framework-task-context-heldout-generalization` | `open` | The task-conditioned prior is learnable but not yet robustly transferable: held-out reconstruction remains fragile and is dominated by the optdigits outlier, so the next work should target feature normalization and dataset mismatch before claiming encoder-level wins. |
 | `2026-03-23T17:19:23.203285+00:00` | `afc-framework-task-context-prototype-learnability` | `open` | The classification-first task-context prototype is learnable. Both encoders reached 100% accuracy on the current bootstrap dataset-identification task, with the transformer showing better final loss, so transformer should be the default baseline for the next stricter generalization check. |
 | `2026-03-23T17:11:56.304425+00:00` | `afc-framework-task-conditioned-lma-prior` | `partially_causal` | The cross-dataset token-bank results now support a task-conditioned or hierarchical LMA prior: classification geometry is much more coherent than regression, so a flat universal prior is less defensible than a regime-aware transformer/GRU-style conditioning layer. |
-| `2026-03-23T16:58:30.582498+00:00` | `afc-framework-cross-dataset-token-geometry` | `open` | The first controlled cross-dataset token-bank pass found nontrivial shared geometry, but task type dominated family-level structure. This keeps the LMA line alive while narrowing the design toward task-conditioned or hierarchical priors. |
 
