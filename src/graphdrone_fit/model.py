@@ -671,6 +671,8 @@ class GraphDrone:
         autocast_enabled = self.device == "cuda"
         task_prior_penalty_lambda = 0.0 if router_cfg is None else float(router_cfg.task_prior_defer_penalty_lambda)
         task_prior_defer_target = 0.8 if router_cfg is None else float(router_cfg.task_prior_defer_target)
+        task_prior_rank_loss_lambda = 0.0 if router_cfg is None else float(router_cfg.task_prior_rank_loss_lambda)
+        task_prior_rank_margin = 0.0 if router_cfg is None else float(router_cfg.task_prior_rank_margin)
         task_prior_confidence = self._task_prior_confidence_scale()
         for _ in range(500):
             self._router.train()
@@ -687,6 +689,14 @@ class GraphDrone:
                     mean_defer = out.defer_prob.mean()
                     defer_penalty = (mean_defer - task_prior_defer_target) ** 2
                     loss = loss + task_prior_penalty_lambda * task_prior_confidence * defer_penalty
+                if task_prior_rank_loss_lambda > 0 and task_prior_confidence > 0 and log_q.shape[-1] == 2:
+                    pos_score = log_q[:, 1] - log_q[:, 0]
+                    rank_loss = self._binary_pairwise_rank_loss(
+                        pos_score,
+                        y_va_t,
+                        margin=task_prior_rank_margin,
+                    )
+                    loss = loss + task_prior_rank_loss_lambda * task_prior_confidence * rank_loss
             loss.backward()
             optimizer.step()
             self._post_optimizer_step()
@@ -720,6 +730,24 @@ class GraphDrone:
         entropy = float(self._task_prior_diagnostics.get("task_prior_entropy", 0.0) or 0.0)
         entropy_scale = max(0.0, 1.0 - entropy / 2.0)
         return max(exact, min(1.0, top_prob + entropy_scale))
+
+    @staticmethod
+    def _binary_pairwise_rank_loss(
+        pos_score: torch.Tensor,
+        y_true: torch.Tensor,
+        *,
+        margin: float = 0.0,
+    ) -> torch.Tensor:
+        import torch.nn.functional as F
+
+        pos_mask = y_true == 1
+        neg_mask = y_true == 0
+        if not bool(pos_mask.any()) or not bool(neg_mask.any()):
+            return pos_score.new_zeros(())
+        pos_scores = pos_score[pos_mask]
+        neg_scores = pos_score[neg_mask]
+        pairwise_margin = pos_scores[:, None] - neg_scores[None, :] - margin
+        return F.softplus(-pairwise_margin).mean()
 
     def _maybe_attach_task_prior_router(
         self,

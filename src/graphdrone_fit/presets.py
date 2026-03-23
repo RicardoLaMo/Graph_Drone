@@ -97,6 +97,8 @@ def build_graphdrone_config_from_preset(
             task_prior_exact_reuse_blend=_env_float("GRAPHDRONE_TASK_PRIOR_EXACT_REUSE_BLEND", 0.5),
             task_prior_defer_penalty_lambda=_env_float("GRAPHDRONE_TASK_PRIOR_DEFER_PENALTY_LAMBDA", 0.0),
             task_prior_defer_target=_env_float("GRAPHDRONE_TASK_PRIOR_DEFER_TARGET", 0.8),
+            task_prior_rank_loss_lambda=_env_float("GRAPHDRONE_TASK_PRIOR_RANK_LOSS_LAMBDA", 0.0),
+            task_prior_rank_margin=_env_float("GRAPHDRONE_TASK_PRIOR_RANK_MARGIN", 0.0),
         ),
         legitimacy_gate=LegitimacyGateConfig(
             enabled=_env_flag("GRAPHDRONE_ENABLE_LEGITIMACY_GATE", True),

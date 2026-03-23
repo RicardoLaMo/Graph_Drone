@@ -16,6 +16,8 @@ def test_binary_classification_router_config_preserves_task_prior_fields() -> No
                 task_prior_exact_reuse_blend=0.8,
                 task_prior_defer_penalty_lambda=0.6,
                 task_prior_defer_target=0.65,
+                task_prior_rank_loss_lambda=0.15,
+                task_prior_rank_margin=0.05,
             )
         )
     )
@@ -30,3 +32,5 @@ def test_binary_classification_router_config_preserves_task_prior_fields() -> No
     assert cfg.task_prior_exact_reuse_blend == 0.8
     assert cfg.task_prior_defer_penalty_lambda == 0.6
     assert cfg.task_prior_defer_target == 0.65
+    assert cfg.task_prior_rank_loss_lambda == 0.15
+    assert cfg.task_prior_rank_margin == 0.05
