@@ -123,3 +123,17 @@ python scripts/sync_graphdrone_skills.py
 ```
 
 This copies all repo skill directories, both parent and GraphDrone-specific, into `~/.codex/skills/`.
+
+## Claude Code Bridge
+
+Yes, the same skills can be carried into Claude Code agents through a generated bridge.
+
+- export command:
+  ```bash
+  python scripts/export_skills_to_claude.py
+  ```
+- source of truth remains `skills/`
+- generated Claude-facing pack lives in `.claude/skills/`
+- `CLAUDE.md` points Claude agents to `.claude/skills/INDEX.md`
+
+This is not a native Codex-skill import. It is a repo-local projection of the same methods into a Claude-readable instruction tree.

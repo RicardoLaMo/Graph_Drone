@@ -1,0 +1,7 @@
+interface:
+  display_name: "Research Platform Ops"
+  short_description: "Operate research as a cumulative system"
+  default_prompt: "Use $research-platform-ops to run this project as a research platform with evidence, notes, and durable findings."
+
+policy:
+  allow_implicit_invocation: true

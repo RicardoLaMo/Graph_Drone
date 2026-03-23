@@ -1,5 +1,28 @@
 # GraphDrone — Developer Guide for Claude
 
+## Project Skill Bridge
+
+The repo now exports reusable research-operation skills into `.claude/skills/`.
+
+- Source of truth: `skills/`
+- Claude-facing copy: `.claude/skills/`
+- Refresh command:
+  ```bash
+  python scripts/export_skills_to_claude.py
+  ```
+
+For methodology-heavy tasks, read `.claude/skills/INDEX.md` first, then the relevant skill pack:
+- generic parent skills:
+  - `research-platform-ops`
+  - `mechanism-first-diagnosis`
+  - `research-memory-ledger`
+  - `benchmark-evidence-governance`
+- GraphDrone specializations:
+  - `graphdrone-research-ops`
+  - `graphdrone-mechanism-diagnosis`
+  - `graphdrone-research-memory`
+  - `graphdrone-benchmark-governance`
+
 ## Current best ELO (2026-03-19, v1.20.0) — **BOTH ENGINES WIN**
 
 | Engine | GD ELO | TabPFN ELO | Benchmark | Tasks |

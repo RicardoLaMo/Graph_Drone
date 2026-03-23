@@ -1,0 +1,7 @@
+interface:
+  display_name: "GraphDrone Mechanism Diagnosis"
+  short_description: "Diagnose local-win global-loss GraphDrone mechanisms"
+  default_prompt: "Use $graphdrone-mechanism-diagnosis to explain why a GraphDrone mechanism improved locally but failed or flattened in end-to-end evaluation."
+
+policy:
+  allow_implicit_invocation: true
