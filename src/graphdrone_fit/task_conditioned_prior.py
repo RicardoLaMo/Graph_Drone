@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
-from typing import Sequence
+from pathlib import Path
+from typing import Any, Sequence
 
 import pandas as pd
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 CANONICAL_FAMILY_ORDER = ("FULL", "structural_subspace", "local_support", "learned_regime", "domain_semantic", "bootstrap")
@@ -37,6 +39,18 @@ class TaskContextNormalization:
     mean: torch.Tensor
     std: torch.Tensor
     continuous_mask: torch.Tensor
+
+
+@dataclass(frozen=True)
+class TaskPrototypeBank:
+    dataset_names: tuple[str, ...]
+    centroids: dict[str, torch.Tensor]
+    counts: dict[str, int]
+    feature_names: tuple[str, ...]
+    encoder_kind: str
+    hidden_dim: int
+    normalize_features: bool
+    normalization: TaskContextNormalization | None = None
 
 
 def _feature_row(row: pd.Series) -> tuple[list[float], list[str]]:
@@ -145,6 +159,153 @@ def split_batch_by_dataset(batch: TaskContextBatch, held_out_dataset: str) -> tu
         )
 
     return _slice(train_idx), _slice(test_idx)
+
+
+def slice_batch_by_datasets(batch: TaskContextBatch, dataset_names: Sequence[str]) -> TaskContextBatch:
+    wanted = set(dataset_names)
+    indices = [idx for idx, dataset in enumerate(batch.example_datasets) if dataset in wanted]
+    if not indices:
+        raise ValueError(f"No examples matched dataset_names={sorted(wanted)}")
+    return TaskContextBatch(
+        sequences=batch.sequences[indices],
+        labels=batch.labels[indices],
+        dataset_names=tuple(name for name in batch.dataset_names if name in wanted),
+        example_datasets=tuple(batch.example_datasets[idx] for idx in indices),
+        feature_names=batch.feature_names,
+    )
+
+
+def normalized_centroids(
+    embeddings: torch.Tensor,
+    dataset_names: Sequence[str],
+    example_datasets: Sequence[str],
+) -> dict[str, torch.Tensor]:
+    centroids: dict[str, torch.Tensor] = {}
+    for dataset in dataset_names:
+        idx = [i for i, name in enumerate(example_datasets) if name == dataset]
+        if not idx:
+            continue
+        centroid = embeddings[idx].mean(dim=0)
+        centroids[str(dataset)] = F.normalize(centroid.unsqueeze(0), dim=-1).squeeze(0).cpu()
+    return centroids
+
+
+def build_task_prototype_bank(
+    embeddings: torch.Tensor,
+    batch: TaskContextBatch,
+    *,
+    encoder_kind: str,
+    hidden_dim: int,
+    normalize_features: bool,
+    normalization: TaskContextNormalization | None = None,
+) -> TaskPrototypeBank:
+    centroids = normalized_centroids(embeddings=embeddings, dataset_names=batch.dataset_names, example_datasets=batch.example_datasets)
+    counts = {
+        dataset: sum(1 for name in batch.example_datasets if name == dataset)
+        for dataset in batch.dataset_names
+    }
+    return TaskPrototypeBank(
+        dataset_names=tuple(batch.dataset_names),
+        centroids=centroids,
+        counts=counts,
+        feature_names=tuple(batch.feature_names),
+        encoder_kind=encoder_kind,
+        hidden_dim=hidden_dim,
+        normalize_features=normalize_features,
+        normalization=normalization,
+    )
+
+
+def _normalization_to_jsonable(normalization: TaskContextNormalization | None) -> dict[str, Any] | None:
+    if normalization is None:
+        return None
+    return {
+        "mean": normalization.mean.tolist(),
+        "std": normalization.std.tolist(),
+        "continuous_mask": normalization.continuous_mask.tolist(),
+    }
+
+
+def _normalization_from_jsonable(payload: dict[str, Any] | None) -> TaskContextNormalization | None:
+    if payload is None:
+        return None
+    return TaskContextNormalization(
+        mean=torch.tensor(payload["mean"], dtype=torch.float32),
+        std=torch.tensor(payload["std"], dtype=torch.float32),
+        continuous_mask=torch.tensor(payload["continuous_mask"], dtype=torch.bool),
+    )
+
+
+def save_task_prototype_bank(bank: TaskPrototypeBank, path: str | Path) -> None:
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "dataset_names": list(bank.dataset_names),
+        "centroids": {name: tensor.tolist() for name, tensor in bank.centroids.items()},
+        "counts": bank.counts,
+        "feature_names": list(bank.feature_names),
+        "encoder_kind": bank.encoder_kind,
+        "hidden_dim": bank.hidden_dim,
+        "normalize_features": bank.normalize_features,
+        "normalization": _normalization_to_jsonable(bank.normalization),
+    }
+    target.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def load_task_prototype_bank(path: str | Path) -> TaskPrototypeBank:
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    return TaskPrototypeBank(
+        dataset_names=tuple(payload["dataset_names"]),
+        centroids={name: torch.tensor(values, dtype=torch.float32) for name, values in payload["centroids"].items()},
+        counts={str(name): int(count) for name, count in payload["counts"].items()},
+        feature_names=tuple(payload["feature_names"]),
+        encoder_kind=str(payload["encoder_kind"]),
+        hidden_dim=int(payload["hidden_dim"]),
+        normalize_features=bool(payload["normalize_features"]),
+        normalization=_normalization_from_jsonable(payload.get("normalization")),
+    )
+
+
+def query_task_prototype_bank(
+    bank: TaskPrototypeBank,
+    query_embeddings: torch.Tensor,
+    *,
+    query_dataset: str,
+    top_k: int = 3,
+) -> dict[str, Any]:
+    if query_embeddings.ndim != 2:
+        raise ValueError(f"query_embeddings must be 2D, got shape={tuple(query_embeddings.shape)}")
+    if not bank.centroids:
+        raise ValueError("TaskPrototypeBank has no centroids")
+    query_embeddings = F.normalize(query_embeddings, dim=-1)
+    centroid_names = sorted(bank.centroids.keys())
+    centroid_matrix = torch.stack([bank.centroids[name] for name in centroid_names], dim=0)
+    similarities = query_embeddings @ centroid_matrix.T
+    probs = torch.softmax(similarities, dim=-1).mean(dim=0)
+    probs = probs / probs.sum()
+    top_values, top_indices = torch.topk(probs, k=min(top_k, probs.shape[0]))
+    top_neighbors = [
+        {
+            "dataset": centroid_names[idx],
+            "probability": float(prob),
+            "mean_similarity": float(similarities[:, idx].mean().item()),
+        }
+        for prob, idx in zip(top_values.tolist(), top_indices.tolist())
+    ]
+    similar_neighbors = [item for item in top_neighbors if item["dataset"] != query_dataset]
+    exact_similarity = None
+    if query_dataset in bank.centroids:
+        exact_idx = centroid_names.index(query_dataset)
+        exact_similarity = float(similarities[:, exact_idx].mean().item())
+    return {
+        "query_dataset": query_dataset,
+        "known_dataset": query_dataset in bank.centroids,
+        "exact_reuse_available": query_dataset in bank.centroids,
+        "exact_match_mean_similarity": exact_similarity,
+        "top_neighbors": top_neighbors,
+        "similar_neighbors_excluding_exact": similar_neighbors,
+        "soft_neighbor_entropy": float(-(probs * torch.log(probs + 1e-12)).sum().item()),
+    }
 
 
 class TaskContextTransformerEncoder(nn.Module):

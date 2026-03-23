@@ -9,9 +9,14 @@ from graphdrone_fit.task_conditioned_prior import (
     TaskContextSequenceAutoencoder,
     TaskContextGRUEncoder,
     apply_task_context_normalization,
+    build_task_prototype_bank,
     fit_task_context_normalization,
     TaskContextTransformerEncoder,
     build_task_context_batch,
+    load_task_prototype_bank,
+    query_task_prototype_bank,
+    save_task_prototype_bank,
+    slice_batch_by_datasets,
     split_batch_by_dataset,
 )
 
@@ -89,3 +94,41 @@ def test_task_context_normalization_preserves_binary_features() -> None:
     normalized = apply_task_context_normalization(batch, norm)
     is_anchor_idx = batch.feature_names.index("is_anchor")
     assert torch.equal(batch.sequences[..., is_anchor_idx], normalized.sequences[..., is_anchor_idx])
+
+
+def test_slice_batch_by_datasets() -> None:
+    batch = build_task_context_batch(_task_context_frame())
+    sliced = slice_batch_by_datasets(batch, ["b"])
+    assert sliced.dataset_names == ("b",)
+    assert sliced.example_datasets == ("b", "b")
+
+
+def test_task_prototype_bank_save_load_and_query(tmp_path) -> None:
+    batch = build_task_context_batch(_task_context_frame())
+    embeddings = torch.tensor(
+        [
+            [1.0, 0.0],
+            [0.9, 0.1],
+            [0.0, 1.0],
+            [0.1, 0.9],
+        ],
+        dtype=torch.float32,
+    )
+    bank = build_task_prototype_bank(
+        embeddings=embeddings,
+        batch=batch,
+        encoder_kind="transformer",
+        hidden_dim=2,
+        normalize_features=False,
+        normalization=None,
+    )
+    path = tmp_path / "bank.json"
+    save_task_prototype_bank(bank, path)
+    loaded = load_task_prototype_bank(path)
+    assert loaded.dataset_names == ("a", "b")
+    assert loaded.encoder_kind == "transformer"
+    result = query_task_prototype_bank(loaded, embeddings[:2], query_dataset="a", top_k=2)
+    assert result["known_dataset"] is True
+    assert result["exact_reuse_available"] is True
+    assert result["top_neighbors"][0]["dataset"] == "a"
+    assert result["similar_neighbors_excluding_exact"][0]["dataset"] == "b"

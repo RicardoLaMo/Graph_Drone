@@ -17,12 +17,16 @@ sys.path.insert(0, str(ROOT / "src"))
 from graphdrone_fit.task_conditioned_prior import (
     TaskContextDatasetClassifier,
     TaskContextGRUEncoder,
-    TaskContextNormalization,
     TaskContextSequenceAutoencoder,
     TaskContextTransformerEncoder,
     apply_task_context_normalization,
+    build_task_prototype_bank,
     build_task_context_batch,
     fit_task_context_normalization,
+    load_task_prototype_bank,
+    query_task_prototype_bank,
+    save_task_prototype_bank,
+    slice_batch_by_datasets,
     split_batch_by_dataset,
 )
 
@@ -127,17 +131,6 @@ def _run_leave_one_dataset_out_reconstruction(encoder_kind: str, batch, epochs: 
     }
 
 
-def _normalized_centroids(embeddings: torch.Tensor, dataset_names: tuple[str, ...], example_datasets: tuple[str, ...]) -> dict[str, torch.Tensor]:
-    centroids: dict[str, torch.Tensor] = {}
-    for dataset in dataset_names:
-        idx = [i for i, name in enumerate(example_datasets) if name == dataset]
-        if not idx:
-            continue
-        centroid = embeddings[idx].mean(dim=0)
-        centroids[dataset] = F.normalize(centroid.unsqueeze(0), dim=-1).squeeze(0)
-    return centroids
-
-
 def _entropy_from_counts(counts: dict[str, int]) -> float:
     total = sum(counts.values())
     if total <= 0:
@@ -202,7 +195,14 @@ def _run_leave_one_dataset_out_similarity(
             _, test_embedding = model(test_sequences)
             train_embedding = F.normalize(train_embedding, dim=-1)
             test_embedding = F.normalize(test_embedding, dim=-1)
-            centroids = _normalized_centroids(train_embedding, train_batch.dataset_names, train_batch.example_datasets)
+            centroids = build_task_prototype_bank(
+                embeddings=train_embedding,
+                batch=train_batch,
+                encoder_kind=encoder_kind,
+                hidden_dim=64,
+                normalize_features=normalize_features,
+                normalization=normalization if normalize_features else None,
+            ).centroids
             seen_datasets = sorted(centroids.keys())
             centroid_matrix = torch.stack([centroids[name] for name in seen_datasets], dim=0)
             sims = test_embedding @ centroid_matrix.T
@@ -235,16 +235,159 @@ def _run_leave_one_dataset_out_similarity(
     }
 
 
+def _fit_similarity_encoder(
+    encoder_kind: str,
+    batch,
+    epochs: int,
+    lr: float,
+    weight_decay: float,
+    device: str,
+):
+    encoder = _build_encoder(encoder_kind, input_dim=batch.sequences.shape[-1], hidden_dim=64)
+    model = TaskContextSequenceAutoencoder(
+        encoder=encoder,
+        hidden_dim=64,
+        seq_len=batch.sequences.shape[1],
+        input_dim=batch.sequences.shape[2],
+    ).to(device)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+    sequences = batch.sequences.to(device)
+    history = []
+    for epoch in range(epochs):
+        model.train()
+        optimizer.zero_grad()
+        recon, embedding = model(sequences)
+        loss = F.mse_loss(recon, sequences)
+        loss.backward()
+        optimizer.step()
+        history.append(
+            {
+                "epoch": epoch + 1,
+                "loss": float(loss.item()),
+                "mean_embedding_norm": float(embedding.norm(dim=-1).mean().item()),
+            }
+        )
+    return model, history
+
+
+def _run_fit_prototype_bank(
+    encoder_kind: str,
+    batch,
+    epochs: int,
+    lr: float,
+    weight_decay: float,
+    device: str,
+    normalize_features: bool,
+    output_dir: Path,
+) -> dict:
+    normalization = None
+    working_batch = batch
+    if normalize_features:
+        normalization = fit_task_context_normalization(batch)
+        working_batch = apply_task_context_normalization(batch, normalization)
+    model, history = _fit_similarity_encoder(
+        encoder_kind=encoder_kind,
+        batch=working_batch,
+        epochs=epochs,
+        lr=lr,
+        weight_decay=weight_decay,
+        device=device,
+    )
+    with torch.no_grad():
+        model.eval()
+        _, embedding = model(working_batch.sequences.to(device))
+        embedding = F.normalize(embedding, dim=-1).cpu()
+    bank = build_task_prototype_bank(
+        embeddings=embedding,
+        batch=working_batch,
+        encoder_kind=encoder_kind,
+        hidden_dim=64,
+        normalize_features=normalize_features,
+        normalization=normalization,
+    )
+    bank_path = output_dir / f"{encoder_kind}_prototype_bank.json"
+    checkpoint_path = output_dir / f"{encoder_kind}_encoder_state.pt"
+    save_task_prototype_bank(bank, bank_path)
+    torch.save(
+        {
+            "encoder_kind": encoder_kind,
+            "hidden_dim": 64,
+            "state_dict": model.encoder.state_dict(),
+        },
+        checkpoint_path,
+    )
+    return {
+        "encoder_kind": encoder_kind,
+        "normalize_features": normalize_features,
+        "prototype_bank_path": str(bank_path),
+        "encoder_checkpoint_path": str(checkpoint_path),
+        "n_datasets": len(bank.dataset_names),
+        "dataset_names": list(bank.dataset_names),
+        "counts": bank.counts,
+        "history_tail": history[-5:],
+    }
+
+
+def _run_query_prototype_bank(
+    encoder_kind: str,
+    batch,
+    device: str,
+    bank_dir: Path,
+    query_datasets: list[str] | None,
+) -> dict:
+    bank_path = bank_dir / f"{encoder_kind}_prototype_bank.json"
+    checkpoint_path = bank_dir / f"{encoder_kind}_encoder_state.pt"
+    bank = load_task_prototype_bank(bank_path)
+    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    encoder = _build_encoder(
+        encoder_kind=checkpoint["encoder_kind"],
+        input_dim=batch.sequences.shape[-1],
+        hidden_dim=int(checkpoint["hidden_dim"]),
+    ).to(device)
+    encoder.load_state_dict(checkpoint["state_dict"])
+    encoder.eval()
+
+    working_batch = batch
+    if query_datasets:
+        working_batch = slice_batch_by_datasets(working_batch, query_datasets)
+    if bank.normalize_features and bank.normalization is not None:
+        working_batch = apply_task_context_normalization(working_batch, bank.normalization)
+
+    results = []
+    for dataset in working_batch.dataset_names:
+        dataset_batch = slice_batch_by_datasets(working_batch, [dataset])
+        with torch.no_grad():
+            embedding = encoder(dataset_batch.sequences.to(device))
+            embedding = F.normalize(embedding, dim=-1).cpu()
+        result = query_task_prototype_bank(bank, embedding, query_dataset=dataset, top_k=min(3, len(bank.dataset_names)))
+        results.append(result)
+
+    return {
+        "encoder_kind": encoder_kind,
+        "prototype_bank_path": str(bank_path),
+        "query_datasets": list(working_batch.dataset_names),
+        "results": results,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Prototype a task-conditioned LMA prior from task-context bootstrap summaries.")
     parser.add_argument("--analysis-dir", type=Path, required=True, help="Directory containing task_context_examples.csv")
     parser.add_argument("--encoder", choices=["transformer", "gru", "both"], default="both")
     parser.add_argument(
         "--mode",
-        choices=["dataset_id", "leave_one_dataset_out_reconstruction", "leave_one_dataset_out_similarity"],
+        choices=[
+            "dataset_id",
+            "leave_one_dataset_out_reconstruction",
+            "leave_one_dataset_out_similarity",
+            "fit_prototype_bank",
+            "query_prototype_bank",
+        ],
         default="dataset_id",
     )
     parser.add_argument("--normalize-features", action="store_true")
+    parser.add_argument("--bank-dir", type=Path, help="Directory containing saved prototype bank artifacts for query mode.")
+    parser.add_argument("--query-datasets", nargs="+", help="Optional dataset names to query from the provided analysis dir.")
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
@@ -286,7 +429,7 @@ def main() -> None:
                 device=device,
             )
             summary["results"].append(result)
-        else:
+        elif args.mode == "leave_one_dataset_out_similarity":
             result = _run_leave_one_dataset_out_similarity(
                 encoder_kind,
                 batch=batch,
@@ -295,6 +438,29 @@ def main() -> None:
                 weight_decay=args.weight_decay,
                 device=device,
                 normalize_features=args.normalize_features,
+            )
+            summary["results"].append(result)
+        elif args.mode == "fit_prototype_bank":
+            result = _run_fit_prototype_bank(
+                encoder_kind,
+                batch=batch,
+                epochs=args.epochs,
+                lr=args.lr,
+                weight_decay=args.weight_decay,
+                device=device,
+                normalize_features=args.normalize_features,
+                output_dir=args.output_dir,
+            )
+            summary["results"].append(result)
+        else:
+            if args.bank_dir is None:
+                raise ValueError("--bank-dir is required for query_prototype_bank mode")
+            result = _run_query_prototype_bank(
+                encoder_kind,
+                batch=batch,
+                device=device,
+                bank_dir=args.bank_dir,
+                query_datasets=args.query_datasets,
             )
             summary["results"].append(result)
 

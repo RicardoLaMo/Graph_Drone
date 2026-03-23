@@ -415,6 +415,103 @@ Current read on encoder choice:
 
 This is the first point where the task-conditioned LMA direction starts to look structurally useful rather than merely learnable.
 
+## Persistent prototype bank and reuse
+
+To avoid relearning the same dataset from scratch, this branch now has a persistent task-prototype bank layer:
+- save normalized task prototypes
+- save encoder state
+- query for either:
+  - exact dataset reuse when the same dataset is seen again
+  - nearest learned task neighborhoods when the dataset is new
+
+New support lives in:
+- `src/graphdrone_fit/task_conditioned_prior.py`
+- `scripts/prototype_task_conditioned_lma.py`
+
+Exact-reuse fit on the 6-dataset normalized classification bank:
+
+```bash
+PYTHONPATH=src python scripts/prototype_task_conditioned_lma.py \
+  --analysis-dir eval/afc_cross_dataset_lma_classification_bootstrap_v2 \
+  --mode fit_prototype_bank \
+  --encoder both \
+  --normalize-features \
+  --epochs 100 \
+  --output-dir eval/afc_task_prototype_bank_cls_v1
+```
+
+Artifacts:
+- `eval/afc_task_prototype_bank_cls_v1/transformer_prototype_bank.json`
+- `eval/afc_task_prototype_bank_cls_v1/transformer_encoder_state.pt`
+- `eval/afc_task_prototype_bank_cls_v1/gru_prototype_bank.json`
+- `eval/afc_task_prototype_bank_cls_v1/gru_encoder_state.pt`
+
+Querying known datasets back against that bank:
+
+```bash
+PYTHONPATH=src python scripts/prototype_task_conditioned_lma.py \
+  --analysis-dir eval/afc_cross_dataset_lma_classification_bootstrap_v2 \
+  --mode query_prototype_bank \
+  --encoder both \
+  --bank-dir eval/afc_task_prototype_bank_cls_v1 \
+  --query-datasets credit_g diabetes optdigits pendigits \
+  --output-dir eval/afc_task_prototype_bank_query_cls_v1
+```
+
+Read:
+- all queried datasets returned `exact_reuse_available=true`
+- transformer exact match similarities were high:
+  - `credit_g`: `0.9256`
+  - `diabetes`: `0.9954`
+  - `optdigits`: `0.9744`
+  - `pendigits`: `0.9839`
+- the next-similar neighborhoods remained visible after removing the self-match:
+  - `credit_g -> diabetes, segment`
+  - `diabetes -> credit_g, segment`
+  - `optdigits -> pendigits, mfeat_factors`
+  - `pendigits -> segment, optdigits`
+
+This is the first branch-local result that directly supports the requirement:
+- if we see the same dataset again, we should reuse prior task learning
+- if we see a new but related dataset, we should attach it to a learned neighborhood instead of starting from zero
+
+## Unseen-task neighborhood lookup
+
+To test the second half directly, a 5-dataset transformer bank was fit without `segment`, then `segment` was queried as unseen:
+
+```bash
+PYTHONPATH=src python scripts/prototype_task_conditioned_lma.py \
+  --analysis-dir eval/afc_cross_dataset_lma_classification_bootstrap_v2_minus_segment \
+  --mode fit_prototype_bank \
+  --encoder transformer \
+  --normalize-features \
+  --epochs 100 \
+  --output-dir eval/afc_task_prototype_bank_cls_minus_segment_v1
+
+PYTHONPATH=src python scripts/prototype_task_conditioned_lma.py \
+  --analysis-dir eval/afc_cross_dataset_lma_classification_bootstrap_v2 \
+  --mode query_prototype_bank \
+  --encoder transformer \
+  --bank-dir eval/afc_task_prototype_bank_cls_minus_segment_v1 \
+  --query-datasets segment \
+  --output-dir eval/afc_task_prototype_bank_query_segment_v1
+```
+
+Observed `segment` neighbors:
+- `pendigits`: probability `0.2735`, mean similarity `0.7553`
+- `diabetes`: probability `0.2459`, mean similarity `0.6491`
+- `credit_g`: probability `0.2136`, mean similarity `0.5071`
+
+Interpretation:
+- the bank now supports exact dataset memory and unseen-task retrieval in the same interface
+- the unseen-task retrieval is still approximate rather than semantically clean
+- but this is already closer to a reusable task-family system than the earlier collapsed one-prototype behavior
+
+Current recommendation:
+- keep building the classification-first prototype bank
+- add a contrastive or metric-learning objective next so neighborhoods sharpen without collapsing
+- use the persistent bank as the memory substrate for any later hyper-router or cross-dataset LMA prior
+
 ## Initial analysis questions
 
 1. Do anchor views from different datasets cluster more tightly than random view pairs?
