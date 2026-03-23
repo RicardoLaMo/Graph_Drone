@@ -117,6 +117,21 @@ class GraphDrone:
         for key, value in extra.items():
             self._router_fit_diagnostics[key] = value
 
+    @staticmethod
+    def _regression_fallback_defaults() -> dict[str, object]:
+        return {
+            "router_nonfinite_fallback": False,
+            "regression_router_fallback_stage": "none",
+            "regression_router_fallback_reason": "none",
+            "validation_router_tokens_finite_flag": float("nan"),
+            "validation_router_predictions_finite_flag": float("nan"),
+            "validation_router_targets_finite_flag": float("nan"),
+            "validation_anchor_mse_finite_flag": float("nan"),
+            "prediction_router_tokens_finite_flag": float("nan"),
+            "prediction_router_weights_finite_flag": float("nan"),
+            "prediction_router_defer_finite_flag": float("nan"),
+        }
+
     def fit(
         self,
         X: np.ndarray,
@@ -931,23 +946,24 @@ class GraphDrone:
         self._router.eval()
         with torch.no_grad():
             out_final = self._router(v_tokens_t, full_index=va_batch.full_index)
-            self._router_fit_diagnostics = self._regression_residual_usefulness_diagnostics(
+            usefulness_diagnostics = self._regression_residual_usefulness_diagnostics(
                 expert_predictions=v_preds_t,
                 y_true=y_va_t,
                 specialist_weights=out_final.specialist_weights,
                 defer_prob=out_final.defer_prob,
                 full_index=va_batch.full_index,
             )
-        if self._router_fit_diagnostics:
+        if usefulness_diagnostics:
+            self._router_fit_diagnostics.update(usefulness_diagnostics)
             self._router_fit_diagnostics["validation_residual_usefulness_lambda"] = float(
                 self.config.router.residual_usefulness_lambda
             )
             print(
                 "  -> Regression router usefulness: "
-                f"weighted_adv={self._router_fit_diagnostics['validation_weighted_specialist_advantage_score']:.4f} "
-                f"best_adv={self._router_fit_diagnostics['validation_best_specialist_advantage_score']:.4f} "
-                f"gap={self._router_fit_diagnostics['validation_residual_usefulness_gap']:.4f} "
-                f"positive_mass={self._router_fit_diagnostics['validation_positive_specialist_mass']:.4f}"
+                f"weighted_adv={usefulness_diagnostics['validation_weighted_specialist_advantage_score']:.4f} "
+                f"best_adv={usefulness_diagnostics['validation_best_specialist_advantage_score']:.4f} "
+                f"gap={usefulness_diagnostics['validation_residual_usefulness_gap']:.4f} "
+                f"positive_mass={usefulness_diagnostics['validation_positive_specialist_mass']:.4f}"
             )
 
     def _compute_gora_obs(self, X: np.ndarray, descriptors: tuple[ViewDescriptor, ...]) -> torch.Tensor:
@@ -1094,6 +1110,7 @@ class GraphDrone:
                 "mean_defer_prob": 0.0,
                 "full_index": int(batch.full_index),
             }
+            diagnostics.update(self._regression_fallback_defaults())
             diagnostics.update(self._portfolio_diagnostics(batch))
             diagnostics.update(self._legitimacy_diagnostics(decision, router_skipped=True))
             return anchor_preds, diagnostics
@@ -1118,6 +1135,9 @@ class GraphDrone:
                     "regression_router_fallback_reason", "unknown"
                 ),
             }
+            base_defaults = self._regression_fallback_defaults()
+            base_defaults.update(diagnostics)
+            diagnostics = base_defaults
             diagnostics.update(self._portfolio_diagnostics(active_batch))
             diagnostics.update(self._router_fit_diagnostics)
             diagnostics.update(self._legitimacy_diagnostics(decision, router_skipped=False))
@@ -1148,6 +1168,9 @@ class GraphDrone:
                     "prediction_router_weights_finite_flag": bool(torch.isfinite(router_out.specialist_weights).all().item()),
                     "prediction_router_defer_finite_flag": bool(torch.isfinite(router_out.defer_prob).all().item()),
                 }
+                base_defaults = self._regression_fallback_defaults()
+                base_defaults.update(diagnostics)
+                diagnostics = base_defaults
                 diagnostics.update(self._portfolio_diagnostics(active_batch))
                 diagnostics.update(self._router_fit_diagnostics)
                 diagnostics.update(self._legitimacy_diagnostics(decision, router_skipped=False))
@@ -1156,7 +1179,8 @@ class GraphDrone:
 
         preds = anchor_preds.copy()
         preds[active_mask] = integration.predictions
-        diagnostics = dict(integration.diagnostics)
+        diagnostics = self._regression_fallback_defaults()
+        diagnostics.update(integration.diagnostics)
         diagnostics.update(self._router_fit_diagnostics)
         if router_out.ot_costs is not None:
             diagnostics["mean_ot_cost"] = float(router_out.ot_costs.mean().item())
