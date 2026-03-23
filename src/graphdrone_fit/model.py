@@ -104,6 +104,7 @@ class GraphDrone:
         self._router_fit_diagnostics: dict[str, float] = {}
         self._router_training_force_anchor_only: bool = False
         self._task_prior_diagnostics: dict[str, object] = {}
+        self.binary_threshold_: float = 0.5
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
     def fit(
@@ -612,10 +613,48 @@ class GraphDrone:
             )
             final_blend_nll = F.nll_loss(F.log_softmax(log_q_final, dim=-1), y_va_t).item()
             mean_defer = float(out_final.defer_prob.mean().item())
+        calibrate = bool(router_cfg.calibrate_threshold)
+        if calibrate:
+            blend_proba_np = torch.softmax(log_q_final, dim=-1).cpu().numpy()
+            self.binary_threshold_ = self._compute_oof_threshold(y_va, blend_proba_np[:, 1])
+        else:
+            self.binary_threshold_ = 0.5
         print(
             f"  -> Classification Router trained. "
             f"blend_nll={final_blend_nll:.4f}  anchor_nll={anchor_nll_val:.4f}  mean_defer={mean_defer:.3f}"
+            + (f"  threshold={self.binary_threshold_:.3f}" if calibrate else "")
         )
+
+    @staticmethod
+    def _compute_oof_threshold(
+        y_true: np.ndarray,
+        proba_pos: np.ndarray,
+        min_improvement: float = 0.01,
+        min_shift: float = 0.08,
+    ) -> float:
+        """Return the F1-maximizing threshold on OOF binary blend predictions.
+
+        Sweeps 99 candidate thresholds in (0.01, 0.99) and returns the one with
+        the best macro-F1, subject to two guards that prevent OOF overfitting:
+        - min_improvement: calibrated threshold must improve OOF F1 by at least
+          this amount over the default 0.5 (rejects weak signals).
+        - min_shift: |t - 0.5| must be >= this value (rejects near-0.5 thresholds
+          that are likely to be noise on small OOF splits).
+        Falls back to 0.5 if either guard fails.
+        """
+        from sklearn.metrics import f1_score as _f1
+        default_f1 = _f1(y_true, (proba_pos >= 0.5).astype(int), average="macro", zero_division=0)
+        best_t, best_f1 = 0.5, default_f1
+        for t in np.linspace(0.01, 0.99, 99):
+            preds = (proba_pos >= t).astype(int)
+            if preds.sum() == 0 or preds.sum() == len(preds):
+                continue
+            f1 = _f1(y_true, preds, average="macro", zero_division=0)
+            if f1 > best_f1:
+                best_f1, best_t = f1, float(t)
+        improvement_ok = (best_f1 - default_f1) >= min_improvement
+        shift_ok = abs(best_t - 0.5) >= min_shift
+        return best_t if (improvement_ok and shift_ok) else 0.5
 
     def _task_prior_confidence_scale(self) -> float:
         """Return a [0, 1] confidence weight based on task prior diagnostics."""

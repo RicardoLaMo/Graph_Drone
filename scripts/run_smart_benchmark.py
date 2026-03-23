@@ -87,8 +87,8 @@ QUICK_DATASETS = {
     "pendigits":     CLASSIFICATION_DATASETS["pendigits"],
 }
 
-GRAPHDRONE_VERSION = os.getenv("GRAPHDRONE_VERSION_OVERRIDE", "2026.03.23-clf-v1.3-phase2")
-GRAPHDRONE_PRESET = os.getenv("GRAPHDRONE_PRESET", "v1_3_phase1")
+GRAPHDRONE_VERSION = os.getenv("GRAPHDRONE_VERSION_OVERRIDE", "2026.03.23-clf-v1.3-phase3b")
+GRAPHDRONE_PRESET = os.getenv("GRAPHDRONE_PRESET", "v1_3_phase3b")
 
 
 def _graphdrone_config(*, n_classes: int = 1, default_router_kind: str) -> GraphDroneConfig:
@@ -343,7 +343,14 @@ def run_graphdrone(X_tr, y_tr, X_te, task_type: str, seed: int = 42, n_classes: 
         return preds, None, diagnostics
     else:
         proba = preds if preds.ndim == 2 else np.column_stack([1 - preds, preds])
-        return proba, np.argmax(proba, axis=1), diagnostics
+        # Apply OOF-calibrated threshold for binary classification when available.
+        binary_t = getattr(gd, "binary_threshold_", 0.5)
+        if proba.shape[1] == 2 and binary_t != 0.5:
+            labels = (proba[:, 1] >= binary_t).astype(int)
+            diagnostics["binary_threshold"] = float(binary_t)
+        else:
+            labels = np.argmax(proba, axis=1)
+        return proba, labels, diagnostics
 
 
 # ---------------------------------------------------------------------------

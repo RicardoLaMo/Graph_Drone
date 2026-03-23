@@ -64,6 +64,10 @@ class SetRouterConfig:
     task_prior_strength: float = 0.5
     task_prior_dataset_key: str | None = None
     task_prior_exact_reuse_blend: float = 0.5
+    # OOF threshold calibration: compute F1-maximizing threshold on OOF blend
+    # predictions after router training and apply it at inference (binary only).
+    # Set calibrate_threshold=False (default) to disable (preserves prior behavior).
+    calibrate_threshold: bool = False
 
     def validate(self) -> "SetRouterConfig":
         normalized_kind = ROUTER_KIND_ALIASES.get(self.kind, self.kind)
