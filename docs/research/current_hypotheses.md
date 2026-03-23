@@ -3,7 +3,7 @@
 This file is generated from `docs/research/findings.jsonl`.
 It is the current research surface for scaling decisions, not an append-only history.
 
-Updated: 2026-03-23T23:16:13.770359+00:00
+Updated: 2026-03-23T23:42:00.131843+00:00
 
 ## How To Read This
 
@@ -34,6 +34,7 @@ Updated: 2026-03-23T23:16:13.770359+00:00
 | `afc-framework-task-conditioned-lma-prior` | `afc_framework` | Probably yes. The within-task token-bank splits show classification has much tighter cross-dataset geometry than regression, while the mixed slice showed task type dominates family. That makes task type a real design axis for the next prior rather than a detail to ignore. | `exp/afc-cross-dataset-lma` | `2026-03-23-afc-cross-dataset-lma-kickoff.md` |
 | `afc-framework-task-prior-defer-regularization` | `afc_framework` | Yes, partially. Task-prior-aware defer regularization is the first live binary mechanism on this branch that both desaturates defer materially and clears the current champion/challenger guardrails on the credit_g+diabetes slice. Strong regularization overcorrects and hurts F1, while a milder setting preserves the binary guardrails. This supports the policy-saturation hypothesis without yet establishing broad classification generalization. | `exp/afc-cross-dataset-lma` | `2026-03-23-afc-cross-dataset-lma-kickoff.md` |
 | `afc-b-reg-anchor-asymmetry` | `afc_phase_b` | Yes. The asymmetry was real and partly causal, but fixing it was not sufficient to make Phase B promotable. | `exp/afc-b-reg-anchor-exclusion` | `2026-03-23-afc-phase-b-anchor-exclusion.md` |
+| `v13-reg-stability-surface` | `v13_regression` | Partially. The regression stability lane now has three artifact layers: preserved row-level finiteness and fallback diagnostics, dataset-level fallback summaries, and explicit route-state summaries. The quick california+cpu_act contract verified that clean routed behavior and legitimacy-gate early exit are now separated directly in the benchmark outputs. This does not solve regression routing yet, but it removes a major source of diagnostic ambiguity. Separately, the current codebase already has generic regression task-prior plumbing, so LMA/task-level learning is implementation-ready once the local routing surface is trustworthy enough to teach it. | `exp/v13-reg-stability` | `2026-03-23-v13-reg-stability.md` |
 
 ## Open
 
@@ -68,6 +69,10 @@ Updated: 2026-03-23T23:16:13.770359+00:00
 
 | Timestamp | Claim ID | Status | Summary |
 |---|---|---|---|
+| `2026-03-23T23:42:00.131472+00:00` | `v13-reg-stability-surface` | `partially_causal` | v1.3 regression stability now exposes route state directly and no longer conflates deliberate early exit with router fallback. Regression also already has generic task-prior hooks, so the real gate for LMA is architecture readiness, not missing plumbing. |
+| `2026-03-23T23:29:39.487751+00:00` | `v13-reg-stability-surface` | `partially_causal` | v1.3 regression stability now exposes fallback state at both the row and dataset level. The first quick contract confirmed that preserved router diagnostics and aggregated fallback summaries can separate true instability from non-fallback early-exit behavior. |
+| `2026-03-23T23:27:46.084088+00:00` | `v13-reg-stability-surface` | `partially_causal` | v1.3 regression stability now preserves its fallback and finiteness diagnostics end-to-end. The first quick validation cleared a real overwrite bug, so regression mechanism-state artifacts now survive later usefulness diagnostics instead of being erased. |
+| `2026-03-23T23:21:44.773037+00:00` | `v13-reg-stability-surface` | `partially_causal` | v1.3 regression stability now labels fallback stage and reason, plus finiteness state for training inputs and prediction-time router outputs. This converts opaque safe fallbacks into diagnosable states. |
 | `2026-03-23T23:16:13.770011+00:00` | `v13-reg-meta-prior-readiness` | `open` | Regression meta-priors are a later v1.3 lane, not the first move, and should be gated on local-routing evidence. |
 | `2026-03-23T23:16:13.738272+00:00` | `v13-reg-afc-allocation-translation` | `open` | v1.3 keeps AFC alive for regression, but only as an allocation-translation question rather than as a presumed feature win. |
 | `2026-03-23T23:16:13.705585+00:00` | `v13-reg-realized-specialist-value` | `open` | The primary v1.3 regression question is whether routing can be trained to realize specialist value instead of merely detecting that it exists. |
@@ -80,4 +85,3 @@ Updated: 2026-03-23T23:16:13.770359+00:00
 | `2026-03-23T18:38:39.263083+00:00` | `afc-framework-live-task-prior-activation-surface` | `partially_causal` | The first live classification prototype showed that the task-prior bank is ready but the current GraphDrone classification architecture does not reliably expose an activation surface for it. The limiting factor moved from prior quality to router-stage availability. |
 | `2026-03-23T18:28:00.917927+00:00` | `afc-framework-metadata-guided-task-neighborhoods` | `partially_causal` | The metadata-guided task bank derived neighborhood targets from dataset signatures rather than named-task rules. It kept segment nearest to pendigits on unseen-task lookup, unlike the contrastive-only bank, while remaining sharper than the reconstruction-only bank. |
 | `2026-03-23T18:21:55.430449+00:00` | `afc-framework-contrastive-task-bank-sharpening` | `partially_causal` | Adding supervised contrastive pressure on top of reconstruction tightened exact-match similarities to about 0.997-0.999 and reduced unseen-segment entropy, but did not yet produce a stable semantically clean task-family assignment. |
-

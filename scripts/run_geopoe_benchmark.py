@@ -613,6 +613,64 @@ def _regression_fallback_summary(df: pd.DataFrame) -> pd.DataFrame:
     return summary
 
 
+def _regression_route_state_summary(df: pd.DataFrame) -> pd.DataFrame:
+    required = {
+        "task_type",
+        "dataset",
+        "method",
+        "router_kind",
+        "router_nonfinite_fallback",
+        "regression_router_fallback_stage",
+        "regression_router_fallback_reason",
+        "early_exit",
+        "router_skipped",
+    }
+    if not required.issubset(df.columns):
+        return pd.DataFrame()
+    reg = df[df["task_type"] == "regression"].copy()
+    if reg.empty:
+        return pd.DataFrame()
+
+    def classify(row: pd.Series) -> str:
+        router_kind = str(row.get("router_kind", "") or "")
+        early_exit = bool(row.get("early_exit", False))
+        router_skipped = bool(row.get("router_skipped", False))
+        nonfinite = bool(row.get("router_nonfinite_fallback", False))
+        if router_kind == "legitimacy_gate_anchor_only" or (early_exit and router_skipped):
+            return "legitimacy_gate_early_exit"
+        if nonfinite or "nonfinite_fallback" in router_kind or router_kind == "router_training_nonfinite_anchor_only":
+            return "router_fallback"
+        return "clean_routed"
+
+    reg["route_state"] = reg.apply(classify, axis=1)
+    reg["regression_router_fallback_stage"] = (
+        reg["regression_router_fallback_stage"].fillna("none").astype(str)
+    )
+    reg["regression_router_fallback_reason"] = (
+        reg["regression_router_fallback_reason"].fillna("none").astype(str)
+    )
+    summary = (
+        reg.groupby(
+            [
+                "dataset",
+                "method",
+                "route_state",
+                "regression_router_fallback_stage",
+                "regression_router_fallback_reason",
+            ],
+            dropna=False,
+        )
+        .size()
+        .reset_index(name="count")
+        .sort_values(
+            ["dataset", "method", "count", "route_state", "regression_router_fallback_stage"],
+            ascending=[True, True, False, True, True],
+        )
+        .reset_index(drop=True)
+    )
+    return summary
+
+
 def build_report(all_rows: list[dict], output_dir: Path):
     output_dir.mkdir(parents=True, exist_ok=True)
     df = pd.DataFrame(all_rows)
@@ -627,6 +685,9 @@ def build_report(all_rows: list[dict], output_dir: Path):
     fallback_summary = _regression_fallback_summary(df)
     if not fallback_summary.empty:
         fallback_summary.to_csv(output_dir / "regression_fallback_summary.csv", index=False)
+    route_state_summary = _regression_route_state_summary(df)
+    if not route_state_summary.empty:
+        route_state_summary.to_csv(output_dir / "regression_route_state_summary.csv", index=False)
 
     lines = [
         "=" * 80,
@@ -662,6 +723,23 @@ def build_report(all_rows: list[dict], output_dir: Path):
                     [
                         "dataset",
                         "method",
+                        "regression_router_fallback_stage",
+                        "regression_router_fallback_reason",
+                        "count",
+                    ]
+                ].to_string(index=False)
+            )
+            lines.append("")
+
+        if not route_state_summary.empty:
+            lines.append("Regression Route State Summary")
+            lines.append("-" * 80)
+            lines.append(
+                route_state_summary[
+                    [
+                        "dataset",
+                        "method",
+                        "route_state",
                         "regression_router_fallback_stage",
                         "regression_router_fallback_reason",
                         "count",

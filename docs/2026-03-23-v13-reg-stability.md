@@ -104,6 +104,50 @@ So the lane now has the first dataset-level surface needed to distinguish:
 - routing instability
 - deliberate early exit
 - clean routed behavior
+
+## Third implemented change
+
+The regression report now adds an explicit route-state summary:
+- `eval/.../report/regression_route_state_summary.csv`
+
+This is stronger than fallback-only reporting because it classifies every regression row into:
+- `clean_routed`
+- `legitimacy_gate_early_exit`
+- `router_fallback`
+
+Quick validation on `california` + `cpu_act` confirmed the intended separation:
+- `california -> clean_routed`
+- `cpu_act -> legitimacy_gate_early_exit`
+
+That means the stability lane no longer has to infer route state indirectly from:
+- `router_kind`
+- `early_exit`
+- `router_nonfinite_fallback`
+
+The benchmark report now exposes the route-state layer directly.
+
+## Cross-lane architecture read
+
+Regression is not blocked from LMA or task-level learning by missing plumbing.
+
+Current code already has generic task-prior hooks on the regression surface:
+- the regression benchmark runner passes `task_prior_dataset_key`
+- the model builds a task context from regression router tokens
+- `_maybe_attach_task_prior_router()` is shared rather than classification-only
+
+So yes, regression can adopt the same broad family of ideas used in the binary line:
+- LMA / task-level learning
+- smarter task-conditioned routing priors
+- feedback-updated dataset memory
+
+But the current v1.3 sequencing still makes sense:
+- first stabilize and explain the local regression routing circuit
+- then improve realized specialist value
+- only then spend heavily on regression meta-priors or cross-dataset LMA
+
+The reason is architectural, not implementation readiness:
+- regression already has a place to plug in a task prior
+- what it still lacks is a clearly trustworthy local routing target to teach that prior
 ## First benchmark contract
 
 Use:
