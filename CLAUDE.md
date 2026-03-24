@@ -68,11 +68,16 @@ Both engines are in `main`. One `GraphDrone` class dispatches via `_detect_probl
 ### Classification engine — multiclass path (`n_classes > 2`)
 
 - **Portfolio**: feature-count-dependent (v1.20):
-  - ≤10 features → FULL only (SUBs at 80-90% have no diversity on 6-10 features)
-  - ≤14 features → FULL + 1×SUB @ 60% (meaningful feature dropout)
-  - >14 features → FULL + 3×SUB @ 0.8/0.85/0.9 (unchanged for high-dim)
-- **Router**: `bootstrap_full_only` → static `anchor_geo_poe_blend(anchor_weight=5.0)`
-- **No router training** — zero NLL overhead, valid probability output guaranteed
+  - ≤10 features → FULL only (1 expert → falls back to static GeoPOE)
+  - ≤14 features → FULL + 1×SUB @ 60% (2 experts → falls back to static GeoPOE; 2-expert routing regressed SDSS17)
+  - >14 features → FULL + 3×SUB @ 0.8/0.85/0.9 (4 experts → learned routing active)
+- **Router** (with `use_learned_router_for_classification=True`, preset `v1_3_mc_phase1+`):
+  - `noise_gate_router` — OOF NLL router, requires ≥3 experts and ≥150 OOF rows; else falls back to static GeoPOE
+  - Guard: `min_experts=3` for multiclass (binary exempt)
+  - Guard: OOF rows < 150 → static GeoPOE
+- **Router** (default / `use_learned_router_for_classification=False`):
+  - `bootstrap_full_only` → static `anchor_geo_poe_blend(anchor_weight=5.0)`
+- **Quality tokens** (MC-2+): `foundation_classifier_bagged` when learned router enabled
 
 ---
 
@@ -90,8 +95,8 @@ Overfits on the 10% OOF split. diabetes/credit_g have ~78–100 OOF rows; the ro
 **DO NOT omit the MSE residual penalty for regression.**
 Without `2.0 * relu(mse - anchor_mse)`, the router drives `defer→1.0` whenever SUB views get lucky on the 10% split. First run (v1-geopoe-2026.03.19b, no penalty): diamonds fold 0/2 had defer=1.0, R² collapsed from 0.98 to 0.94. Penalty added in v1-geopoe-2026.03.19c: diamonds R² restored, ELO 1482→1523.
 
-**DO NOT re-enable GORA for multiclass classification.**
-GORA tokens are computed via kNN in each expert's subspace. For multiclass with static GeoPOE (no router), the signal has no consumer. GORA is valid in the binary path where the learned router can use it.
+**DO NOT enable GORA for multiclass when using static GeoPOE.**
+GORA tokens are computed via kNN in each expert's subspace. With static GeoPOE (no learned router), the signal has no consumer. GORA is valid — and actively used — in both the binary path and the multiclass path when `use_learned_router_for_classification=True` (MC-1+). The restriction is: do not enable `use_learned_router_for_classification` without the ≥3-expert guard (MC-1 finding: 2-expert routing regresses on SDSS17).
 
 **DO NOT treat 1514.7 as a regression ELO target.**
 That number is in `eval/geopoe_benchmark/run_log.txt` from v1-geopoe-2026.03.18a. It was a combined ELO (6 regression + 6 classification datasets). The regression component used `bootstrap_full_only` (= vanilla TabPFN). GD appeared to win only because it used more estimators. The true regression baseline before 2026-03-19 was ~1440–1447.

@@ -171,7 +171,8 @@ class GraphDrone:
         rng = np.random.RandomState(42)
 
         if is_classification:
-            model_kind = "foundation_classifier_bagged" if is_binary else "foundation_classifier"
+            use_bagged = is_binary or self.config.use_learned_router_for_classification
+            model_kind = "foundation_classifier_bagged" if use_bagged else "foundation_classifier"
             skip_subs = is_binary and (len(matrix) < 500 and matrix.shape[1] < 25)
             full_spec = ExpertBuildSpec(
                 descriptor=ViewDescriptor(
