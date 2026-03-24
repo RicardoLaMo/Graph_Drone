@@ -12,7 +12,7 @@ Treat `skills/` as the source of truth and `.claude/skills/` as the Claude-facin
 
 ## Available Skills
 
-- `benchmark-evidence-governance`
+- `benchmark-evidence-governance` *(global)*
   path: `.claude/skills/benchmark-evidence-governance/SKILL.md`
   description: Use when benchmark work needs explicit contract control, fair comparison rules, cache/version boundaries, provenance expectations, and evidence grading rather than ad hoc metric interpretation.
 - `graphdrone-benchmark-governance`
@@ -27,12 +27,12 @@ Treat `skills/` as the source of truth and `.claude/skills/` as the Claude-facin
 - `graphdrone-research-ops`
   path: `.claude/skills/graphdrone-research-ops/SKILL.md`
   description: Use when running GraphDrone research as an operating system rather than a single benchmark: branch setup, benchmark contract control, claim-first evaluation, run provenance, long-form notes, and durable finding capture across `eval/`, `output/experiments/`, and `docs/research/`.
-- `mechanism-first-diagnosis`
+- `mechanism-first-diagnosis` *(global)*
   path: `.claude/skills/mechanism-first-diagnosis/SKILL.md`
   description: Use when a new method shows a local or component-level gain but the end-to-end result is flat or negative, and the real task is to explain the break between mechanism truth, integration, and final outcome.
-- `research-memory-ledger`
+- `research-memory-ledger` *(global)*
   path: `.claude/skills/research-memory-ledger/SKILL.md`
   description: Use when experiments need to accumulate into durable research knowledge instead of remaining isolated run outputs, with explicit separation between execution lineage, long-form notes, and claim memory.
-- `research-platform-ops`
+- `research-platform-ops` *(global)*
   path: `.claude/skills/research-platform-ops/SKILL.md`
   description: Use when a project needs a research operating system rather than isolated experiments: branch hygiene, contract framing, execution evidence, structured notes, and durable claim memory that compound over time.

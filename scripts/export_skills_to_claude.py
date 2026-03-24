@@ -32,11 +32,12 @@ def parse_frontmatter(skill_md: Path) -> dict[str, str]:
     content = skill_md.read_text(encoding="utf-8")
     match = FRONTMATTER_RE.match(content)
     if not match:
-        return {"name": skill_md.parent.name, "description": ""}
+        return {"name": skill_md.parent.name, "description": "", "scope": ""}
     data = yaml.safe_load(match.group(1)) or {}
     return {
         "name": str(data.get("name", skill_md.parent.name)),
         "description": str(data.get("description", "")).strip(),
+        "scope": str(data.get("scope", "")).strip(),
     }
 
 
@@ -59,7 +60,8 @@ def render_index(skill_paths: list[Path]) -> str:
     ]
     for skill_dir in skill_paths:
         meta = parse_frontmatter(skill_dir / "SKILL.md")
-        lines.append(f"- `{meta['name']}`")
+        tag = " *(global)*" if meta["scope"] == "global" else ""
+        lines.append(f"- `{meta['name']}`{tag}")
         lines.append(f"  path: `.claude/skills/{skill_dir.name}/SKILL.md`")
         if meta["description"]:
             lines.append(f"  description: {meta['description']}")
