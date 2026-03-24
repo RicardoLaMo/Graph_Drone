@@ -68,6 +68,11 @@ class SetRouterConfig:
     # predictions after router training and apply it at inference (binary only).
     # Set calibrate_threshold=False (default) to disable (preserves prior behavior).
     calibrate_threshold: bool = False
+    # Per-class OVR threshold calibration for multiclass (Phase MC-3).
+    # When True and use_learned_router_for_classification=True, computes per-class
+    # OVR F1-maximizing thresholds on OOF blend probabilities.  Applied at inference
+    # via class_thresholds_ attribute (benchmark script uses getattr).
+    calibrate_multiclass_thresholds: bool = False
 
     def validate(self) -> "SetRouterConfig":
         normalized_kind = ROUTER_KIND_ALIASES.get(self.kind, self.kind)

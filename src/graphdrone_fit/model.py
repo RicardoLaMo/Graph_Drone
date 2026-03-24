@@ -645,20 +645,24 @@ class GraphDrone:
             final_blend_nll = F.nll_loss(F.log_softmax(log_q_final, dim=-1), y_va_t).item()
             mean_defer = float(out_final.defer_prob.mean().item())
         calibrate = bool(router_cfg.calibrate_threshold)
+        calibrate_mc = bool(getattr(router_cfg, "calibrate_multiclass_thresholds", False))
+        blend_proba_np = torch.softmax(log_q_final, dim=-1).cpu().numpy()
         if is_binary:
             # Binary-only: OOF F1-maximizing threshold on P(class=1).
             if calibrate:
-                blend_proba_np = torch.softmax(log_q_final, dim=-1).cpu().numpy()
                 self.binary_threshold_ = self._compute_oof_threshold(y_va, blend_proba_np[:, 1])
             else:
                 self.binary_threshold_ = 0.5
         else:
-            # Multiclass: binary_threshold_ stays at default (argmax is used at predict time).
+            # Multiclass: binary_threshold_ stays at 0.5; optionally calibrate per-class OVR thresholds.
             self.binary_threshold_ = 0.5
+            if calibrate_mc:
+                self.class_thresholds_ = self._compute_oof_multiclass_thresholds(y_va, blend_proba_np)
         print(
             f"  -> Classification Router trained. "
             f"blend_nll={final_blend_nll:.4f}  anchor_nll={anchor_nll_val:.4f}  mean_defer={mean_defer:.3f}"
             + (f"  threshold={self.binary_threshold_:.3f}" if (calibrate and is_binary) else "")
+            + (f"  mc_thresholds={[f'{t:.2f}' for t in self.class_thresholds_]}" if (calibrate_mc and not is_binary and self.class_thresholds_ is not None) else "")
         )
 
     @staticmethod
@@ -691,6 +695,33 @@ class GraphDrone:
         improvement_ok = (best_f1 - default_f1) >= min_improvement
         shift_ok = abs(best_t - 0.5) >= min_shift
         return best_t if (improvement_ok and shift_ok) else 0.5
+
+    @staticmethod
+    def _compute_oof_multiclass_thresholds(
+        y_true: np.ndarray,
+        proba: np.ndarray,
+        min_improvement: float = 0.01,
+        min_shift: float = 0.08,
+        min_pos_samples: int = 30,
+    ) -> np.ndarray:
+        """Return per-class OVR F1-maximizing thresholds on OOF multiclass probabilities.
+
+        For each class c, computes a binary OVR problem (y==c vs rest) and calls
+        _compute_oof_threshold(). Classes with fewer than min_pos_samples positive
+        OOF samples fall back to 0.5 (too few samples to calibrate reliably).
+        Returns an array of shape [n_classes] with per-class thresholds (default 0.5).
+        """
+        n_classes = proba.shape[1]
+        thresholds = np.full(n_classes, 0.5)
+        for c in range(n_classes):
+            y_ovr = (y_true == c).astype(int)
+            if y_ovr.sum() < min_pos_samples:
+                continue  # too few positive OOF samples — keep 0.5
+            t = GraphDrone._compute_oof_threshold(
+                y_ovr, proba[:, c], min_improvement=min_improvement, min_shift=min_shift
+            )
+            thresholds[c] = t
+        return thresholds
 
     def _task_prior_confidence_scale(self) -> float:
         """Return a [0, 1] confidence weight based on task prior diagnostics."""

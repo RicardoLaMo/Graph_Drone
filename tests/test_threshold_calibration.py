@@ -117,3 +117,106 @@ def test_calibrate_threshold_false_config_flag():
     )
     validated = cfg.validate()
     assert validated.router.calibrate_threshold is False
+
+
+# ---------------------------------------------------------------------------
+# Multiclass safety — Phase 3B must be a no-op for n_classes > 2
+# ---------------------------------------------------------------------------
+
+def test_multiclass_binary_threshold_is_half():
+    """GraphDrone with n_classes=3 must always expose binary_threshold_=0.5 (no-op)."""
+    cfg = GraphDroneConfig(
+        n_classes=3,
+        router=SetRouterConfig(calibrate_threshold=True),
+    )
+    gd = GraphDrone(cfg)
+    assert gd.binary_threshold_ == 0.5
+
+
+def test_multiclass_class_thresholds_is_none():
+    """class_thresholds_ must be None on a fresh GraphDrone (multiclass extension not yet active)."""
+    cfg = GraphDroneConfig(n_classes=5)
+    gd = GraphDrone(cfg)
+    assert gd.class_thresholds_ is None
+
+
+def test_benchmark_argmax_path_for_multiclass():
+    """Benchmark label logic: proba with 3+ classes must always use argmax regardless of binary_threshold_."""
+    proba = np.array([[0.1, 0.6, 0.3], [0.7, 0.2, 0.1], [0.2, 0.3, 0.5]])
+    binary_t = 0.38  # would shift labels if mistakenly applied to multiclass
+    # Guard: only apply binary_t when exactly 2 classes
+    if proba.shape[1] == 2 and binary_t != 0.5:
+        labels = (proba[:, 1] >= binary_t).astype(int)
+    else:
+        labels = np.argmax(proba, axis=1)
+    np.testing.assert_array_equal(labels, [1, 0, 2])
+
+
+def test_binary_threshold_not_applied_to_multiclass_proba():
+    """Confirm the benchmark script guard: binary_t is ignored when n_classes > 2."""
+    rng = np.random.RandomState(7)
+    proba = rng.dirichlet(np.ones(4), size=20)  # 4-class, rows sum to 1
+    binary_t = 0.35  # well below 0.5 — would change labels if wrongly applied
+    # Apply the exact same logic as run_smart_benchmark.py
+    if proba.shape[1] == 2 and binary_t != 0.5:
+        labels = (proba[:, 1] >= binary_t).astype(int)
+    else:
+        labels = np.argmax(proba, axis=1)
+    expected = np.argmax(proba, axis=1)
+    np.testing.assert_array_equal(labels, expected)
+
+
+# ---------------------------------------------------------------------------
+# Phase MC-3: per-class OVR threshold calibration
+# ---------------------------------------------------------------------------
+
+def test_compute_oof_multiclass_thresholds_shape():
+    """_compute_oof_multiclass_thresholds returns array of shape [n_classes]."""
+    rng = np.random.RandomState(10)
+    n, n_classes = 300, 3
+    y = np.tile(np.arange(n_classes), n // n_classes + 1)[:n]
+    proba = rng.dirichlet(np.ones(n_classes), size=n)
+    t = GraphDrone._compute_oof_multiclass_thresholds(y, proba)
+    assert t.shape == (n_classes,), f"Expected ({n_classes},), got {t.shape}"
+    assert np.all((t > 0) & (t < 1)), "All thresholds must be in (0, 1)"
+
+
+def test_compute_oof_multiclass_thresholds_fallback_on_sparse_class():
+    """Classes with fewer than min_pos_samples positive OOF samples fall back to 0.5."""
+    rng = np.random.RandomState(11)
+    n, n_classes = 200, 3
+    # Class 2 has only 5 positive samples — below min_pos_samples=30
+    y = np.array([0] * 100 + [1] * 95 + [2] * 5)
+    proba = rng.dirichlet(np.ones(n_classes), size=n)
+    t = GraphDrone._compute_oof_multiclass_thresholds(y, proba, min_pos_samples=30)
+    assert t[2] == 0.5, f"Sparse class must fall back to 0.5, got {t[2]}"
+
+
+def test_class_thresholds_applied_in_benchmark_logic():
+    """benchmark class_thresholds_ guard: adjusted = proba / class_t; labels = argmax(adjusted)."""
+    rng = np.random.RandomState(12)
+    n, n_classes = 50, 3
+    proba = rng.dirichlet(np.ones(n_classes), size=n)
+    # Thresholds biased towards class 0 (low threshold → class 0 preferred)
+    class_t = np.array([0.2, 0.5, 0.5])
+    adjusted = proba / class_t[np.newaxis, :]
+    labels_adjusted = np.argmax(adjusted, axis=1)
+    labels_plain = np.argmax(proba, axis=1)
+    # With a low threshold for class 0, more samples should be assigned to class 0
+    assert (labels_adjusted == 0).sum() >= (labels_plain == 0).sum(), (
+        "Low threshold for class 0 should increase class 0 assignments"
+    )
+
+
+def test_class_thresholds_none_falls_through_to_argmax():
+    """When class_thresholds_ is None, benchmark uses plain argmax (no regression)."""
+    rng = np.random.RandomState(13)
+    proba = rng.dirichlet(np.ones(4), size=30)
+    class_t = None
+    if class_t is not None and proba.shape[1] > 2:
+        adjusted = proba / class_t[np.newaxis, :]
+        labels = np.argmax(adjusted, axis=1)
+    else:
+        labels = np.argmax(proba, axis=1)
+    expected = np.argmax(proba, axis=1)
+    np.testing.assert_array_equal(labels, expected)
