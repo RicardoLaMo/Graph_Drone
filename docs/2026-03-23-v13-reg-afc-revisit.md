@@ -83,6 +83,45 @@ So the first AFC revisit result is:
 That means rotor is still not a clean routing-usefulness win for regression.
 It may be helping via a small change in overall routing behavior, but it is not yet making specialist use more clearly beneficial on average.
 
+## Second quick result: rotor plus allocation objective
+
+Contract:
+- `eval/v13_reg_afc_rotor_allocation_quick_v3/comparison/promotion_decision.json`
+- `eval/v13_reg_afc_rotor_allocation_quick_v3/comparison/paired_mechanism_summary.csv`
+- `eval/v13_reg_afc_rotor_allocation_quick_v3/comparison/promotion_report.md`
+
+Setup:
+- same clean-routed regression slice: `cpu_act`, `elevators`, `kin8nm`
+- regression legitimacy gate disabled
+- challenger router: `contextual_transformer_rotor`
+- `alignment_lambda=0.1`
+- `allocation_usefulness_lambda=0.2`
+
+What cleared:
+- all 9 task-folds again stayed `clean_routed`
+- the combined objective improved weighted specialist advantage on all 3 datasets relative to the champion
+- compared with rotor-only, the mechanism surface improved materially:
+  - `cpu_act`: weighted specialist advantage delta improved from about `+0.0060` to `+0.0535`
+  - `elevators`: improved from about `-0.0283` to `+0.0071`
+  - `kin8nm`: improved from about `-0.0282` to `+0.0133`
+- positive specialist mass also improved on all 3 datasets relative to rotor-only
+
+What did not clear:
+- promotion decision still stayed `hold`
+- mean RMSE relative improvement became slightly negative: about `-0.000349`
+- latency worsened sharply on `cpu_act` and `elevators`
+
+Most important interpretation:
+- this is the first AFC revisit result that clearly improves the allocation/usefulness surface across the whole clean-routed slice
+- so the old story, "rotor helps geometry but not allocation," is now too narrow
+- the new story is:
+  - rotor plus a direct allocation objective can improve allocation diagnostics
+  - but that mechanism movement still does not translate into better held-out RMSE
+  - and it currently buys those mechanism gains at a substantial latency cost
+
+So the remaining blocker is no longer pure translation from geometry into allocation.
+It is translation from improved allocation diagnostics into actual prediction quality and efficient routing behavior.
+
 ## Acceptance
 
 This lane succeeds only if AFC-style geometry improvements also improve regression routing usefulness.
