@@ -6,6 +6,7 @@ from graphdrone_fit.config import GraphDroneConfig, LegitimacyGateConfig, SetRou
 from graphdrone_fit.expert_factory import ExpertPredictionBatch
 from graphdrone_fit.model import GraphDrone
 from graphdrone_fit.set_router import RouterOutputs
+from graphdrone_fit.set_router import ContextualTransformerRouter, TaskConditionedRouter
 from graphdrone_fit.view_descriptor import ViewDescriptor
 
 
@@ -265,6 +266,36 @@ def test_regression_prediction_falls_back_to_anchor_when_training_nonfinite():
     assert diagnostics["validation_router_training_nonfinite_flag"] == 1.0
     assert diagnostics["regression_router_fallback_stage"] == "train_loss"
     assert diagnostics["regression_router_fallback_reason"] == "nonfinite_loss"
+
+
+def test_task_conditioned_router_routing_bias_mode_emits_bias_diagnostics() -> None:
+    base_router = ContextualTransformerRouter(token_dim=4)
+    router = TaskConditionedRouter(
+        token_dim=4,
+        prior_dim=3,
+        base_router=base_router,
+        strength=0.5,
+        mode="routing_bias",
+        router_kind="contextual_transformer_router_task_prior",
+    )
+    router.set_task_prior_context(torch.tensor([1.0, 0.5, -0.25], dtype=torch.float32))
+    tokens = torch.tensor(
+        [
+            [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+            ]
+        ],
+        dtype=torch.float32,
+    )
+    outputs = router(tokens, full_index=0)
+    diagnostics = outputs.extra_diagnostics or {}
+    assert diagnostics["task_prior_enabled"] == 1.0
+    assert diagnostics["task_prior_mode"] == "routing_bias"
+    assert "task_prior_routing_bias_mean" in diagnostics
+    assert "task_prior_routing_bias_std" in diagnostics
+    assert "task_prior_defer_bias_mean" in diagnostics
 
 
 def test_regression_legitimacy_early_exit_preserves_router_fit_diagnostics():

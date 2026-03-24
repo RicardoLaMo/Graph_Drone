@@ -379,3 +379,60 @@ So the current read becomes:
 - bank membership: no longer the main blocker
 - simple coupling sweeps: falsified as the main fix
 - next design question: how should the regression task prior shape routing behavior, rather than how much of the current prior vector should be injected
+
+## Eighth result: routing-bias task-prior architecture
+
+Contracts:
+- first routing-bias probe:
+  - `eval/v13_reg_task_prior_hardregimes_routingbias_v1/comparison/promotion_decision.json`
+  - `eval/v13_reg_task_prior_hardregimes_routingbias_v1/comparison/paired_task_deltas.csv`
+- stronger routing-bias probe:
+  - `eval/v13_reg_task_prior_hardregimes_routingbias_strength1_v1/comparison/promotion_decision.json`
+  - `eval/v13_reg_task_prior_hardregimes_routingbias_strength1_v1/comparison/paired_task_deltas.csv`
+
+Architecture change:
+- the old task prior only shifted the anchor token
+- the new `routing_bias` mode uses the task prior to bias expert attention logits and defer directly
+- this changes the routing shape rather than just injecting more of the same prior vector into the anchor representation
+
+Setup:
+- same stabilized hard-regime slice: `california`, `diamonds`, `house_prices`
+- same refreshed six-dataset regression bank
+- same exact-reuse blend baseline of `0.6`
+
+Probe A:
+- `task_prior_mode=routing_bias`
+- `task_prior_strength=0.5`
+
+Probe B:
+- `task_prior_mode=routing_bias`
+- `task_prior_strength=1.0`
+
+What cleared:
+- `routing_bias` at `0.5` materially improved on the old additive task-prior path
+- compared with the stabilized additive baseline (`quick_v2`, mean RMSE relative improvement `-0.000535`), the first routing-bias probe reached near-flat:
+  - mean RMSE relative improvement: `+0.000001`
+  - mean R² delta: `-0.000071`
+  - worst dataset RMSE guardrail stayed clean at `-0.000178`
+- the route stayed fully `clean_routed` on all 9 task-folds
+- the most visible local gain was `california fold=1`, which improved by `+0.007176` RMSE relative improvement while reducing defer sharply versus the additive route
+
+What did not clear:
+- the first routing-bias probe still stayed `hold`
+- stronger routing-bias coupling at `1.0` made the contract worse again:
+  - mean RMSE relative improvement: `-0.001277`
+  - mean R² delta: `-0.000353`
+
+Most important interpretation:
+- this is the first regression task-prior architecture result that beats the old additive coupling design clearly enough to matter
+- the remaining problem is no longer "the task prior cannot shape routing"
+- it can
+- but the operating range is narrow:
+  - additive injection was too weak or wrongly shaped
+  - routing bias at moderate strength is much better
+  - routing bias at higher strength degrades again
+
+So the next state of the lane is:
+- task-prior architecture matters
+- expert/defer biasing is a better direction than anchor-only prior shift
+- the new question is how to make the routing-bias path selective and stable enough to turn this near-flat result into a real regression win

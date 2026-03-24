@@ -59,6 +59,7 @@ class SetRouterConfig:
     ot_threshold: float = 0.25
     task_prior_bank_dir: str | None = None
     task_prior_encoder_kind: Literal["transformer", "gru"] = "transformer"
+    task_prior_mode: Literal["anchor_shift", "routing_bias"] = "anchor_shift"
     task_prior_strength: float = 0.5
     task_prior_dataset_key: str | None = None
     task_prior_exact_reuse_blend: float = 0.5
@@ -109,6 +110,10 @@ class SetRouterConfig:
             raise ValueError(f"ot_max_iter must be positive, got {self.ot_max_iter}")
         if self.task_prior_strength < 0:
             raise ValueError(f"task_prior_strength must be non-negative, got {self.task_prior_strength}")
+        if self.task_prior_mode not in {"anchor_shift", "routing_bias"}:
+            raise ValueError(
+                f"task_prior_mode must be one of ['anchor_shift', 'routing_bias'], got {self.task_prior_mode!r}"
+            )
         if not 0.0 <= self.task_prior_exact_reuse_blend <= 1.0:
             raise ValueError(
                 f"task_prior_exact_reuse_blend must be in [0, 1], got {self.task_prior_exact_reuse_blend}"

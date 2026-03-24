@@ -98,6 +98,7 @@ def build_graphdrone_config_from_preset(
             ot_threshold=_env_float("GRAPHDRONE_OT_THRESHOLD", 0.25),
             task_prior_bank_dir=_env_str("GRAPHDRONE_TASK_PRIOR_BANK_DIR", None),
             task_prior_encoder_kind=_env_str("GRAPHDRONE_TASK_PRIOR_ENCODER_KIND", "transformer") or "transformer",
+            task_prior_mode=_env_str("GRAPHDRONE_TASK_PRIOR_MODE", "anchor_shift") or "anchor_shift",
             task_prior_strength=_env_float("GRAPHDRONE_TASK_PRIOR_STRENGTH", 0.5),
             task_prior_dataset_key=task_prior_dataset_key or _env_str("GRAPHDRONE_TASK_PRIOR_DATASET_KEY", None),
             task_prior_exact_reuse_blend=_env_float("GRAPHDRONE_TASK_PRIOR_EXACT_REUSE_BLEND", 0.5),
