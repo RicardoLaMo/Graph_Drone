@@ -436,3 +436,41 @@ So the next state of the lane is:
 - task-prior architecture matters
 - expert/defer biasing is a better direction than anchor-only prior shift
 - the new question is how to make the routing-bias path selective and stable enough to turn this near-flat result into a real regression win
+
+## Ninth result: local-gated routing bias
+
+Contract:
+- `eval/v13_reg_task_prior_hardregimes_routingbias_localgate_v1/comparison/promotion_decision.json`
+- `eval/v13_reg_task_prior_hardregimes_routingbias_localgate_v1/comparison/paired_task_deltas.csv`
+
+Architecture change:
+- keep the `routing_bias` task-prior route
+- add a per-row local gate so the global task prior is scaled by anchor-to-prior alignment before biasing expert logits and defer
+
+Setup:
+- `task_prior_mode=routing_bias`
+- `task_prior_strength=0.5`
+- `task_prior_local_gate_alpha=2.0`
+- same stabilized hard-regime slice and same six-dataset bank
+
+What cleared:
+- the local-global version stayed fully `clean_routed`
+- the gate was live and measurable in the challenger report
+- it preserved the architectural gain over the old additive route and remained essentially flat overall:
+  - mean RMSE relative improvement: `+0.000009`
+  - mean R² delta: `-0.000091`
+- this is slightly better on RMSE than the ungated routing-bias probe (`+0.000001`), but only marginally
+
+What did not clear:
+- promotion still stayed `hold`
+- the gain over ungated routing bias is too small to count as a real architectural breakthrough
+- latency got worse relative to the champion
+
+Most important interpretation:
+- the local-vs-global idea is reasonable and does not destabilize the route
+- but this first local gate is not yet selective enough to create a meaningful held-out regression gain
+- the global prior is still doing most of the work; local gating only trims it slightly
+
+So the current read is:
+- local-global prior shaping is more defensible than global-only injection
+- but the present cosine-gated formulation is too weak to solve the regression translation problem by itself

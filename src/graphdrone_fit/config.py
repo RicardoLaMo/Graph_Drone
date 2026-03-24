@@ -61,6 +61,7 @@ class SetRouterConfig:
     task_prior_encoder_kind: Literal["transformer", "gru"] = "transformer"
     task_prior_mode: Literal["anchor_shift", "routing_bias"] = "anchor_shift"
     task_prior_strength: float = 0.5
+    task_prior_local_gate_alpha: float = 0.0
     task_prior_dataset_key: str | None = None
     task_prior_exact_reuse_blend: float = 0.5
     task_prior_defer_penalty_lambda: float = 0.0
@@ -110,6 +111,10 @@ class SetRouterConfig:
             raise ValueError(f"ot_max_iter must be positive, got {self.ot_max_iter}")
         if self.task_prior_strength < 0:
             raise ValueError(f"task_prior_strength must be non-negative, got {self.task_prior_strength}")
+        if self.task_prior_local_gate_alpha < 0:
+            raise ValueError(
+                f"task_prior_local_gate_alpha must be non-negative, got {self.task_prior_local_gate_alpha}"
+            )
         if self.task_prior_mode not in {"anchor_shift", "routing_bias"}:
             raise ValueError(
                 f"task_prior_mode must be one of ['anchor_shift', 'routing_bias'], got {self.task_prior_mode!r}"

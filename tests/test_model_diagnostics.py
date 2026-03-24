@@ -269,6 +269,7 @@ def test_regression_prediction_falls_back_to_anchor_when_training_nonfinite():
 
 
 def test_task_conditioned_router_routing_bias_mode_emits_bias_diagnostics() -> None:
+    torch.manual_seed(0)
     base_router = ContextualTransformerRouter(token_dim=4)
     router = TaskConditionedRouter(
         token_dim=4,
@@ -276,6 +277,7 @@ def test_task_conditioned_router_routing_bias_mode_emits_bias_diagnostics() -> N
         base_router=base_router,
         strength=0.5,
         mode="routing_bias",
+        local_gate_alpha=2.0,
         router_kind="contextual_transformer_router_task_prior",
     )
     router.set_task_prior_context(torch.tensor([1.0, 0.5, -0.25], dtype=torch.float32))
@@ -289,13 +291,20 @@ def test_task_conditioned_router_routing_bias_mode_emits_bias_diagnostics() -> N
         ],
         dtype=torch.float32,
     )
+    base_outputs = base_router(tokens, full_index=0)
     outputs = router(tokens, full_index=0)
     diagnostics = outputs.extra_diagnostics or {}
     assert diagnostics["task_prior_enabled"] == 1.0
     assert diagnostics["task_prior_mode"] == "routing_bias"
-    assert "task_prior_routing_bias_mean" in diagnostics
-    assert "task_prior_routing_bias_std" in diagnostics
-    assert "task_prior_defer_bias_mean" in diagnostics
+    assert diagnostics["task_prior_local_gate_alpha"] == 2.0
+    assert diagnostics["task_prior_local_gate_mean"] > 0.0
+    assert diagnostics["task_prior_local_gate_mean"] < 1.0
+    assert np.isfinite(diagnostics["task_prior_routing_bias_mean"])
+    assert np.isfinite(diagnostics["task_prior_routing_bias_std"])
+    assert np.isfinite(diagnostics["task_prior_defer_bias_mean"])
+    assert outputs.specialist_weights.shape == base_outputs.specialist_weights.shape
+    assert outputs.defer_prob.shape == base_outputs.defer_prob.shape
+    assert not torch.allclose(outputs.specialist_weights, base_outputs.specialist_weights)
 
 
 def test_regression_legitimacy_early_exit_preserves_router_fit_diagnostics():
