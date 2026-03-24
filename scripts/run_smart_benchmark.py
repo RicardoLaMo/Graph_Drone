@@ -345,9 +345,16 @@ def run_graphdrone(X_tr, y_tr, X_te, task_type: str, seed: int = 42, n_classes: 
         proba = preds if preds.ndim == 2 else np.column_stack([1 - preds, preds])
         # Apply OOF-calibrated threshold for binary classification when available.
         binary_t = getattr(gd, "binary_threshold_", 0.5)
+        class_t = getattr(gd, "class_thresholds_", None)
         if proba.shape[1] == 2 and binary_t != 0.5:
             labels = (proba[:, 1] >= binary_t).astype(int)
             diagnostics["binary_threshold"] = float(binary_t)
+        elif class_t is not None and proba.shape[1] > 2:
+            # Per-class OVR thresholds: adjust proba by dividing each class by its threshold,
+            # then argmax. Equivalent to applying per-class decision biases.
+            adjusted = proba / class_t[np.newaxis, :]
+            labels = np.argmax(adjusted, axis=1)
+            diagnostics["class_thresholds"] = class_t.tolist()
         else:
             labels = np.argmax(proba, axis=1)
         return proba, labels, diagnostics

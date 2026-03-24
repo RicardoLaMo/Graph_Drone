@@ -68,11 +68,16 @@ Both engines are in `main`. One `GraphDrone` class dispatches via `_detect_probl
 ### Classification engine — multiclass path (`n_classes > 2`)
 
 - **Portfolio**: feature-count-dependent (v1.20):
-  - ≤10 features → FULL only (SUBs at 80-90% have no diversity on 6-10 features)
-  - ≤14 features → FULL + 1×SUB @ 60% (meaningful feature dropout)
-  - >14 features → FULL + 3×SUB @ 0.8/0.85/0.9 (unchanged for high-dim)
-- **Router**: `bootstrap_full_only` → static `anchor_geo_poe_blend(anchor_weight=5.0)`
-- **No router training** — zero NLL overhead, valid probability output guaranteed
+  - ≤10 features → FULL only (1 expert → falls back to static GeoPOE)
+  - ≤14 features → FULL + 1×SUB @ 60% (2 experts → falls back to static GeoPOE; 2-expert routing regressed SDSS17)
+  - >14 features → FULL + 3×SUB @ 0.8/0.85/0.9 (4 experts → learned routing active)
+- **Router** (with `use_learned_router_for_classification=True`, preset `v1_3_mc_phase1+`):
+  - `noise_gate_router` — OOF NLL router, requires ≥3 experts and ≥150 OOF rows; else falls back to static GeoPOE
+  - Guard: `min_experts=3` for multiclass (binary exempt)
+  - Guard: OOF rows < 150 → static GeoPOE
+- **Router** (default / `use_learned_router_for_classification=False`):
+  - `bootstrap_full_only` → static `anchor_geo_poe_blend(anchor_weight=5.0)`
+- **Quality tokens** (MC-2+): `foundation_classifier_bagged` when learned router enabled
 
 ---
 
@@ -90,8 +95,8 @@ Overfits on the 10% OOF split. diabetes/credit_g have ~78–100 OOF rows; the ro
 **DO NOT omit the MSE residual penalty for regression.**
 Without `2.0 * relu(mse - anchor_mse)`, the router drives `defer→1.0` whenever SUB views get lucky on the 10% split. First run (v1-geopoe-2026.03.19b, no penalty): diamonds fold 0/2 had defer=1.0, R² collapsed from 0.98 to 0.94. Penalty added in v1-geopoe-2026.03.19c: diamonds R² restored, ELO 1482→1523.
 
-**DO NOT re-enable GORA for multiclass classification.**
-GORA tokens are computed via kNN in each expert's subspace. For multiclass with static GeoPOE (no router), the signal has no consumer. GORA is valid in the binary path where the learned router can use it.
+**DO NOT enable GORA for multiclass when using static GeoPOE.**
+GORA tokens are computed via kNN in each expert's subspace. With static GeoPOE (no learned router), the signal has no consumer. GORA is valid — and actively used — in both the binary path and the multiclass path when `use_learned_router_for_classification=True` (MC-1+). The restriction is: do not enable `use_learned_router_for_classification` without the ≥3-expert guard (MC-1 finding: 2-expert routing regresses on SDSS17).
 
 **DO NOT treat 1514.7 as a regression ELO target.**
 That number is in `eval/geopoe_benchmark/run_log.txt` from v1-geopoe-2026.03.18a. It was a combined ELO (6 regression + 6 classification datasets). The regression component used `bootstrap_full_only` (= vanilla TabPFN). GD appeared to win only because it used more estimators. The true regression baseline before 2026-03-19 was ~1440–1447.
@@ -117,7 +122,7 @@ PYTHONPATH=src python scripts/run_smart_benchmark.py --quick --folds 0
 
 - **Bump `GRAPHDRONE_VERSION`** in the relevant script after any model code change, or stale cached results will be used.
 - Current regression version: `v1-geopoe-2026.03.19c`
-- Current classification version: `2026.03.23-clf-v1.3-phase3b-r3`
+- Current classification version: `2026.03.23-clf-v1.3-mc-phase3` (MC pipeline active)
 
 ---
 
@@ -133,7 +138,8 @@ PYTHONPATH=src python scripts/run_smart_benchmark.py --quick --folds 0
 | 2026-03-19 | v1.19.0 | 1523.2 | 1502.2 | Binary/multiclass split. Both engines win. |
 | 2026-03-19 | v1.20.0 | 1523.2 | 1503.3 | Feature-count portfolio + bagged quality tokens. 9 datasets. |
 | 2026-03-23 | v1.3.0-rc | 1523.2 | 1507.9 | TaskConditionedPrior + confidence-gated defer penalty. credit_g gap −0.004→−0.0014. |
-| **2026-03-23** | **v1.3.0** | **1523.2** | **1512.4** | **← current branch**. OOF threshold calibration (Phase 3B). credit_g gap fully closed, GD leads TabPFN +0.029. |
+| **2026-03-23** | **v1.3.0** | **1523.2** | **1512.4** | OOF threshold calibration (Phase 3B). credit_g gap fully closed, GD leads TabPFN +0.029. |
+| **2026-03-24** | **v1.3-mc** | **1523.2** | **~1512.4** | **← current branch**. Multiclass V1.3 pipeline (MC-1+2+3): learned router (noise_gate_router) wired for multiclass, bagged quality tokens, per-class OVR thresholds. Net result: parity with static GeoPOE champion within noise (mean Δ = -0.0001 across 7 datasets). Infrastructure in place for future MC phases. |
 
 ---
 
@@ -141,6 +147,8 @@ PYTHONPATH=src python scripts/run_smart_benchmark.py --quick --folds 0
 
 1. **credit_g gap CLOSED** (v1.3.0). OOF threshold calibration moved threshold to 0.61–0.68 (credit_g has 30% positive rate). GD now leads TabPFN +0.029 F1. Remaining open: log_loss on credit_g still lags (threshold shifts improve F1 but not calibration).
 
-2. **Multiclass log_loss on low-dim** (maternal_health_risk, SDSS17 below TabPFN). Static GeoPOE at anchor_weight=5.0 is well-calibrated for F1 but slightly over-confident. ScalarGatingAdapter (Phase 3) was designed to learn this but had a bug (`use_learned` path exclusion); fixed in `exp/clf-mc-scalar-gating` but not yet benchmarked successfully.
+2. **Multiclass learned router parity** (MC-1+2+3, 2026-03-24). Learned routing active on 4 high-dim multiclass datasets (>14 features). Net F1 delta vs static GeoPOE = -0.0001 (within noise). Routing infrastructure in place. MC-4 opportunity: optdigits -0.0017 and segment routing instability suggest router needs per-dataset stabilization.
+
+3. **Multiclass log_loss on low-dim** (maternal_health_risk, SDSS17 below TabPFN). Static GeoPOE at anchor_weight=5.0 is well-calibrated for F1 but slightly over-confident. ScalarGatingAdapter (Phase 3) was designed to learn this but had a bug (`use_learned` path exclusion); fixed in `exp/clf-mc-scalar-gating` but not yet benchmarked successfully.
 
 3. **TabICL-inspired ideas** (`research/tabicl-inspiration`) — class shift + YJ view + temperature bundle tested: net −4.3 ELO on smart benchmark. YJ 5th expert drags segment. Class-shift-only is promising for 10-class datasets.
