@@ -122,7 +122,7 @@ PYTHONPATH=src python scripts/run_smart_benchmark.py --quick --folds 0
 
 - **Bump `GRAPHDRONE_VERSION`** in the relevant script after any model code change, or stale cached results will be used.
 - Current regression version: `v1-geopoe-2026.03.19c`
-- Current classification version: `2026.03.23-clf-v1.3-phase3b-r3`
+- Current classification version: `2026.03.23-clf-v1.3-mc-phase3` (MC pipeline active)
 
 ---
 
@@ -138,7 +138,8 @@ PYTHONPATH=src python scripts/run_smart_benchmark.py --quick --folds 0
 | 2026-03-19 | v1.19.0 | 1523.2 | 1502.2 | Binary/multiclass split. Both engines win. |
 | 2026-03-19 | v1.20.0 | 1523.2 | 1503.3 | Feature-count portfolio + bagged quality tokens. 9 datasets. |
 | 2026-03-23 | v1.3.0-rc | 1523.2 | 1507.9 | TaskConditionedPrior + confidence-gated defer penalty. credit_g gap −0.004→−0.0014. |
-| **2026-03-23** | **v1.3.0** | **1523.2** | **1512.4** | **← current branch**. OOF threshold calibration (Phase 3B). credit_g gap fully closed, GD leads TabPFN +0.029. |
+| **2026-03-23** | **v1.3.0** | **1523.2** | **1512.4** | OOF threshold calibration (Phase 3B). credit_g gap fully closed, GD leads TabPFN +0.029. |
+| **2026-03-24** | **v1.3-mc** | **1523.2** | **~1512.4** | **← current branch**. Multiclass V1.3 pipeline (MC-1+2+3): learned router (noise_gate_router) wired for multiclass, bagged quality tokens, per-class OVR thresholds. Net result: parity with static GeoPOE champion within noise (mean Δ = -0.0001 across 7 datasets). Infrastructure in place for future MC phases. |
 
 ---
 
@@ -146,6 +147,8 @@ PYTHONPATH=src python scripts/run_smart_benchmark.py --quick --folds 0
 
 1. **credit_g gap CLOSED** (v1.3.0). OOF threshold calibration moved threshold to 0.61–0.68 (credit_g has 30% positive rate). GD now leads TabPFN +0.029 F1. Remaining open: log_loss on credit_g still lags (threshold shifts improve F1 but not calibration).
 
-2. **Multiclass log_loss on low-dim** (maternal_health_risk, SDSS17 below TabPFN). Static GeoPOE at anchor_weight=5.0 is well-calibrated for F1 but slightly over-confident. ScalarGatingAdapter (Phase 3) was designed to learn this but had a bug (`use_learned` path exclusion); fixed in `exp/clf-mc-scalar-gating` but not yet benchmarked successfully.
+2. **Multiclass learned router parity** (MC-1+2+3, 2026-03-24). Learned routing active on 4 high-dim multiclass datasets (>14 features). Net F1 delta vs static GeoPOE = -0.0001 (within noise). Routing infrastructure in place. MC-4 opportunity: optdigits -0.0017 and segment routing instability suggest router needs per-dataset stabilization.
+
+3. **Multiclass log_loss on low-dim** (maternal_health_risk, SDSS17 below TabPFN). Static GeoPOE at anchor_weight=5.0 is well-calibrated for F1 but slightly over-confident. ScalarGatingAdapter (Phase 3) was designed to learn this but had a bug (`use_learned` path exclusion); fixed in `exp/clf-mc-scalar-gating` but not yet benchmarked successfully.
 
 3. **TabICL-inspired ideas** (`research/tabicl-inspiration`) — class shift + YJ view + temperature bundle tested: net −4.3 ELO on smart benchmark. YJ 5th expert drags segment. Class-shift-only is promising for 10-class datasets.
