@@ -40,6 +40,46 @@ Use:
 - quick regression gate first
 - then fold-0 mini-full regression
 
+## First quick result
+
+Contract:
+- `eval/v13_reg_afc_rotor_quick_v1/comparison/promotion_decision.json`
+- `eval/v13_reg_afc_rotor_quick_v1/comparison/claim_report.json`
+- `eval/v13_reg_afc_rotor_quick_v1/comparison/paired_task_deltas.csv`
+
+Setup:
+- regression legitimacy gate disabled to force a learned-routing surface
+- datasets: `cpu_act`, `elevators`, `kin8nm`
+- challenger router: `contextual_transformer_rotor`
+- `alignment_lambda=0.1`
+
+What cleared:
+- all 9 task-folds stayed `clean_routed`
+- no route-state switching confounded the comparison
+- rotor alignment mechanism is still supported on this cleaner regression surface
+  - mean alignment cosine gain: about `+0.0155`
+
+What did not clear:
+- promotion decision stayed `hold`
+- mean RMSE relative improvement was only `+0.000141`
+- mean latency got worse
+
+Most important interpretation:
+- the narrow quick slice gives a tiny positive metric average
+- but the allocation story is weaker than that headline suggests
+- comparing raw champion vs challenger regression rows shows:
+  - mean weighted specialist advantage got slightly more negative overall
+  - mean positive specialist mass also slipped slightly overall
+  - defer fell on average
+
+So the first AFC revisit result is:
+- geometry: yes
+- tiny benchmark lift on this narrow slice: yes
+- clear allocation translation: not yet
+
+That means rotor is still not a clean routing-usefulness win for regression.
+It may be helping via a small change in overall routing behavior, but it is not yet making specialist use more clearly beneficial on average.
+
 ## Acceptance
 
 This lane succeeds only if AFC-style geometry improvements also improve regression routing usefulness.
