@@ -62,6 +62,7 @@ class SetRouterConfig:
     task_prior_mode: Literal["anchor_shift", "routing_bias"] = "anchor_shift"
     task_prior_strength: float = 0.5
     task_prior_local_gate_alpha: float = 0.0
+    task_prior_expert_local_gate_alpha: float = 0.0
     task_prior_dataset_key: str | None = None
     task_prior_exact_reuse_blend: float = 0.5
     task_prior_defer_penalty_lambda: float = 0.0
@@ -114,6 +115,11 @@ class SetRouterConfig:
         if self.task_prior_local_gate_alpha < 0:
             raise ValueError(
                 f"task_prior_local_gate_alpha must be non-negative, got {self.task_prior_local_gate_alpha}"
+            )
+        if self.task_prior_expert_local_gate_alpha < 0:
+            raise ValueError(
+                "task_prior_expert_local_gate_alpha must be non-negative, got "
+                f"{self.task_prior_expert_local_gate_alpha}"
             )
         if self.task_prior_mode not in {"anchor_shift", "routing_bias"}:
             raise ValueError(

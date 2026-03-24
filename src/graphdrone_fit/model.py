@@ -1001,6 +1001,7 @@ class GraphDrone:
             strength=router_cfg.task_prior_strength,
             mode=router_cfg.task_prior_mode,
             local_gate_alpha=router_cfg.task_prior_local_gate_alpha,
+            expert_local_gate_alpha=router_cfg.task_prior_expert_local_gate_alpha,
             router_kind=f"{getattr(router, 'router_kind', router_cfg.kind)}_task_prior",
         ).to(self.device)
         conditioned.set_task_prior_context(prior_bundle["prior_vector"].to(self.device))
@@ -1021,6 +1022,7 @@ class GraphDrone:
             "task_prior_exact_reuse_used": bool(prior_bundle.get("exact_reuse_used", False)),
             "task_prior_mode": str(router_cfg.task_prior_mode),
             "task_prior_local_gate_alpha": float(router_cfg.task_prior_local_gate_alpha),
+            "task_prior_expert_local_gate_alpha": float(router_cfg.task_prior_expert_local_gate_alpha),
             "task_prior_query_dataset": query_dataset,
             "task_prior_feedback_used": bool(query_result.get("feedback_used", False)),
             "task_prior_feedback_top_source": (

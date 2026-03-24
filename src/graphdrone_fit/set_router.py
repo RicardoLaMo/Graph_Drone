@@ -291,6 +291,7 @@ class TaskConditionedRouter(nn.Module):
         strength: float,
         mode: str,
         local_gate_alpha: float,
+        expert_local_gate_alpha: float,
         router_kind: str,
     ):
         super().__init__()
@@ -298,6 +299,7 @@ class TaskConditionedRouter(nn.Module):
         self.strength = strength
         self.mode = mode
         self.local_gate_alpha = local_gate_alpha
+        self.expert_local_gate_alpha = expert_local_gate_alpha
         self.router_kind = router_kind
         self.prior_to_token = nn.Linear(prior_dim, token_dim)
         self.prior_to_logit = nn.Linear(prior_dim, token_dim)
@@ -338,6 +340,8 @@ class TaskConditionedRouter(nn.Module):
         defer_bias_mean = 0.0
         local_gate_mean = 1.0
         local_gate_std = 0.0
+        expert_local_gate_mean = 1.0
+        expert_local_gate_std = 0.0
         if self.mode == "routing_bias":
             prior_basis = F.normalize(self.prior_to_logit(prior_context), dim=0)
             normalized_tokens = F.normalize(tokens, dim=-1)
@@ -347,7 +351,21 @@ class TaskConditionedRouter(nn.Module):
                 local_gate = torch.sigmoid(self.local_gate_alpha * torch.einsum("bd,d->b", anchor_basis, prior_anchor))
             else:
                 local_gate = torch.ones(tokens.shape[0], device=tokens.device, dtype=tokens.dtype)
-            expert_logit_bias = self.strength * local_gate.unsqueeze(1) * torch.einsum("bed,d->be", normalized_tokens, prior_basis)
+            expert_local_gate = torch.ones(
+                (tokens.shape[0], tokens.shape[1]),
+                device=tokens.device,
+                dtype=tokens.dtype,
+            )
+            if self.expert_local_gate_alpha > 0:
+                expert_local_gate = torch.sigmoid(
+                    self.expert_local_gate_alpha * torch.einsum("bed,d->be", normalized_tokens, prior_basis)
+                )
+            expert_logit_bias = (
+                self.strength
+                * local_gate.unsqueeze(1)
+                * expert_local_gate
+                * torch.einsum("bed,d->be", normalized_tokens, prior_basis)
+            )
             expert_logit_bias[:, full_index] = 0.0
             defer_scalar = self.strength * self.prior_to_defer(prior_context)
             defer_logit_bias = local_gate * defer_scalar.expand(tokens.shape[0])
@@ -356,6 +374,8 @@ class TaskConditionedRouter(nn.Module):
             defer_bias_mean = float(defer_logit_bias.mean().item())
             local_gate_mean = float(local_gate.mean().item())
             local_gate_std = float(local_gate.std(unbiased=False).item())
+            expert_local_gate_mean = float(expert_local_gate.mean().item())
+            expert_local_gate_std = float(expert_local_gate.std(unbiased=False).item())
         else:
             prior_shift = self.prior_to_token(prior_context).to(tokens.device)
             anchor_delta = self.strength * prior_shift.unsqueeze(0)
@@ -380,6 +400,9 @@ class TaskConditionedRouter(nn.Module):
                 "task_prior_local_gate_alpha": float(self.local_gate_alpha),
                 "task_prior_local_gate_mean": local_gate_mean,
                 "task_prior_local_gate_std": local_gate_std,
+                "task_prior_expert_local_gate_alpha": float(self.expert_local_gate_alpha),
+                "task_prior_expert_local_gate_mean": expert_local_gate_mean,
+                "task_prior_expert_local_gate_std": expert_local_gate_std,
             }
         )
         return replace(outputs, router_kind=self.router_kind, extra_diagnostics=diagnostics)

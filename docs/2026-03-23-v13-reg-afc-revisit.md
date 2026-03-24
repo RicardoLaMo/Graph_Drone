@@ -474,3 +474,45 @@ Most important interpretation:
 So the current read is:
 - local-global prior shaping is more defensible than global-only injection
 - but the present cosine-gated formulation is too weak to solve the regression translation problem by itself
+
+## Tenth result: per-expert local-global routing bias
+
+Contract:
+- `eval/v13_reg_task_prior_hardregimes_routingbias_expertlocal_v1/comparison/promotion_decision.json`
+- `eval/v13_reg_task_prior_hardregimes_routingbias_expertlocal_v1/comparison/paired_task_deltas.csv`
+
+Architecture change:
+- keep the global task prior
+- keep the row-level local gate
+- add an expert-specific local gate so each expert token is scaled by its own alignment to the task-prior basis before contributing routing bias
+
+Setup:
+- `task_prior_mode=routing_bias`
+- `task_prior_strength=0.5`
+- `task_prior_local_gate_alpha=2.0`
+- `task_prior_expert_local_gate_alpha=2.0`
+- same stabilized hard-regime slice and same six-dataset bank
+
+What cleared:
+- the route stayed fully `clean_routed`
+- this is the strongest regression task-prior result on the hard-regime slice so far:
+  - mean RMSE relative improvement: `+0.000200`
+  - mean R² delta: `-0.000051`
+- this improved over:
+  - ungated routing bias: `+0.000001`
+  - scalar local gate: `+0.000009`
+
+What did not clear:
+- the contract still stayed `hold`
+- the gain is real but still small
+- worst-dataset guardrail remained slightly negative
+
+Most important interpretation:
+- local-vs-global alignment helps more when it is expert-specific rather than one scalar gate for the whole row
+- this is the first version of the local-global idea that produces a visible step up over the plain routing-bias architecture
+- the effect is still too small to count as solved, but it is no longer just “safe but flat”
+
+So the next state of the lane is:
+- global regime priors should shape specialists differently, not uniformly
+- per-expert local-global gating is a better direction than row-level gating alone
+- the next design question is how to make the expert-local gate depend on specialist opportunity, not just token-prior cosine

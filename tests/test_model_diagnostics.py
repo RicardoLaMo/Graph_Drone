@@ -278,6 +278,7 @@ def test_task_conditioned_router_routing_bias_mode_emits_bias_diagnostics() -> N
         strength=0.5,
         mode="routing_bias",
         local_gate_alpha=2.0,
+        expert_local_gate_alpha=1.5,
         router_kind="contextual_transformer_router_task_prior",
     )
     router.set_task_prior_context(torch.tensor([1.0, 0.5, -0.25], dtype=torch.float32))
@@ -297,8 +298,11 @@ def test_task_conditioned_router_routing_bias_mode_emits_bias_diagnostics() -> N
     assert diagnostics["task_prior_enabled"] == 1.0
     assert diagnostics["task_prior_mode"] == "routing_bias"
     assert diagnostics["task_prior_local_gate_alpha"] == 2.0
+    assert diagnostics["task_prior_expert_local_gate_alpha"] == 1.5
     assert diagnostics["task_prior_local_gate_mean"] > 0.0
     assert diagnostics["task_prior_local_gate_mean"] < 1.0
+    assert diagnostics["task_prior_expert_local_gate_mean"] > 0.0
+    assert diagnostics["task_prior_expert_local_gate_mean"] < 1.0
     assert np.isfinite(diagnostics["task_prior_routing_bias_mean"])
     assert np.isfinite(diagnostics["task_prior_routing_bias_std"])
     assert np.isfinite(diagnostics["task_prior_defer_bias_mean"])
