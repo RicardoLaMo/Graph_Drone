@@ -3,7 +3,7 @@
 This file is generated from `docs/research/findings.jsonl`.
 It is the current research surface for scaling decisions, not an append-only history.
 
-Updated: 2026-03-24T02:55:25.905654+00:00
+Updated: 2026-03-24T02:55:59.478752+00:00
 
 ## How To Read This
 
@@ -70,6 +70,7 @@ Updated: 2026-03-24T02:55:25.905654+00:00
 
 | Timestamp | Claim ID | Status | Summary |
 |---|---|---|---|
+| `2026-03-24T02:55:59.478299+00:00` | `v13-reg-task-prior-regime-router` | `partially_causal` | The first live regression task-prior run was invalid because regression never attached the task-prior wrapper and dropped task-prior diagnostics. After fixing both issues, the rerun produced explicit task-prior activation, exact reuse on known datasets, and a promotable quick-contract win concentrated on california. |
 | `2026-03-24T02:55:25.905176+00:00` | `v13-reg-task-prior-regime-router` | `partially_causal` | The first live regression task-prior run was invalid because regression never attached the task-prior wrapper and dropped task-prior diagnostics. After fixing both issues, the rerun produced explicit task-prior activation, exact reuse on known datasets, and a promotable quick-contract win concentrated on california. |
 | `2026-03-24T02:07:03.566799+00:00` | `v13-reg-afc-robust-allocation-target` | `falsified` | A robustness-aware AFC allocation reward still improved the local mechanism surface across the clean-routed regression slice, but held-out RMSE regressed more, not less. The current validation-side allocation target is therefore not causal enough even with a simple consistency filter. |
 | `2026-03-24T01:40:20.860371+00:00` | `v13-reg-afc-allocation-translation` | `partially_causal` | Rotor plus an allocation objective is the first AFC regression variant that improves the allocation surface across the entire clean-routed quick slice, but the held-out RMSE still regresses slightly and latency gets worse. The blocker has shifted from geometry-to-allocation translation toward allocation-to-outcome translation and routing efficiency. |
@@ -81,5 +82,4 @@ Updated: 2026-03-24T02:55:25.905654+00:00
 | `2026-03-23T23:16:13.770011+00:00` | `v13-reg-meta-prior-readiness` | `open` | Regression meta-priors are a later v1.3 lane, not the first move, and should be gated on local-routing evidence. |
 | `2026-03-23T23:16:13.738272+00:00` | `v13-reg-afc-allocation-translation` | `open` | v1.3 keeps AFC alive for regression, but only as an allocation-translation question rather than as a presumed feature win. |
 | `2026-03-23T23:16:13.705585+00:00` | `v13-reg-realized-specialist-value` | `open` | The primary v1.3 regression question is whether routing can be trained to realize specialist value instead of merely detecting that it exists. |
-| `2026-03-23T23:16:13.673633+00:00` | `v13-reg-stability-surface` | `open` | v1.3 regression should begin with a stability lane that classifies and explains regression fallback modes instead of treating them as opaque safe fallbacks. |
 
