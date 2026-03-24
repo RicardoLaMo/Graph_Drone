@@ -84,6 +84,11 @@ def build_graphdrone_config_from_preset(
             alignment_lambda=_env_float("GRAPHDRONE_ALIGNMENT_LAMBDA", 0.1),
             residual_usefulness_lambda=_env_float("GRAPHDRONE_RESIDUAL_USEFULNESS_LAMBDA", 0.0),
             allocation_usefulness_lambda=_env_float("GRAPHDRONE_ALLOCATION_USEFULNESS_LAMBDA", 0.0),
+            conservative_allocation_lambda=_env_float("GRAPHDRONE_CONSERVATIVE_ALLOCATION_LAMBDA", 0.0),
+            conservative_allocation_opportunity_threshold=_env_float(
+                "GRAPHDRONE_CONSERVATIVE_ALLOCATION_OPPORTUNITY_THRESHOLD", 0.1
+            ),
+            robust_allocation_usefulness_lambda=_env_float("GRAPHDRONE_ROBUST_ALLOCATION_USEFULNESS_LAMBDA", 0.0),
             router_seed=_env_int("GRAPHDRONE_ROUTER_SEED", 42),
             freeze_base_router=_env_flag("GRAPHDRONE_FREEZE_BASE_ROUTER", False),
             ot_prototype_count=_env_int("GRAPHDRONE_OT_PROTOTYPE_COUNT", 32),

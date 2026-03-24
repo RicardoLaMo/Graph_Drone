@@ -122,6 +122,42 @@ Most important interpretation:
 So the remaining blocker is no longer pure translation from geometry into allocation.
 It is translation from improved allocation diagnostics into actual prediction quality and efficient routing behavior.
 
+## Third quick result: robust allocation target
+
+Contract:
+- `eval/v13_reg_afc_rotor_robust_quick_v5/comparison/promotion_decision.json`
+- `eval/v13_reg_afc_rotor_robust_quick_v5/comparison/paired_mechanism_summary.csv`
+- `eval/v13_reg_afc_rotor_robust_quick_v5/comparison/promotion_report.md`
+
+Setup:
+- same clean-routed regression slice: `cpu_act`, `elevators`, `kin8nm`
+- regression legitimacy gate disabled
+- challenger router: `contextual_transformer_rotor`
+- `alignment_lambda=0.1`
+- `robust_allocation_usefulness_lambda=0.2`
+- robust score = allocation usefulness rewarded only through the weaker half of a deterministic even/odd validation split
+
+What cleared:
+- all 9 task-folds again stayed `clean_routed`
+- weighted specialist advantage improved on all 3 datasets relative to the champion
+- positive specialist mass also improved on all 3 datasets
+- unlike the conservative penalty probe, `elevators` did not collapse into obviously worse validation-side allocation
+
+What did not clear:
+- promotion decision still stayed `hold`
+- mean RMSE relative improvement got worse again: about `-0.000500`
+- the consistency-aware reward did not convert the mechanism gain into better held-out RMSE
+
+Most important interpretation:
+- this is a stronger negative result than the raw rotor-only run
+- even after forcing the allocation objective to survive a simple split-consistency check, the held-out regression metric still regressed
+- that means the current validation-side allocation target is itself not sufficiently causal for the downstream regression objective
+
+So the next move should not be another small variation of the same validation-allocation reward.
+The lane now needs a different signal family:
+- either a better causal proxy for robust specialist benefit
+- or a different routing design that does not rely on this single-dataset validation target as the main teacher
+
 ## Acceptance
 
 This lane succeeds only if AFC-style geometry improvements also improve regression routing usefulness.

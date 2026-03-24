@@ -122,6 +122,104 @@ def test_regression_allocation_usefulness_prefers_positive_mass_on_helpful_speci
     assert float(good_score.item()) > float(bad_score.item())
 
 
+def test_regression_conservative_allocation_penalty_prefers_positive_mass_on_confident_rows():
+    expert_predictions = torch.tensor(
+        [
+            [10.0, 9.0, 20.0],
+            [5.0, 4.0, 20.0],
+        ],
+        dtype=torch.float32,
+    )
+    y_true = torch.tensor([9.0, 4.0], dtype=torch.float32)
+    defer_prob = torch.ones((2, 1), dtype=torch.float32)
+
+    good_weights = torch.tensor(
+        [
+            [0.1, 0.9, 0.0],
+            [0.1, 0.9, 0.0],
+        ],
+        dtype=torch.float32,
+    )
+    bad_weights = torch.tensor(
+        [
+            [0.1, 0.0, 0.9],
+            [0.1, 0.0, 0.9],
+        ],
+        dtype=torch.float32,
+    )
+
+    good_stats = GraphDrone._regression_residual_usefulness_tensors(
+        expert_predictions=expert_predictions,
+        y_true=y_true,
+        specialist_weights=good_weights,
+        defer_prob=defer_prob,
+        full_index=0,
+    )
+    bad_stats = GraphDrone._regression_residual_usefulness_tensors(
+        expert_predictions=expert_predictions,
+        y_true=y_true,
+        specialist_weights=bad_weights,
+        defer_prob=defer_prob,
+        full_index=0,
+    )
+
+    good_penalty = GraphDrone._regression_conservative_allocation_penalty_from_stats(good_stats)
+    bad_penalty = GraphDrone._regression_conservative_allocation_penalty_from_stats(bad_stats)
+    assert float(good_penalty.item()) < float(bad_penalty.item())
+
+
+def test_regression_robust_allocation_usefulness_prefers_consistent_positive_mass():
+    expert_predictions = torch.tensor(
+        [
+            [10.0, 9.0, 20.0],
+            [5.0, 4.0, 20.0],
+            [8.0, 7.0, 20.0],
+            [6.0, 5.0, 20.0],
+        ],
+        dtype=torch.float32,
+    )
+    y_true = torch.tensor([9.0, 4.0, 7.0, 5.0], dtype=torch.float32)
+    defer_prob = torch.ones((4, 1), dtype=torch.float32)
+
+    consistent_weights = torch.tensor(
+        [
+            [0.1, 0.9, 0.0],
+            [0.1, 0.9, 0.0],
+            [0.1, 0.9, 0.0],
+            [0.1, 0.9, 0.0],
+        ],
+        dtype=torch.float32,
+    )
+    inconsistent_weights = torch.tensor(
+        [
+            [0.1, 0.9, 0.0],
+            [0.1, 0.0, 0.9],
+            [0.1, 0.9, 0.0],
+            [0.1, 0.0, 0.9],
+        ],
+        dtype=torch.float32,
+    )
+
+    consistent_stats = GraphDrone._regression_residual_usefulness_tensors(
+        expert_predictions=expert_predictions,
+        y_true=y_true,
+        specialist_weights=consistent_weights,
+        defer_prob=defer_prob,
+        full_index=0,
+    )
+    inconsistent_stats = GraphDrone._regression_residual_usefulness_tensors(
+        expert_predictions=expert_predictions,
+        y_true=y_true,
+        specialist_weights=inconsistent_weights,
+        defer_prob=defer_prob,
+        full_index=0,
+    )
+
+    consistent_score = GraphDrone._regression_robust_allocation_usefulness_from_stats(consistent_stats)
+    inconsistent_score = GraphDrone._regression_robust_allocation_usefulness_from_stats(inconsistent_stats)
+    assert float(consistent_score.item()) > float(inconsistent_score.item())
+
+
 def test_regression_prediction_falls_back_to_anchor_when_training_nonfinite():
     gd = GraphDrone(GraphDroneConfig())
     gd._problem_type = "regression"
@@ -183,6 +281,8 @@ def test_regression_legitimacy_early_exit_preserves_router_fit_diagnostics():
     gd._router_fit_diagnostics = {
         "validation_weighted_specialist_advantage_score": 0.25,
         "validation_allocation_usefulness_score": 0.5,
+        "validation_robust_allocation_usefulness_score": 0.4,
+        "validation_conservative_allocation_penalty": 0.125,
     }
 
     batch = ExpertPredictionBatch(
@@ -215,3 +315,5 @@ def test_regression_legitimacy_early_exit_preserves_router_fit_diagnostics():
     assert diagnostics["router_kind"] == "legitimacy_gate_anchor_only"
     assert diagnostics["validation_weighted_specialist_advantage_score"] == 0.25
     assert diagnostics["validation_allocation_usefulness_score"] == 0.5
+    assert diagnostics["validation_robust_allocation_usefulness_score"] == 0.4
+    assert diagnostics["validation_conservative_allocation_penalty"] == 0.125

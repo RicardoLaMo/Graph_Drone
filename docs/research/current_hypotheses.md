@@ -3,7 +3,7 @@
 This file is generated from `docs/research/findings.jsonl`.
 It is the current research surface for scaling decisions, not an append-only history.
 
-Updated: 2026-03-24T01:40:20.860797+00:00
+Updated: 2026-03-24T02:07:03.567338+00:00
 
 ## How To Read This
 
@@ -63,11 +63,13 @@ Updated: 2026-03-24T01:40:20.860797+00:00
 |---|---|---|---|---|
 | `afc-framework-binary-rank-loss-probe` | `afc_framework` | For this formulation, no. A pairwise rank auxiliary on the blended binary score improved some calibration terms, but it did not improve the credit_g best-threshold ceiling and it failed to produce a better binary challenger than defer regularization alone. The lower-weight variant also regressed credit_g F1 enough to fail the guardrail. | `exp/afc-cross-dataset-lma-rankloss` | `2026-03-23-afc-cross-dataset-lma-rankloss.md` |
 | `afc-b-residual-objective-gap-penalty` | `afc_phase_b` | For the current objective shape, no. Across lambda={0.02,0.05,0.10} on the quick regression contract, the penalty was active but did not produce a better held-out model; its main effect was modest defer suppression rather than a genuinely better specialist-allocation policy. | `exp/afc-b-residual-objective` | `2026-03-23-afc-phase-b-residual-objective.md` |
+| `v13-reg-afc-robust-allocation-target` | `v13_regression` | No, not in this formulation. The robust allocation objective improved weighted specialist advantage and positive specialist mass on cpu_act, elevators, and kin8nm relative to the champion, but the quick held-out regression result still regressed and did so more than the conservative variant. This means simple validation split-consistency is not enough to turn the current allocation target into a reliable teacher for the regression router. | `exp/v13-reg-afc-revisit` | `2026-03-23-v13-reg-afc-revisit.md` |
 
 ## Recent Findings
 
 | Timestamp | Claim ID | Status | Summary |
 |---|---|---|---|
+| `2026-03-24T02:07:03.566799+00:00` | `v13-reg-afc-robust-allocation-target` | `falsified` | A robustness-aware AFC allocation reward still improved the local mechanism surface across the clean-routed regression slice, but held-out RMSE regressed more, not less. The current validation-side allocation target is therefore not causal enough even with a simple consistency filter. |
 | `2026-03-24T01:40:20.860371+00:00` | `v13-reg-afc-allocation-translation` | `partially_causal` | Rotor plus an allocation objective is the first AFC regression variant that improves the allocation surface across the entire clean-routed quick slice, but the held-out RMSE still regresses slightly and latency gets worse. The blocker has shifted from geometry-to-allocation translation toward allocation-to-outcome translation and routing efficiency. |
 | `2026-03-24T00:21:39.932370+00:00` | `v13-reg-afc-allocation-translation` | `partially_causal` | Rotor still shows real geometric activation on the corrected regression surface, and the narrow clean-routed quick slice was essentially flat-to-slightly-positive. But allocation/usefulness metrics did not improve with it, so AFC remains only partially translated for regression. |
 | `2026-03-23T23:42:00.131472+00:00` | `v13-reg-stability-surface` | `partially_causal` | v1.3 regression stability now exposes route state directly and no longer conflates deliberate early exit with router fallback. Regression also already has generic task-prior hooks, so the real gate for LMA is architecture readiness, not missing plumbing. |
@@ -79,5 +81,4 @@ Updated: 2026-03-24T01:40:20.860797+00:00
 | `2026-03-23T23:16:13.705585+00:00` | `v13-reg-realized-specialist-value` | `open` | The primary v1.3 regression question is whether routing can be trained to realize specialist value instead of merely detecting that it exists. |
 | `2026-03-23T23:16:13.673633+00:00` | `v13-reg-stability-surface` | `open` | v1.3 regression should begin with a stability lane that classifies and explains regression fallback modes instead of treating them as opaque safe fallbacks. |
 | `2026-03-23T19:59:55.186947+00:00` | `afc-framework-binary-rank-loss-probe` | `falsified` | The first binary rank-loss probe separated ranking-surface questions from calibration questions, but the current pairwise formulation did not translate into a better live task-prior route. It should not be the next default architecture step without a different target or coupling. |
-| `2026-03-23T19:49:37.217034+00:00` | `afc-framework-binary-threshold-sensitivity` | `partially_causal` | Threshold-sensitivity analysis showed that defer-regularized task priors improve calibration consistently on the binary slice, but only partially improve the broader threshold landscape. The next bottleneck has shifted from defer saturation to score ordering and threshold geometry. |
 

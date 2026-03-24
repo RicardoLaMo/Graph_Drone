@@ -47,6 +47,9 @@ class SetRouterConfig:
     alignment_lambda: float = 0.0
     residual_usefulness_lambda: float = 0.0
     allocation_usefulness_lambda: float = 0.0
+    conservative_allocation_lambda: float = 0.0
+    conservative_allocation_opportunity_threshold: float = 0.1
+    robust_allocation_usefulness_lambda: float = 0.0
     router_seed: int = 42
     freeze_base_router: bool = False
     ot_prototype_count: int = 32
@@ -82,6 +85,19 @@ class SetRouterConfig:
         if self.allocation_usefulness_lambda < 0:
             raise ValueError(
                 f"allocation_usefulness_lambda must be non-negative, got {self.allocation_usefulness_lambda}"
+            )
+        if self.conservative_allocation_lambda < 0:
+            raise ValueError(
+                f"conservative_allocation_lambda must be non-negative, got {self.conservative_allocation_lambda}"
+            )
+        if self.conservative_allocation_opportunity_threshold < 0:
+            raise ValueError(
+                "conservative_allocation_opportunity_threshold must be non-negative, got "
+                f"{self.conservative_allocation_opportunity_threshold}"
+            )
+        if self.robust_allocation_usefulness_lambda < 0:
+            raise ValueError(
+                f"robust_allocation_usefulness_lambda must be non-negative, got {self.robust_allocation_usefulness_lambda}"
             )
         if self.router_seed < 0:
             raise ValueError(f"router_seed must be non-negative, got {self.router_seed}")
