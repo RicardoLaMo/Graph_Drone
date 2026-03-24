@@ -105,6 +105,9 @@ class GraphDrone:
         self._router_training_force_anchor_only: bool = False
         self._task_prior_diagnostics: dict[str, object] = {}
         self.binary_threshold_: float = 0.5
+        # Per-class OVR thresholds for multiclass calibration (future extension).
+        # None means use standard argmax (default behavior, always set for multiclass).
+        self.class_thresholds_: Optional[np.ndarray] = None
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
     def fit(
@@ -236,10 +239,14 @@ class GraphDrone:
         _seed_torch_generators(self.config.router.router_seed)
 
     def _classification_router_config(self, *, is_binary: bool) -> tuple[bool, SetRouterConfig | None]:
-        use_learned = is_binary
+        # Binary always uses the learned router (original behavior).
+        # Multiclass uses the learned router when use_learned_router_for_classification=True
+        # (the config flag was designed for this purpose but was previously short-circuited).
+        use_learned = is_binary or self.config.use_learned_router_for_classification
         if not use_learned:
             return False, None
-        if is_binary and self.config.router.kind == "bootstrap_full_only":
+        # Auto-upgrade bootstrap_full_only → noise_gate_router for both binary and multiclass.
+        if self.config.router.kind == "bootstrap_full_only":
             return True, replace(self.config.router, kind="noise_gate_router")
         return True, self.config.router
 
@@ -488,9 +495,15 @@ class GraphDrone:
         is_binary: bool,
     ) -> None:
         use_learned, router_cfg = self._classification_router_config(is_binary=is_binary)
+        # Guard: single-expert portfolio (FULL-only) has nothing to route — static blend.
+        if use_learned and len(expert_specs) <= 1:
+            print("  -> Classification router skipped: single-expert portfolio, using static GeoPOE blend.")
+            use_learned = False
+            router_cfg = None
         self._clf_uses_learned_router = use_learned
         if not use_learned:
-            print("  -> Classification (multiclass): using static Geometric PoE blending.")
+            label = "binary" if is_binary else "multiclass"
+            print(f"  -> Classification ({label}): using static Geometric PoE blending.")
             return
 
         from sklearn.model_selection import train_test_split as _tts
@@ -501,6 +514,16 @@ class GraphDrone:
         idx_tr90, idx_va = _tts(np.arange(n_all), test_size=oof_test_size, random_state=42, stratify=y)
         X_tr90, X_va = matrix[idx_tr90], matrix[idx_va]
         y_tr90, y_va = y[idx_tr90], y[idx_va]
+
+        # Guard: OOF split too small to reliably train a router — fall back to static blend.
+        if len(X_va) < 150:
+            label = "binary" if is_binary else "multiclass"
+            print(
+                f"  -> Classification ({label}): OOF split too small ({len(X_va)} rows < 150), "
+                f"using static Geometric PoE blending."
+            )
+            self._clf_uses_learned_router = False
+            return
 
         oof_specs = tuple(
             ExpertBuildSpec(
@@ -614,15 +637,20 @@ class GraphDrone:
             final_blend_nll = F.nll_loss(F.log_softmax(log_q_final, dim=-1), y_va_t).item()
             mean_defer = float(out_final.defer_prob.mean().item())
         calibrate = bool(router_cfg.calibrate_threshold)
-        if calibrate:
-            blend_proba_np = torch.softmax(log_q_final, dim=-1).cpu().numpy()
-            self.binary_threshold_ = self._compute_oof_threshold(y_va, blend_proba_np[:, 1])
+        if is_binary:
+            # Binary-only: OOF F1-maximizing threshold on P(class=1).
+            if calibrate:
+                blend_proba_np = torch.softmax(log_q_final, dim=-1).cpu().numpy()
+                self.binary_threshold_ = self._compute_oof_threshold(y_va, blend_proba_np[:, 1])
+            else:
+                self.binary_threshold_ = 0.5
         else:
+            # Multiclass: binary_threshold_ stays at default (argmax is used at predict time).
             self.binary_threshold_ = 0.5
         print(
             f"  -> Classification Router trained. "
             f"blend_nll={final_blend_nll:.4f}  anchor_nll={anchor_nll_val:.4f}  mean_defer={mean_defer:.3f}"
-            + (f"  threshold={self.binary_threshold_:.3f}" if calibrate else "")
+            + (f"  threshold={self.binary_threshold_:.3f}" if (calibrate and is_binary) else "")
         )
 
     @staticmethod
