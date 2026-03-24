@@ -488,3 +488,46 @@ def test_fit_regression_router_attaches_task_prior_wrapper(monkeypatch):
     assert attach_calls[0]["task_type"] == "regression"
     assert attach_calls[0]["dataset_key"] == "cpu_act"
     assert gd._router.router_kind == "contextual_transformer_task_prior"
+
+
+def test_normalize_regression_router_targets_stabilizes_large_scale_targets():
+    expert_predictions = torch.tensor(
+        [
+            [200000.0, 205000.0, 198000.0],
+            [180000.0, 175000.0, 182500.0],
+            [220000.0, 218000.0, 225000.0],
+        ],
+        dtype=torch.float32,
+    )
+    y_true = torch.tensor([210000.0, 170000.0, 230000.0], dtype=torch.float32)
+
+    norm_preds, norm_targets, diagnostics = GraphDrone._normalize_regression_router_targets(
+        expert_predictions=expert_predictions,
+        y_true=y_true,
+    )
+
+    assert diagnostics["validation_router_target_scale"] > 1.0
+    assert torch.isfinite(norm_preds).all()
+    assert torch.isfinite(norm_targets).all()
+    assert float(norm_targets.abs().mean().item()) < float(y_true.abs().mean().item())
+    assert float(norm_preds.abs().mean().item()) < float(expert_predictions.abs().mean().item())
+
+
+def test_normalize_regression_token_predictions_stabilizes_anchor_scale():
+    predictions = np.array(
+        [
+            [200000.0, 205000.0, 198000.0],
+            [180000.0, 175000.0, 182500.0],
+            [220000.0, 218000.0, 225000.0],
+        ],
+        dtype=np.float32,
+    )
+
+    normalized, diagnostics = GraphDrone._normalize_regression_token_predictions(
+        predictions,
+        full_index=0,
+    )
+
+    assert diagnostics["regression_token_prediction_scale"] > 1.0
+    assert np.isfinite(normalized).all()
+    assert float(np.mean(np.abs(normalized[:, 0]))) < float(np.mean(np.abs(predictions[:, 0])))

@@ -700,6 +700,27 @@ class GraphDrone:
         if saw_nonfinite:
             self._router_training_force_anchor_only = True
 
+    @staticmethod
+    def _normalize_regression_router_targets(
+        *,
+        expert_predictions: torch.Tensor,
+        y_true: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, dict[str, float]]:
+        y_center = torch.median(y_true)
+        centered_targets = y_true - y_center
+        target_scale = centered_targets.std(unbiased=False)
+        if not torch.isfinite(target_scale) or float(target_scale.item()) < 1e-6:
+            target_scale = centered_targets.abs().mean()
+        if not torch.isfinite(target_scale) or float(target_scale.item()) < 1e-6:
+            target_scale = y_true.new_tensor(1.0)
+        normalized_predictions = (expert_predictions - y_center) / target_scale
+        normalized_targets = centered_targets / target_scale
+        diagnostics = {
+            "validation_router_target_center": float(y_center.detach().cpu().item()),
+            "validation_router_target_scale": float(target_scale.detach().cpu().item()),
+        }
+        return normalized_predictions, normalized_targets, diagnostics
+
     def _sample_aux_rows(self, matrix: np.ndarray, max_rows: int = 1024) -> np.ndarray:
         if len(matrix) <= max_rows:
             return matrix
@@ -731,11 +752,39 @@ class GraphDrone:
             quality_encoding=_make_quality_encoding(batch.quality_scores),
         )
 
+    @staticmethod
+    def _normalize_regression_token_predictions(
+        predictions: np.ndarray,
+        *,
+        full_index: int,
+    ) -> tuple[np.ndarray, dict[str, float]]:
+        pred = np.asarray(predictions, dtype=np.float32)
+        anchor = pred[:, full_index]
+        center = float(np.median(anchor))
+        scale = float(np.std(anchor - center))
+        if not np.isfinite(scale) or scale < 1e-6:
+            scale = float(np.mean(np.abs(anchor - center)))
+        if not np.isfinite(scale) or scale < 1e-6:
+            scale = float(np.std(pred))
+        if not np.isfinite(scale) or scale < 1e-6:
+            scale = 1.0
+        normalized = (pred - center) / scale
+        diagnostics = {
+            "regression_token_prediction_center": center,
+            "regression_token_prediction_scale": scale,
+        }
+        return normalized.astype(np.float32), diagnostics
+
     def _build_regression_tokens(self, X: np.ndarray, batch: ExpertPredictionBatch):
         support_enc = self._support_encoder.encode(n_rows=len(X), descriptors=batch.descriptors)
         gora_obs = self._compute_gora_obs(X, batch.descriptors)
+        normalized_predictions, token_norm_diagnostics = self._normalize_regression_token_predictions(
+            batch.predictions,
+            full_index=batch.full_index,
+        )
+        self._router_fit_diagnostics.update(token_norm_diagnostics)
         return self._token_builder.build(
-            predictions=batch.predictions,
+            predictions=normalized_predictions,
             descriptors=batch.descriptors,
             full_expert_id=batch.full_expert_id,
             support_encoding=support_enc,
@@ -999,10 +1048,15 @@ class GraphDrone:
         aux_tokens_t = aux_tokens.tokens.to(self.device)
         y_va_t = torch.tensor(y_va, dtype=torch.float32, device=self.device)
         v_preds_t = torch.tensor(va_batch.predictions, dtype=torch.float32, device=self.device)
+        v_preds_t_norm, y_va_t_norm, normalization_diagnostics = self._normalize_regression_router_targets(
+            expert_predictions=v_preds_t,
+            y_true=y_va_t,
+        )
+        self._router_fit_diagnostics.update(normalization_diagnostics)
         v_tokens_t = va_tokens.tokens.to(self.device)
 
         with torch.no_grad():
-            anchor_mse_val = F.mse_loss(v_preds_t[:, va_batch.full_index], y_va_t).item()
+            anchor_mse_val = F.mse_loss(v_preds_t_norm[:, va_batch.full_index], y_va_t_norm).item()
         if self.config.router.kind == "contextual_transformer_rotor" and self.config.router.freeze_base_router:
             print("  -> Frozen-router rotor ablation: training base router first, then freezing it.")
             base_cfg = replace(
@@ -1020,8 +1074,8 @@ class GraphDrone:
             self._optimize_regression_router_module(
                 base_router,
                 v_tokens_t=v_tokens_t,
-                v_preds_t=v_preds_t,
-                y_va_t=y_va_t,
+                v_preds_t=v_preds_t_norm,
+                y_va_t=y_va_t_norm,
                 full_index=va_batch.full_index,
                 anchor_mse_val=anchor_mse_val,
                 label="Frozen-base pre-router",
@@ -1058,8 +1112,8 @@ class GraphDrone:
         self._optimize_regression_router_module(
             self._router,
             v_tokens_t=v_tokens_t,
-            v_preds_t=v_preds_t,
-            y_va_t=y_va_t,
+            v_preds_t=v_preds_t_norm,
+            y_va_t=y_va_t_norm,
             full_index=va_batch.full_index,
             anchor_mse_val=anchor_mse_val,
             label="Router",
