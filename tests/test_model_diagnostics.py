@@ -311,6 +311,25 @@ def test_task_conditioned_router_routing_bias_mode_emits_bias_diagnostics() -> N
     assert not torch.allclose(outputs.specialist_weights, base_outputs.specialist_weights)
 
 
+def test_regression_expert_opportunity_scores_favor_helpful_specialists() -> None:
+    expert_predictions = torch.tensor(
+        [
+            [10.0, 9.0, 20.0],
+            [5.0, 4.0, 20.0],
+        ],
+        dtype=torch.float32,
+    )
+    y_true = torch.tensor([9.0, 4.0], dtype=torch.float32)
+    scores = GraphDrone._regression_expert_opportunity_scores(
+        expert_predictions=expert_predictions,
+        y_true=y_true,
+        full_index=0,
+    )
+    assert scores.shape[0] == 3
+    assert float(scores[0].item()) == 0.0
+    assert float(scores[1].item()) > float(scores[2].item())
+
+
 def test_regression_legitimacy_early_exit_preserves_router_fit_diagnostics():
     gd = GraphDrone(
         GraphDroneConfig(

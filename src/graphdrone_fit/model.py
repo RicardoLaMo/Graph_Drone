@@ -320,6 +320,25 @@ class GraphDrone:
             router.fit_auxiliary_state(aux_tokens, full_index=full_index)
 
     @staticmethod
+    def _regression_expert_opportunity_scores(
+        expert_predictions: torch.Tensor,
+        y_true: torch.Tensor,
+        *,
+        full_index: int,
+    ) -> torch.Tensor:
+        errors = (expert_predictions - y_true.unsqueeze(1)).abs()
+        anchor_error = errors[:, full_index : full_index + 1]
+        advantage = anchor_error - errors
+        positive = torch.clamp(advantage, min=0.0)
+        scores = positive.mean(dim=0)
+        if scores.shape[0] > full_index:
+            scores[full_index] = 0.0
+        max_score = float(scores.max().item()) if scores.numel() else 0.0
+        if max_score > 0:
+            scores = scores / max_score
+        return scores
+
+    @staticmethod
     def _attention_diagnostics(
         *,
         expert_ids: tuple[str, ...],
@@ -1107,6 +1126,14 @@ class GraphDrone:
             descriptors=va_batch.descriptors,
             task_type="regression",
         )
+        if hasattr(self._router, "set_expert_opportunity_scores"):
+            self._router.set_expert_opportunity_scores(
+                self._regression_expert_opportunity_scores(
+                    expert_predictions=v_preds_t,
+                    y_true=y_va_t,
+                    full_index=va_batch.full_index,
+                )
+            )
 
         self._fit_router_auxiliary_state(self._router, aux_tokens_t, full_index=aux_batch.full_index)
 

@@ -516,3 +516,60 @@ So the next state of the lane is:
 - global regime priors should shape specialists differently, not uniformly
 - per-expert local-global gating is a better direction than row-level gating alone
 - the next design question is how to make the expert-local gate depend on specialist opportunity, not just token-prior cosine
+
+## Eleventh result: opportunity-aware expert-local routing bias
+
+Contract:
+- `eval/v13_reg_task_prior_hardregimes_routingbias_expertlocalopp_v1/comparison/promotion_decision.json`
+- `eval/v13_reg_task_prior_hardregimes_routingbias_expertlocalopp_v1/comparison/paired_task_deltas.csv`
+- challenger raw report:
+  `eval/v13_reg_task_prior_hardregimes_routingbias_expertlocalopp_v1/raw/challenger/regression/report/results_granular.csv`
+
+Architecture change:
+- keep the `routing_bias` task-prior route
+- keep the row-level local gate
+- keep the per-expert local gate
+- multiply the expert-local gate by a validation-derived per-expert opportunity score:
+  mean positive residual advantage over anchor on the router-training validation split
+
+Setup:
+- `task_prior_mode=routing_bias`
+- `task_prior_strength=0.5`
+- `task_prior_local_gate_alpha=2.0`
+- `task_prior_expert_local_gate_alpha=2.0`
+- `task_prior_exact_reuse_blend=0.6`
+- same stabilized hard-regime slice: `california`, `diamonds`, `house_prices`
+- same six-dataset regression bank
+
+What cleared:
+- the route again stayed fully `clean_routed` on all 9 task-folds
+- this was a real code-and-execution step, not just a thought experiment:
+  - the router now receives explicit expert opportunity scores during regression router fitting
+  - challenger rows surface `task_prior_expert_opportunity_mean`
+- the mechanism was live:
+  - `task_prior_expert_local_gate_mean` varied by fold and dataset
+  - `task_prior_expert_opportunity_mean` was below `1.0`, so the opportunity signal actually changed expert-local gating
+
+What did not clear:
+- promotion stayed `hold`
+- mean RMSE relative improvement regressed to `-0.000147`
+- mean R² delta regressed to `-0.000128`
+- latency also worsened to about `-3.27%`
+- this is worse than the simpler expert-local gate:
+  - expert-local gate: `+0.000200`
+  - expert-local + static opportunity weighting: `-0.000147`
+
+Most important interpretation:
+- this does **not** falsify local-vs-global LMA for regression
+- it falsifies this specific teacher formulation:
+  static dataset-level per-expert opportunity weighting is not a good enough signal for the live router
+- the likely failure mode is that the mean validation opportunity score is too coarse:
+  - it helps some folds (`california` fold 1, `diamonds` fold 0)
+  - but it hurts others (`california` fold 2) and does not move `house_prices`
+- so the expert-local gate needs a richer signal than one fixed per-expert weight for the whole dataset/fold
+
+So the next state of the lane is:
+- keep the stabilized hard-regime base
+- keep `routing_bias` and expert-local gating
+- stop using static mean opportunity scores as the next teacher
+- next design should use row-conditional or regime-conditional specialist opportunity, not one dataset-level average per expert
