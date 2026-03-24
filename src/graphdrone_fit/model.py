@@ -1040,6 +1040,13 @@ class GraphDrone:
                 token_dim=token_dim,
                 n_experts=va_tokens.tokens.shape[1],
             ).to(self.device)
+        self._router = self._maybe_attach_task_prior_router(
+            router=self._router,
+            router_cfg=self.config.router,
+            tokens=va_tokens.tokens,
+            descriptors=va_batch.descriptors,
+            task_type="regression",
+        )
 
         self._fit_router_auxiliary_state(self._router, aux_tokens_t, full_index=aux_batch.full_index)
 
@@ -1316,6 +1323,7 @@ class GraphDrone:
             diagnostics["alignment_aux_loss"] = float(router_out.aux_loss.detach().cpu().item())
         if router_out.extra_diagnostics:
             diagnostics.update(router_out.extra_diagnostics)
+        diagnostics.update(self._task_prior_diagnostics)
         diagnostics.update(
             self._attention_diagnostics(
                 expert_ids=active_batch.expert_ids,

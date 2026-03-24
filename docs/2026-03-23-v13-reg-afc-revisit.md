@@ -161,3 +161,57 @@ The lane now needs a different signal family:
 ## Acceptance
 
 This lane succeeds only if AFC-style geometry improvements also improve regression routing usefulness.
+
+## Fourth quick result: live regression task-prior / regime-conditioned router
+
+Contracts:
+- invalid first pass: `eval/v13_reg_task_prior_live_quick_v1/comparison/promotion_decision.json`
+- corrected rerun: `eval/v13_reg_task_prior_live_quick_v2/comparison/promotion_decision.json`
+- corrected report: `eval/v13_reg_task_prior_live_quick_v2/comparison/promotion_report.md`
+- challenger raw report: `eval/v13_reg_task_prior_live_quick_v2/raw/challenger/regression/report/results_granular.csv`
+
+Setup:
+- regression task bank fit from `california`, `cpu_act`, `elevators`, `kin8nm`
+- challenger router: `contextual_transformer`
+- task prior bank enabled
+- exact reuse blend enabled
+- regression legitimacy gate disabled
+
+What the first pass taught:
+- the first live regression task-prior contract was diagnostic-grade only
+- regression router fitting never called `_maybe_attach_task_prior_router(...)`
+- clean-routed regression predictions also failed to merge `self._task_prior_diagnostics`
+- that is why `v13_reg_task_prior_live_quick_v1` was bit-for-bit identical to the champion and surfaced no `task_prior_*` fields
+
+What was fixed:
+- regression router fitting now wraps the base router with the task-prior-conditioned router
+- clean-routed regression predictions now merge `task_prior_*` diagnostics like the classification path does
+- focused regression tests now cover both:
+  - regression prediction diagnostics include `task_prior_*`
+  - `_fit_regression_router()` actually attaches the task-prior wrapper
+
+What cleared on the corrected rerun:
+- the challenger is now a real regime-conditioned regression router, not a silent bypass
+- raw regression rows now show:
+  - `router_kind=contextual_transformer_router_task_prior`
+  - `task_prior_enabled=1`
+  - `task_prior_query_dataset` equal to the real dataset key
+  - exact reuse available on all known datasets
+- quick champion/challenger decision became `promote`
+  - mean RMSE relative improvement: `+0.032662`
+  - mean R² delta: `+0.007938`
+- the win is concentrated in the unstable regime:
+  - `california` mean RMSE improved from `14.7535` to `12.9852`
+  - one clean-routed fold improved sharply from `13.4676` to `7.7998`
+- `cpu_act`, `elevators`, and `kin8nm` stayed effectively flat
+
+Most important interpretation:
+- this is the first regression result on this lane where task-level learning is both:
+  - architecturally live
+  - benchmark-visible
+- the gain is not broad yet; it is regime-specific and currently concentrated on `california`
+- that still matters, because `california` is exactly the regime that had been exposing instability and weak single-dataset teaching signals
+- so the current read is:
+  - regression task priors are not just plumbing-ready
+  - they can improve the live route on at least one hard regime
+  - the next question is whether this survives the mini-full fold-0 gate and whether the gain remains localized to instability-heavy regimes

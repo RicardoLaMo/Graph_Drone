@@ -3,7 +3,7 @@
 This file is generated from `docs/research/findings.jsonl`.
 It is the current research surface for scaling decisions, not an append-only history.
 
-Updated: 2026-03-24T02:07:03.567338+00:00
+Updated: 2026-03-24T02:55:25.905654+00:00
 
 ## How To Read This
 
@@ -36,6 +36,7 @@ Updated: 2026-03-24T02:07:03.567338+00:00
 | `afc-b-reg-anchor-asymmetry` | `afc_phase_b` | Yes. The asymmetry was real and partly causal, but fixing it was not sufficient to make Phase B promotable. | `exp/afc-b-reg-anchor-exclusion` | `2026-03-23-afc-phase-b-anchor-exclusion.md` |
 | `v13-reg-afc-allocation-translation` | `v13_regression` | Partially. Adding a direct allocation-usefulness objective to the rotor route materially improved allocation diagnostics on the full clean-routed quick slice: weighted specialist advantage and positive specialist mass improved on cpu_act, elevators, and kin8nm relative to both the champion and the rotor-only challenger. But held-out RMSE still regressed slightly overall, and latency worsened sharply on cpu_act and elevators. So AFC on regression is now beyond pure geometry-only movement, yet it still does not translate improved allocation diagnostics into a promotable prediction-quality win. | `exp/v13-reg-afc-revisit` | `2026-03-23-v13-reg-afc-revisit.md` |
 | `v13-reg-stability-surface` | `v13_regression` | Partially. The regression stability lane now has three artifact layers: preserved row-level finiteness and fallback diagnostics, dataset-level fallback summaries, and explicit route-state summaries. The quick california+cpu_act contract verified that clean routed behavior and legitimacy-gate early exit are now separated directly in the benchmark outputs. This does not solve regression routing yet, but it removes a major source of diagnostic ambiguity. Separately, the current codebase already has generic regression task-prior plumbing, so LMA/task-level learning is implementation-ready once the local routing surface is trustworthy enough to teach it. | `exp/v13-reg-stability` | `2026-03-23-v13-reg-stability.md` |
+| `v13-reg-task-prior-regime-router` | `v13_regression` | Yes, on the first corrected quick contract. After fixing regression task-prior wiring, the live challenger became meaningfully different from the champion, surfaced explicit task-prior activation and exact reuse, and cleared the quick regression gate with a strong california gain. The effect is not broad yet: cpu_act, elevators, and kin8nm stayed effectively flat, and latency regressed slightly overall. This supports regression task priors as a real architectural lever while keeping the broader meta-prior claim short of established until mini-full. | `exp/v13-reg-afc-revisit` | `2026-03-23-v13-reg-afc-revisit.md` |
 
 ## Open
 
@@ -69,6 +70,7 @@ Updated: 2026-03-24T02:07:03.567338+00:00
 
 | Timestamp | Claim ID | Status | Summary |
 |---|---|---|---|
+| `2026-03-24T02:55:25.905176+00:00` | `v13-reg-task-prior-regime-router` | `partially_causal` | The first live regression task-prior run was invalid because regression never attached the task-prior wrapper and dropped task-prior diagnostics. After fixing both issues, the rerun produced explicit task-prior activation, exact reuse on known datasets, and a promotable quick-contract win concentrated on california. |
 | `2026-03-24T02:07:03.566799+00:00` | `v13-reg-afc-robust-allocation-target` | `falsified` | A robustness-aware AFC allocation reward still improved the local mechanism surface across the clean-routed regression slice, but held-out RMSE regressed more, not less. The current validation-side allocation target is therefore not causal enough even with a simple consistency filter. |
 | `2026-03-24T01:40:20.860371+00:00` | `v13-reg-afc-allocation-translation` | `partially_causal` | Rotor plus an allocation objective is the first AFC regression variant that improves the allocation surface across the entire clean-routed quick slice, but the held-out RMSE still regresses slightly and latency gets worse. The blocker has shifted from geometry-to-allocation translation toward allocation-to-outcome translation and routing efficiency. |
 | `2026-03-24T00:21:39.932370+00:00` | `v13-reg-afc-allocation-translation` | `partially_causal` | Rotor still shows real geometric activation on the corrected regression surface, and the narrow clean-routed quick slice was essentially flat-to-slightly-positive. But allocation/usefulness metrics did not improve with it, so AFC remains only partially translated for regression. |
@@ -80,5 +82,4 @@ Updated: 2026-03-24T02:07:03.567338+00:00
 | `2026-03-23T23:16:13.738272+00:00` | `v13-reg-afc-allocation-translation` | `open` | v1.3 keeps AFC alive for regression, but only as an allocation-translation question rather than as a presumed feature win. |
 | `2026-03-23T23:16:13.705585+00:00` | `v13-reg-realized-specialist-value` | `open` | The primary v1.3 regression question is whether routing can be trained to realize specialist value instead of merely detecting that it exists. |
 | `2026-03-23T23:16:13.673633+00:00` | `v13-reg-stability-surface` | `open` | v1.3 regression should begin with a stability lane that classifies and explains regression fallback modes instead of treating them as opaque safe fallbacks. |
-| `2026-03-23T19:59:55.186947+00:00` | `afc-framework-binary-rank-loss-probe` | `falsified` | The first binary rank-loss probe separated ranking-surface questions from calibration questions, but the current pairwise formulation did not translate into a better live task-prior route. It should not be the next default architecture step without a different target or coupling. |
 

@@ -1,9 +1,11 @@
 import numpy as np
 import torch
+from types import SimpleNamespace
 
-from graphdrone_fit.config import GraphDroneConfig, LegitimacyGateConfig
+from graphdrone_fit.config import GraphDroneConfig, LegitimacyGateConfig, SetRouterConfig
 from graphdrone_fit.expert_factory import ExpertPredictionBatch
 from graphdrone_fit.model import GraphDrone
+from graphdrone_fit.set_router import RouterOutputs
 from graphdrone_fit.view_descriptor import ViewDescriptor
 
 
@@ -317,3 +319,172 @@ def test_regression_legitimacy_early_exit_preserves_router_fit_diagnostics():
     assert diagnostics["validation_allocation_usefulness_score"] == 0.5
     assert diagnostics["validation_robust_allocation_usefulness_score"] == 0.4
     assert diagnostics["validation_conservative_allocation_penalty"] == 0.125
+
+
+def test_regression_predictions_include_task_prior_diagnostics_on_clean_route():
+    class DummyRouter(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.router_kind = "contextual_transformer_router_task_prior"
+
+        def forward(self, tokens: torch.Tensor, *, full_index: int) -> RouterOutputs:
+            batch, experts, _ = tokens.shape
+            weights = torch.full((batch, experts), 1.0 / experts, dtype=torch.float32)
+            return RouterOutputs(
+                defer_prob=torch.zeros((batch, 1), dtype=torch.float32),
+                specialist_weights=weights,
+                full_index=full_index,
+                router_kind=self.router_kind,
+                extra_diagnostics={"task_prior_enabled": 1.0},
+            )
+
+    gd = GraphDrone(
+        GraphDroneConfig(
+            legitimacy_gate=LegitimacyGateConfig(
+                enabled=False,
+                regression_enabled=False,
+                binary_enabled=False,
+                multiclass_enabled=False,
+            )
+        )
+    )
+    gd._problem_type = "regression"
+    gd._router = DummyRouter()
+    gd._task_prior_diagnostics = {
+        "task_prior_query_dataset": "cpu_act",
+        "task_prior_top_neighbor": "elevators",
+        "task_prior_exact_reuse_used": True,
+    }
+    gd._router_fit_diagnostics = {}
+    gd._attention_diagnostics = lambda **_: {}
+    gd._build_regression_tokens = lambda matrix, batch: SimpleNamespace(
+        tokens=torch.zeros((matrix.shape[0], len(batch.expert_ids), 4), dtype=torch.float32)
+    )
+
+    batch = ExpertPredictionBatch(
+        expert_ids=("FULL", "SUB0"),
+        descriptors=(
+            ViewDescriptor(
+                expert_id="FULL",
+                family="FULL",
+                view_name="Full",
+                is_anchor=True,
+                input_dim=2,
+                input_indices=(0, 1),
+            ),
+            ViewDescriptor(
+                expert_id="SUB0",
+                family="structural_subspace",
+                view_name="Sub",
+                input_dim=1,
+                input_indices=(0,),
+            ),
+        ),
+        predictions=np.array([[1.0, 1.5], [2.0, 2.5]], dtype=np.float32),
+        full_expert_id="FULL",
+        full_index=0,
+        quality_scores=None,
+    )
+
+    preds, diagnostics = gd._regression_predictions(np.zeros((2, 2), dtype=np.float32), batch)
+    assert preds.shape == (2,)
+    assert diagnostics["router_kind"] == "contextual_transformer_router_task_prior"
+    assert diagnostics["task_prior_enabled"] == 1.0
+    assert diagnostics["task_prior_query_dataset"] == "cpu_act"
+    assert diagnostics["task_prior_top_neighbor"] == "elevators"
+    assert diagnostics["task_prior_exact_reuse_used"] is True
+
+
+def test_fit_regression_router_attaches_task_prior_wrapper(monkeypatch):
+    class DummyFactory:
+        def predict_all(self, X: np.ndarray) -> ExpertPredictionBatch:
+            return ExpertPredictionBatch(
+                expert_ids=("FULL", "SUB0"),
+                descriptors=(
+                    ViewDescriptor(
+                        expert_id="FULL",
+                        family="FULL",
+                        view_name="Full",
+                        is_anchor=True,
+                        input_dim=2,
+                        input_indices=(0, 1),
+                    ),
+                    ViewDescriptor(
+                        expert_id="SUB0",
+                        family="structural_subspace",
+                        view_name="Sub",
+                        input_dim=1,
+                        input_indices=(0,),
+                    ),
+                ),
+                predictions=np.tile(np.array([[1.0, 1.2]], dtype=np.float32), (len(X), 1)),
+                full_expert_id="FULL",
+                full_index=0,
+                quality_scores=None,
+            )
+
+    class DummyRouter(torch.nn.Module):
+        def __init__(self, kind: str) -> None:
+            super().__init__()
+            self.router_kind = kind
+            self.weight = torch.nn.Parameter(torch.tensor(0.0))
+
+        def forward(self, tokens: torch.Tensor, *, full_index: int) -> RouterOutputs:
+            batch, experts, _ = tokens.shape
+            weights = torch.full((batch, experts), 1.0 / experts, dtype=torch.float32, device=tokens.device)
+            defer = torch.zeros((batch, 1), dtype=torch.float32, device=tokens.device)
+            return RouterOutputs(
+                defer_prob=defer,
+                specialist_weights=weights,
+                full_index=full_index,
+                router_kind=self.router_kind,
+            )
+
+    gd = GraphDrone(
+        GraphDroneConfig(
+            router=SetRouterConfig(
+                kind="contextual_transformer",
+                task_prior_bank_dir="/tmp/task-bank",
+                task_prior_encoder_kind="transformer",
+                task_prior_dataset_key="cpu_act",
+                task_prior_strength=0.5,
+            )
+        )
+    )
+    gd._problem_type = "regression"
+    gd._expert_factory = DummyFactory()
+    gd._train_views = {}
+    gd._router_fit_diagnostics = {}
+
+    monkeypatch.setattr("graphdrone_fit.model.build_set_router", lambda config, token_dim, n_experts: DummyRouter(config.kind))
+    monkeypatch.setattr(gd, "_seed_router_training", lambda: None)
+    monkeypatch.setattr(gd, "_sample_aux_rows", lambda X: X[: min(len(X), 4)])
+    monkeypatch.setattr(gd, "_build_regression_tokens", lambda X, batch: SimpleNamespace(tokens=torch.zeros((len(X), len(batch.expert_ids), 4), dtype=torch.float32)))
+    monkeypatch.setattr(gd, "_fit_router_auxiliary_state", lambda *args, **kwargs: None)
+    monkeypatch.setattr(gd, "_optimize_regression_router_module", lambda *args, **kwargs: None)
+
+    attach_calls = []
+
+    def fake_attach(*, router, router_cfg, tokens, descriptors, task_type):
+        attach_calls.append(
+            {
+                "router_kind": getattr(router, "router_kind", ""),
+                "dataset_key": router_cfg.task_prior_dataset_key,
+                "task_type": task_type,
+                "token_shape": tuple(tokens.shape),
+            }
+        )
+        wrapped = DummyRouter(f"{router.router_kind}_task_prior")
+        gd._task_prior_diagnostics = {"task_prior_query_dataset": router_cfg.task_prior_dataset_key}
+        return wrapped
+
+    monkeypatch.setattr(gd, "_maybe_attach_task_prior_router", fake_attach)
+
+    X = np.random.RandomState(0).randn(32, 2).astype(np.float32)
+    y = np.random.RandomState(1).randn(32).astype(np.float32)
+    gd._fit_regression_router(X, y)
+
+    assert len(attach_calls) == 1
+    assert attach_calls[0]["task_type"] == "regression"
+    assert attach_calls[0]["dataset_key"] == "cpu_act"
+    assert gd._router.router_kind == "contextual_transformer_task_prior"
