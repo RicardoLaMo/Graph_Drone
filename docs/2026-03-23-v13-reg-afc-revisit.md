@@ -573,3 +573,59 @@ So the next state of the lane is:
 - keep `routing_bias` and expert-local gating
 - stop using static mean opportunity scores as the next teacher
 - next design should use row-conditional or regime-conditional specialist opportunity, not one dataset-level average per expert
+
+## Twelfth result: row-conditional expert opportunity gating
+
+Contract:
+- `eval/v13_reg_task_prior_hardregimes_routingbias_expertrowopp_v1/comparison/promotion_decision.json`
+- `eval/v13_reg_task_prior_hardregimes_routingbias_expertrowopp_v1/comparison/paired_task_deltas.csv`
+- challenger raw report:
+  `eval/v13_reg_task_prior_hardregimes_routingbias_expertrowopp_v1/raw/challenger/regression/report/results_granular.csv`
+
+Architecture change:
+- keep the `routing_bias` task-prior route
+- keep row-level local gating
+- keep expert-local cosine gating
+- replace the static dataset-level expert-opportunity teacher with a per-row expert-opportunity gate derived from current expert-vs-anchor prediction disagreement
+
+Setup:
+- `task_prior_mode=routing_bias`
+- `task_prior_strength=0.5`
+- `task_prior_local_gate_alpha=2.0`
+- `task_prior_expert_local_gate_alpha=2.0`
+- `task_prior_row_expert_opportunity_alpha=4.0`
+- `task_prior_exact_reuse_blend=0.6`
+- same stabilized hard-regime slice: `california`, `diamonds`, `house_prices`
+- same six-dataset regression bank
+
+What cleared:
+- all 9 task-folds again stayed fully `clean_routed`
+- this was a real live router experiment, not an offline surrogate
+- the new gate changed the route materially:
+  - expert-local gate means dropped sharply relative to the simpler expert-local run
+  - some folds improved their validation-side allocation deltas
+    - `california` fold 1
+    - `diamonds` folds 1 and 2
+
+What did not clear:
+- promotion stayed `hold`
+- mean RMSE relative improvement regressed to `-0.000236`
+- this is worse than:
+  - expert-local gate: `+0.000200`
+  - static expert-opportunity gate: `-0.000147`
+- the main problem is not universal collapse; it is uneven row-level suppression:
+  - `california` fold 2 regressed more strongly than in the simpler expert-local route
+  - `house_prices` remained effectively unchanged
+
+Most important interpretation:
+- this does **not** falsify local-vs-global LMA or expert-local routing
+- it falsifies a second teacher formulation:
+  raw row-level disagreement is also not a sufficient opportunity signal by itself
+- compared with the static-opportunity version, this gate improved some local mechanism deltas
+  but it also pushed the expert-local gate means much lower, which likely over-suppressed experts on rows where disagreement was not actually useful
+
+So the next state of the lane is:
+- keep the stabilized routed surface
+- keep `routing_bias` and expert-local gating
+- stop treating raw disagreement magnitude as the opportunity teacher
+- the next design should use a residual or thresholded modulation of expert-local gates, so row-level opportunity shapes routing without collapsing specialist contribution

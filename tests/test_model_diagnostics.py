@@ -330,6 +330,25 @@ def test_regression_expert_opportunity_scores_favor_helpful_specialists() -> Non
     assert float(scores[1].item()) > float(scores[2].item())
 
 
+def test_regression_row_expert_opportunity_scores_track_disagreement() -> None:
+    expert_predictions = torch.tensor(
+        [
+            [10.0, 11.0, 30.0],
+            [5.0, 5.0, 7.0],
+        ],
+        dtype=torch.float32,
+    )
+    scores = GraphDrone._regression_row_expert_opportunity_scores(
+        expert_predictions=expert_predictions,
+        full_index=0,
+        alpha=4.0,
+    )
+    assert scores.shape == expert_predictions.shape
+    assert torch.allclose(scores[:, 0], torch.zeros(2))
+    assert float(scores[0, 2].item()) > float(scores[0, 1].item())
+    assert float(scores[1, 1].item()) <= float(scores[1, 2].item())
+
+
 def test_regression_legitimacy_early_exit_preserves_router_fit_diagnostics():
     gd = GraphDrone(
         GraphDroneConfig(

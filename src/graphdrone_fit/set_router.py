@@ -306,6 +306,7 @@ class TaskConditionedRouter(nn.Module):
         self.prior_to_defer = nn.Linear(prior_dim, 1)
         self.register_buffer("_task_prior_context", torch.zeros(prior_dim), persistent=False)
         self._expert_opportunity_scores: torch.Tensor | None = None
+        self._row_expert_opportunity_scores: torch.Tensor | None = None
         self._has_task_prior = False
 
     @torch.no_grad()
@@ -326,6 +327,13 @@ class TaskConditionedRouter(nn.Module):
         if score_tensor.ndim != 1:
             raise ValueError(f"expert opportunity scores must be 1D, got shape={tuple(score_tensor.shape)}")
         self._expert_opportunity_scores = score_tensor.clone()
+
+    @torch.no_grad()
+    def set_row_expert_opportunity_scores(self, scores: torch.Tensor) -> None:
+        score_tensor = torch.as_tensor(scores, dtype=self._task_prior_context.dtype, device=self._task_prior_context.device)
+        if score_tensor.ndim != 2:
+            raise ValueError(f"row expert opportunity scores must be 2D, got shape={tuple(score_tensor.shape)}")
+        self._row_expert_opportunity_scores = score_tensor.clone()
 
     @torch.no_grad()
     def fit_auxiliary_state(self, tokens: torch.Tensor, *, full_index: int) -> None:
@@ -351,6 +359,8 @@ class TaskConditionedRouter(nn.Module):
         expert_local_gate_mean = 1.0
         expert_local_gate_std = 0.0
         expert_opportunity_mean = 1.0
+        row_expert_opportunity_mean = 1.0
+        row_expert_opportunity_std = 0.0
         if self.mode == "routing_bias":
             prior_basis = F.normalize(self.prior_to_logit(prior_context), dim=0)
             normalized_tokens = F.normalize(tokens, dim=-1)
@@ -374,6 +384,12 @@ class TaskConditionedRouter(nn.Module):
                 if opportunity.shape[0] == tokens.shape[1]:
                     expert_local_gate = expert_local_gate * opportunity.unsqueeze(0)
                     expert_opportunity_mean = float(opportunity.mean().item())
+            if self._row_expert_opportunity_scores is not None:
+                row_opportunity = self._row_expert_opportunity_scores.to(tokens.device)
+                if row_opportunity.shape == expert_local_gate.shape:
+                    expert_local_gate = expert_local_gate * row_opportunity
+                    row_expert_opportunity_mean = float(row_opportunity.mean().item())
+                    row_expert_opportunity_std = float(row_opportunity.std(unbiased=False).item())
             expert_logit_bias = (
                 self.strength
                 * local_gate.unsqueeze(1)
@@ -418,6 +434,8 @@ class TaskConditionedRouter(nn.Module):
                 "task_prior_expert_local_gate_mean": expert_local_gate_mean,
                 "task_prior_expert_local_gate_std": expert_local_gate_std,
                 "task_prior_expert_opportunity_mean": expert_opportunity_mean,
+                "task_prior_row_expert_opportunity_mean": row_expert_opportunity_mean,
+                "task_prior_row_expert_opportunity_std": row_expert_opportunity_std,
             }
         )
         return replace(outputs, router_kind=self.router_kind, extra_diagnostics=diagnostics)

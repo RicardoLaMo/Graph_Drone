@@ -339,6 +339,25 @@ class GraphDrone:
         return scores
 
     @staticmethod
+    def _regression_row_expert_opportunity_scores(
+        expert_predictions: torch.Tensor,
+        *,
+        full_index: int,
+        alpha: float,
+    ) -> torch.Tensor:
+        if expert_predictions.ndim != 2:
+            raise ValueError(f"expert_predictions must be 2D, got shape={tuple(expert_predictions.shape)}")
+        anchor = expert_predictions[:, full_index : full_index + 1]
+        disagreement = (expert_predictions - anchor).abs()
+        disagreement[:, full_index] = 0.0
+        row_max = disagreement.max(dim=1, keepdim=True).values
+        normalized = torch.where(row_max > 0, disagreement / row_max.clamp_min(1e-12), torch.zeros_like(disagreement))
+        if alpha > 0:
+            normalized = torch.sigmoid(alpha * (normalized - 0.5))
+        normalized[:, full_index] = 0.0
+        return normalized
+
+    @staticmethod
     def _attention_diagnostics(
         *,
         expert_ids: tuple[str, ...],
@@ -1126,7 +1145,18 @@ class GraphDrone:
             descriptors=va_batch.descriptors,
             task_type="regression",
         )
-        if hasattr(self._router, "set_expert_opportunity_scores"):
+        if (
+            hasattr(self._router, "set_row_expert_opportunity_scores")
+            and self.config.router.task_prior_row_expert_opportunity_alpha > 0
+        ):
+            self._router.set_row_expert_opportunity_scores(
+                self._regression_row_expert_opportunity_scores(
+                    expert_predictions=v_preds_t,
+                    full_index=va_batch.full_index,
+                    alpha=self.config.router.task_prior_row_expert_opportunity_alpha,
+                )
+            )
+        elif hasattr(self._router, "set_expert_opportunity_scores"):
             self._router.set_expert_opportunity_scores(
                 self._regression_expert_opportunity_scores(
                     expert_predictions=v_preds_t,
@@ -1369,6 +1399,18 @@ class GraphDrone:
         self._router.eval()
         with torch.no_grad():
             token_tensor = tokens.tokens.to(self.device)
+            if (
+                hasattr(self._router, "set_row_expert_opportunity_scores")
+                and self.config.router.task_prior_row_expert_opportunity_alpha > 0
+            ):
+                pred_tensor = torch.as_tensor(active_batch.predictions, dtype=torch.float32, device=self.device)
+                self._router.set_row_expert_opportunity_scores(
+                    self._regression_row_expert_opportunity_scores(
+                        expert_predictions=pred_tensor,
+                        full_index=active_batch.full_index,
+                        alpha=self.config.router.task_prior_row_expert_opportunity_alpha,
+                    )
+                )
             router_out = self._router(token_tensor, full_index=active_batch.full_index)
             router_has_nonfinite = (
                 (not torch.isfinite(router_out.specialist_weights).all())
