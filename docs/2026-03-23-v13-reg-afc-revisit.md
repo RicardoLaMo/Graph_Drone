@@ -46,6 +46,8 @@ Contract:
 - `eval/v13_reg_afc_rotor_quick_v1/comparison/promotion_decision.json`
 - `eval/v13_reg_afc_rotor_quick_v1/comparison/claim_report.json`
 - `eval/v13_reg_afc_rotor_quick_v1/comparison/paired_task_deltas.csv`
+- `eval/v13_reg_afc_rotor_quick_v2/comparison/paired_mechanism_summary.csv`
+- `eval/v13_reg_afc_rotor_quick_v2/comparison/promotion_report.md`
 
 Setup:
 - regression legitimacy gate disabled to force a learned-routing surface
@@ -67,10 +69,11 @@ What did not clear:
 Most important interpretation:
 - the narrow quick slice gives a tiny positive metric average
 - but the allocation story is weaker than that headline suggests
-- comparing raw champion vs challenger regression rows shows:
-  - mean weighted specialist advantage got slightly more negative overall
-  - mean positive specialist mass also slipped slightly overall
-  - defer fell on average
+- the paired mechanism summary now makes that visible directly:
+  - `cpu_act` improved weighted specialist advantage slightly
+  - `elevators` and `kin8nm` both got worse on weighted specialist advantage
+  - positive specialist mass also fell on `elevators` and `kin8nm`
+  - defer fell on `elevators` and `kin8nm`
 
 So the first AFC revisit result is:
 - geometry: yes
