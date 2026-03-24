@@ -215,3 +215,46 @@ Most important interpretation:
   - regression task priors are not just plumbing-ready
   - they can improve the live route on at least one hard regime
   - the next question is whether this survives the mini-full fold-0 gate and whether the gain remains localized to instability-heavy regimes
+
+## Fifth result: regression task-prior mini-full fold 0
+
+Contract:
+- `eval/v13_reg_task_prior_live_mini_v1/comparison/promotion_decision.json`
+- `eval/v13_reg_task_prior_live_mini_v1/comparison/promotion_report.md`
+- `eval/v13_reg_task_prior_live_mini_v1/comparison/paired_mechanism_summary.csv`
+- challenger raw report: `eval/v13_reg_task_prior_live_mini_v1/raw/challenger/regression/report/results_granular.csv`
+
+Setup:
+- same task-prior bank and exact reuse blend as the corrected quick run
+- gate: mini-full
+- tasks: regression fold `0`
+- datasets: `california`, `diamonds`, `house_prices`, `elevators`, `cpu_act`, `kin8nm`
+
+What cleared:
+- the challenger remained architecturally live on the clean-routed datasets:
+  - `cpu_act`, `elevators`, and `kin8nm` all surfaced
+    `router_kind=contextual_transformer_router_task_prior`
+  - `task_prior_enabled=1`
+  - exact reuse remained available on the known bank datasets
+- so the quick result was not a one-off wiring artifact; the live regression task-prior path persists on the mini-full contract
+
+What did not clear:
+- promotion decision returned `hold`
+  - mean RMSE relative improvement: `+0.000006`
+  - mean R² delta: `+0.000001`
+- the contract was essentially flat overall
+
+Most important interpretation:
+- the mini-full failure is not “task prior stopped working”
+- it is more specific:
+  - the datasets where the task prior was active on this contract (`cpu_act`, `elevators`, `kin8nm`) were already near-flat regimes, and they stayed near-flat
+  - the unstable regimes where a stronger gain would matter most (`california`, `diamonds`, `house_prices`) still fell into `router_training_nonfinite_anchor_only`
+  - once they fall back that early, the task-prior route cannot express itself
+- this is why the quick contract looked promising while mini-full went flat:
+  - quick included clean-routed `california` folds where the task prior could act
+  - mini-full fold `0` happened to include only the `california` fallback fold, not the clean-routed winning folds
+
+So the current state of the claim is:
+- regression task-prior routing is real
+- it can help on at least one hard regime when the learned router survives
+- but on the mini-full fold-0 contract, the broader bottleneck is still regression router stability on the hard datasets, not absence of a useful task prior
