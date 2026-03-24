@@ -1,228 +1,295 @@
-"""
-Unit tests for task_conditioned_prior and TaskConditionedRouter (Phase 2 / V1.3).
-
-Tests the bank serialization round-trip, encoder forward pass,
-TaskConditionedRouter passthrough and injection modes.
-"""
 from __future__ import annotations
 
 import json
-import tempfile
-from pathlib import Path
 
-import pytest
+import pandas as pd
 import torch
-import torch.nn.functional as F
 
 from graphdrone_fit.task_conditioned_prior import (
-    TaskContextBatch,
-    TaskContextNormalization,
-    TaskPrototypeBank,
+    TaskContextSequenceAutoencoder,
+    TaskContextGRUEncoder,
     apply_task_context_normalization,
-    build_task_context_encoder,
+    build_task_context_frame_from_router_tokens,
+    build_task_prototype_bank,
+    embedding_neighbor_distribution,
     fit_task_context_normalization,
+    metadata_neighbor_targets,
+    neighborhood_consistency_loss,
+    TaskContextTransformerEncoder,
+    build_task_context_batch,
     load_task_prototype_bank,
-    normalized_centroids,
+    query_task_prototype_bank,
     save_task_prototype_bank,
+    slice_batch_by_datasets,
+    split_batch_by_dataset,
     supervised_contrastive_loss,
+    update_task_prototype_bank_feedback,
 )
-from graphdrone_fit.set_router import TaskConditionedRouter
 
 
-# ---------------------------------------------------------------------------
-# Bank serialization round-trip
-# ---------------------------------------------------------------------------
+def _task_context_frame() -> pd.DataFrame:
+    rows = []
+    for dataset in ["a", "b"]:
+        for bootstrap_id in [0, 1]:
+            for expert_id, family, is_anchor in [("FULL", "FULL", 1), ("SUB0", "structural_subspace", 0), ("SUB1", "structural_subspace", 0)]:
+                rows.append(
+                    {
+                        "dataset": dataset,
+                        "task_type": "classification",
+                        "bootstrap_id": bootstrap_id,
+                        "expert_id": expert_id,
+                        "family": family,
+                        "projection_kind": "identity_subselect",
+                        "input_dim": 8 if is_anchor else 4,
+                        "preferred_k": 15,
+                        "is_anchor": is_anchor,
+                        "mean_norm": 1.0,
+                        "std_norm": 0.5,
+                        "mean_token_json": json.dumps([0.1, 0.2, 0.3]),
+                    }
+                )
+    return pd.DataFrame(rows)
 
-def _make_dummy_bank(dataset_names: tuple[str, ...] = ("ds_a", "ds_b")) -> TaskPrototypeBank:
-    dim = 8
-    centroids = {name: F.normalize(torch.randn(dim), dim=-1) for name in dataset_names}
-    counts = {name: 3 for name in dataset_names}
-    return TaskPrototypeBank(
-        dataset_names=dataset_names,
-        centroids=centroids,
-        counts=counts,
-        feature_names=tuple(f"f{i}" for i in range(4)),
+
+def test_build_task_context_batch_orders_full_first() -> None:
+    batch = build_task_context_batch(_task_context_frame())
+    assert batch.sequences.shape == (4, 3, batch.sequences.shape[-1])
+    assert batch.labels.shape[0] == 4
+    assert batch.dataset_names == ("a", "b")
+    assert batch.example_datasets == ("a", "a", "b", "b")
+
+
+def test_transformer_encoder_forward_shape() -> None:
+    batch = build_task_context_batch(_task_context_frame())
+    encoder = TaskContextTransformerEncoder(input_dim=batch.sequences.shape[-1], hidden_dim=32, num_heads=4, num_layers=1)
+    out = encoder(batch.sequences)
+    assert out.shape == (4, 32)
+    assert torch.isfinite(out).all()
+
+
+def test_gru_encoder_forward_shape() -> None:
+    batch = build_task_context_batch(_task_context_frame())
+    encoder = TaskContextGRUEncoder(input_dim=batch.sequences.shape[-1], hidden_dim=32, num_layers=1)
+    out = encoder(batch.sequences)
+    assert out.shape == (4, 32)
+    assert torch.isfinite(out).all()
+
+
+def test_split_batch_by_dataset() -> None:
+    batch = build_task_context_batch(_task_context_frame())
+    train_batch, test_batch = split_batch_by_dataset(batch, "b")
+    assert train_batch.sequences.shape[0] == 2
+    assert test_batch.sequences.shape[0] == 2
+    assert all(name == "a" for name in train_batch.example_datasets)
+    assert all(name == "b" for name in test_batch.example_datasets)
+
+
+def test_sequence_autoencoder_forward_shape() -> None:
+    batch = build_task_context_batch(_task_context_frame())
+    encoder = TaskContextTransformerEncoder(input_dim=batch.sequences.shape[-1], hidden_dim=32, num_heads=4, num_layers=1)
+    model = TaskContextSequenceAutoencoder(encoder=encoder, hidden_dim=32, seq_len=batch.sequences.shape[1], input_dim=batch.sequences.shape[2])
+    recon, embedding = model(batch.sequences)
+    assert recon.shape == batch.sequences.shape
+    assert embedding.shape == (4, 32)
+    assert torch.isfinite(recon).all()
+
+
+def test_task_context_normalization_preserves_binary_features() -> None:
+    batch = build_task_context_batch(_task_context_frame())
+    norm = fit_task_context_normalization(batch)
+    normalized = apply_task_context_normalization(batch, norm)
+    is_anchor_idx = batch.feature_names.index("is_anchor")
+    assert torch.equal(batch.sequences[..., is_anchor_idx], normalized.sequences[..., is_anchor_idx])
+
+
+def test_slice_batch_by_datasets() -> None:
+    batch = build_task_context_batch(_task_context_frame())
+    sliced = slice_batch_by_datasets(batch, ["b"])
+    assert sliced.dataset_names == ("b",)
+    assert sliced.example_datasets == ("b", "b")
+
+
+def test_task_prototype_bank_save_load_and_query(tmp_path) -> None:
+    batch = build_task_context_batch(_task_context_frame())
+    embeddings = torch.tensor(
+        [
+            [1.0, 0.0],
+            [0.9, 0.1],
+            [0.0, 1.0],
+            [0.1, 0.9],
+        ],
+        dtype=torch.float32,
+    )
+    bank = build_task_prototype_bank(
+        embeddings=embeddings,
+        batch=batch,
         encoder_kind="transformer",
-        hidden_dim=dim,
-        normalize_features=True,
+        hidden_dim=2,
+        normalize_features=False,
+        normalization=None,
     )
+    path = tmp_path / "bank.json"
+    save_task_prototype_bank(bank, path)
+    loaded = load_task_prototype_bank(path)
+    assert loaded.dataset_names == ("a", "b")
+    assert loaded.encoder_kind == "transformer"
+    result = query_task_prototype_bank(loaded, embeddings[:2], query_dataset="a", top_k=2)
+    assert result["known_dataset"] is True
+    assert result["exact_reuse_available"] is True
+    assert result["top_neighbors"][0]["dataset"] == "a"
+    assert result["similar_neighbors_excluding_exact"][0]["dataset"] == "b"
 
 
-def test_bank_serialization_round_trip():
-    bank = _make_dummy_bank()
-    with tempfile.TemporaryDirectory() as tmpdir:
-        path = Path(tmpdir) / "bank.json"
-        save_task_prototype_bank(bank, path)
-        assert path.exists()
-        loaded = load_task_prototype_bank(path)
-
-    assert loaded.dataset_names == bank.dataset_names
-    assert loaded.encoder_kind == bank.encoder_kind
-    assert loaded.hidden_dim == bank.hidden_dim
-    assert loaded.normalize_features == bank.normalize_features
-    for name in bank.dataset_names:
-        assert name in loaded.centroids
-        torch.testing.assert_close(loaded.centroids[name], bank.centroids[name], atol=1e-5, rtol=0)
-
-
-def test_bank_serialization_with_normalization():
-    bank = _make_dummy_bank()
-    norm = TaskContextNormalization(
-        mean=torch.zeros(6),
-        std=torch.ones(6),
-        continuous_mask=torch.tensor([True, True, False, True, False, True]),
+def test_supervised_contrastive_loss_prefers_grouped_embeddings() -> None:
+    labels = torch.tensor([0, 0, 1, 1], dtype=torch.long)
+    grouped = torch.tensor(
+        [
+            [1.0, 0.0],
+            [0.9, 0.1],
+            [0.0, 1.0],
+            [0.1, 0.9],
+        ],
+        dtype=torch.float32,
     )
-    bank_with_norm = TaskPrototypeBank(
-        dataset_names=bank.dataset_names,
-        centroids=bank.centroids,
-        counts=bank.counts,
-        feature_names=bank.feature_names,
-        encoder_kind=bank.encoder_kind,
-        hidden_dim=bank.hidden_dim,
-        normalize_features=bank.normalize_features,
-        normalization=norm,
+    mixed = torch.tensor(
+        [
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [0.9, 0.1],
+            [0.1, 0.9],
+        ],
+        dtype=torch.float32,
     )
-    with tempfile.TemporaryDirectory() as tmpdir:
-        path = Path(tmpdir) / "bank_norm.json"
-        save_task_prototype_bank(bank_with_norm, path)
-        loaded = load_task_prototype_bank(path)
-    assert loaded.normalization is not None
-    torch.testing.assert_close(loaded.normalization.mean, norm.mean)
-    torch.testing.assert_close(loaded.normalization.std, norm.std)
+    grouped_loss = supervised_contrastive_loss(grouped, labels, temperature=0.1)
+    mixed_loss = supervised_contrastive_loss(mixed, labels, temperature=0.1)
+    assert grouped_loss < mixed_loss
 
 
-# ---------------------------------------------------------------------------
-# Encoder forward pass
-# ---------------------------------------------------------------------------
-
-@pytest.mark.parametrize("encoder_kind", ["transformer", "gru"])
-def test_encoder_forward_shape(encoder_kind: str):
-    input_dim, hidden_dim, batch, seq_len = 10, 32, 4, 3
-    encoder = build_task_context_encoder(encoder_kind, input_dim=input_dim, hidden_dim=hidden_dim)
-    sequences = torch.randn(batch, seq_len, input_dim)
-    with torch.no_grad():
-        out = encoder(sequences)
-    assert out.shape == (batch, hidden_dim), f"expected ({batch}, {hidden_dim}), got {tuple(out.shape)}"
+def test_metadata_neighbor_targets_form_probability_rows() -> None:
+    batch = build_task_context_batch(_task_context_frame())
+    targets = metadata_neighbor_targets(batch, temperature=0.2)
+    assert targets.shape == (2, 2)
+    assert torch.allclose(targets.sum(dim=-1), torch.ones(2))
+    assert torch.allclose(torch.diag(targets), torch.zeros(2))
 
 
-def test_encoder_unknown_kind_raises():
-    with pytest.raises(ValueError, match="Unsupported encoder_kind"):
-        build_task_context_encoder("unknown_kind", input_dim=10, hidden_dim=32)
-
-
-# ---------------------------------------------------------------------------
-# TaskConditionedRouter
-# ---------------------------------------------------------------------------
-
-class _DummyRouter(torch.nn.Module):
-    """Minimal router for testing TaskConditionedRouter wrapper."""
-
-    router_kind = "dummy"
-
-    def __init__(self, token_dim: int, n_experts: int):
-        super().__init__()
-        self.token_dim = token_dim
-        self.n_experts = n_experts
-
-    def forward(self, tokens: torch.Tensor, *, full_index: int):
-        from graphdrone_fit.set_router import RouterOutputs
-        B = tokens.shape[0]
-        E = tokens.shape[1]
-        weights = torch.ones(B, E - 1) / (E - 1)  # uniform specialist weights
-        defer_prob = torch.full((B, 1), 0.5)
-        return RouterOutputs(
-            specialist_weights=weights,
-            defer_prob=defer_prob,
-            full_index=full_index,
-            router_kind="dummy",
-            extra_diagnostics={},
-        )
-
-
-def test_task_conditioned_router_passthrough_without_prior():
-    token_dim, prior_dim = 16, 8
-    base = _DummyRouter(token_dim=token_dim, n_experts=3)
-    router = TaskConditionedRouter(
-        token_dim=token_dim,
-        prior_dim=prior_dim,
-        base_router=base,
-        strength=1.0,
-        router_kind="dummy_task_prior",
+def test_neighborhood_consistency_loss_is_finite() -> None:
+    batch = build_task_context_batch(_task_context_frame())
+    embeddings = torch.tensor(
+        [
+            [1.0, 0.0],
+            [0.9, 0.1],
+            [0.0, 1.0],
+            [0.1, 0.9],
+        ],
+        dtype=torch.float32,
     )
-    tokens = torch.randn(5, 3, token_dim)
-    out = router(tokens, full_index=0)
-    # No prior set → should passthrough with task_prior_enabled=0
-    assert out.extra_diagnostics is not None
-    assert out.extra_diagnostics.get("task_prior_enabled") == 0.0
+    targets = metadata_neighbor_targets(batch, temperature=0.2)
+    loss = neighborhood_consistency_loss(embeddings, batch, target_distributions=targets, temperature=0.1)
+    pred = embedding_neighbor_distribution(embeddings, batch, temperature=0.1)
+    assert torch.isfinite(loss)
+    assert pred.shape == targets.shape
 
 
-def test_task_conditioned_router_with_prior():
-    token_dim, prior_dim = 16, 8
-    base = _DummyRouter(token_dim=token_dim, n_experts=3)
-    router = TaskConditionedRouter(
-        token_dim=token_dim,
-        prior_dim=prior_dim,
-        base_router=base,
-        strength=1.0,
-        router_kind="dummy_task_prior",
+def test_build_task_context_frame_from_router_tokens_uses_descriptors_not_names() -> None:
+    batch = build_task_context_batch(_task_context_frame())
+    frame = build_task_context_frame_from_router_tokens(
+        tokens=batch.sequences[:1],
+        descriptors=[
+            type("D", (), {"expert_id": "FULL", "family": "FULL", "projection_kind": "identity_subselect", "input_dim": 8, "preferred_k": 15, "is_anchor": True})(),
+            type("D", (), {"expert_id": "SUB0", "family": "structural_subspace", "projection_kind": "identity_subselect", "input_dim": 4, "preferred_k": 15, "is_anchor": False})(),
+            type("D", (), {"expert_id": "SUB1", "family": "structural_subspace", "projection_kind": "identity_subselect", "input_dim": 4, "preferred_k": 15, "is_anchor": False})(),
+        ],
+        dataset_name="opaque_dataset_name",
+        task_type="classification",
     )
-    prior_ctx = torch.randn(prior_dim)
-    router.set_task_prior_context(prior_ctx)
-    tokens = torch.randn(5, 3, token_dim)
-    out = router(tokens, full_index=0)
-    assert out.extra_diagnostics is not None
-    assert out.extra_diagnostics.get("task_prior_enabled") == 1.0
-    assert "task_prior_strength" in out.extra_diagnostics
-    assert "task_prior_norm" in out.extra_diagnostics
+    assert list(frame["dataset"].unique()) == ["opaque_dataset_name"]
+    assert set(frame["expert_id"]) == {"FULL", "SUB0", "SUB1"}
+    assert "mean_token_json" in frame.columns
 
 
-def test_task_conditioned_router_strength_zero_passthrough():
-    token_dim, prior_dim = 16, 8
-    base = _DummyRouter(token_dim=token_dim, n_experts=3)
-    router = TaskConditionedRouter(
-        token_dim=token_dim,
-        prior_dim=prior_dim,
-        base_router=base,
-        strength=0.0,
-        router_kind="dummy_task_prior",
+def test_task_context_batch_uses_schema_stable_token_summaries() -> None:
+    batch = build_task_context_batch(_task_context_frame())
+    assert "token_mean" in batch.feature_names
+    assert "token_dim" in batch.feature_names
+    assert all(not name.startswith("mean_token_") for name in batch.feature_names)
+
+
+def test_task_prototype_bank_feedback_is_saved_and_loaded(tmp_path) -> None:
+    batch = build_task_context_batch(_task_context_frame())
+    embeddings = torch.tensor(
+        [
+            [1.0, 0.0],
+            [0.9, 0.1],
+            [0.0, 1.0],
+            [0.1, 0.9],
+        ],
+        dtype=torch.float32,
     )
-    router.set_task_prior_context(torch.randn(prior_dim))
-    tokens = torch.randn(5, 3, token_dim)
-    out = router(tokens, full_index=0)
-    # strength=0 → passthrough even if prior is set
-    assert out.extra_diagnostics is not None
-    assert out.extra_diagnostics.get("task_prior_enabled") == 0.0
-
-
-def test_task_conditioned_router_dim_mismatch_raises():
-    token_dim, prior_dim = 16, 8
-    base = _DummyRouter(token_dim=token_dim, n_experts=3)
-    router = TaskConditionedRouter(
-        token_dim=token_dim,
-        prior_dim=prior_dim,
-        base_router=base,
-        strength=1.0,
-        router_kind="dummy_task_prior",
+    bank = build_task_prototype_bank(
+        embeddings=embeddings,
+        batch=batch,
+        encoder_kind="transformer",
+        hidden_dim=2,
+        normalize_features=False,
+        normalization=None,
     )
-    wrong_dim_ctx = torch.randn(prior_dim + 4)
-    with pytest.raises(ValueError, match="dim mismatch"):
-        router.set_task_prior_context(wrong_dim_ctx)
+    updated = update_task_prototype_bank_feedback(
+        bank,
+        query_dataset="a",
+        query_embeddings=embeddings[:2],
+        reward=0.2,
+        neighbor_rewards={"b": 0.15},
+    )
+    path = tmp_path / "bank.json"
+    save_task_prototype_bank(updated, path)
+    loaded = load_task_prototype_bank(path)
+    assert loaded.dataset_feedback["a"]["updates"] == 1
+    assert loaded.dataset_feedback["a"]["neighbor_rewards"]["b"]["count"] == 1
+    assert loaded.dataset_feedback["a"]["neighbor_rewards"]["b"]["reward_sum"] == 0.15
 
 
-# ---------------------------------------------------------------------------
-# Supervised contrastive loss
-# ---------------------------------------------------------------------------
-
-def test_supervised_contrastive_loss_positive():
-    torch.manual_seed(0)
-    embeddings = torch.randn(8, 16)
-    labels = torch.tensor([0, 0, 1, 1, 2, 2, 2, 2])
-    loss = supervised_contrastive_loss(embeddings, labels)
-    assert loss.item() > 0
-
-
-def test_supervised_contrastive_loss_requires_positive_pairs():
-    embeddings = torch.randn(3, 8)
-    labels = torch.tensor([0, 1, 2])  # all unique → no positive pairs
-    with pytest.raises(ValueError, match="positive pair"):
-        supervised_contrastive_loss(embeddings, labels)
+def test_query_task_prototype_bank_uses_feedback_bias_for_similar_queries() -> None:
+    batch = build_task_context_batch(_task_context_frame())
+    embeddings = torch.tensor(
+        [
+            [1.0, 0.0],
+            [0.95, 0.05],
+            [0.0, 1.0],
+            [0.05, 0.95],
+        ],
+        dtype=torch.float32,
+    )
+    base_bank = build_task_prototype_bank(
+        embeddings=embeddings,
+        batch=batch,
+        encoder_kind="transformer",
+        hidden_dim=2,
+        normalize_features=False,
+        normalization=None,
+    )
+    feedback_bank = update_task_prototype_bank_feedback(
+        base_bank,
+        query_dataset="a",
+        query_embeddings=embeddings[:2],
+        reward=0.4,
+        neighbor_rewards={"b": 0.4},
+    )
+    feedback_bank = type(feedback_bank)(
+        dataset_names=feedback_bank.dataset_names,
+        centroids=feedback_bank.centroids,
+        counts=feedback_bank.counts,
+        feature_names=feedback_bank.feature_names,
+        encoder_kind=feedback_bank.encoder_kind,
+        hidden_dim=feedback_bank.hidden_dim,
+        normalize_features=feedback_bank.normalize_features,
+        training_objective=feedback_bank.training_objective,
+        normalization=feedback_bank.normalization,
+        feedback_blend=1.0,
+        feedback_temperature=0.1,
+        dataset_feedback=feedback_bank.dataset_feedback,
+    )
+    query = torch.tensor([[0.98, 0.02]], dtype=torch.float32)
+    result = query_task_prototype_bank(feedback_bank, query, query_dataset="unseen", top_k=2)
+    assert result["feedback_used"] is True
+    assert result["neighbor_probabilities"]["b"] > result["base_neighbor_probabilities"]["b"]

@@ -89,13 +89,20 @@ QUICK_DATASETS = {
 
 GRAPHDRONE_VERSION = os.getenv("GRAPHDRONE_VERSION_OVERRIDE", "2026.03.23-clf-v1.3-phase3b")
 GRAPHDRONE_PRESET = os.getenv("GRAPHDRONE_PRESET", "v1_3_phase3b")
+SAVE_CLASSIFICATION_PREDICTIONS = os.getenv("GRAPHDRONE_SAVE_CLASSIFICATION_PREDICTIONS", "0").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
 
-def _graphdrone_config(*, n_classes: int = 1, default_router_kind: str) -> GraphDroneConfig:
+def _graphdrone_config(*, n_classes: int = 1, default_router_kind: str, dataset_key: str | None = None) -> GraphDroneConfig:
     return build_graphdrone_config_from_preset(
         preset=GRAPHDRONE_PRESET,
         n_classes=n_classes,
         default_router_kind=default_router_kind,
+        task_prior_dataset_key=dataset_key,
     )
 
 
@@ -159,6 +166,14 @@ def load_cache(path: Path) -> Optional[dict]:
 def save_cache(path: Path, payload: dict):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2))
+
+
+def _prediction_payload(y_true: np.ndarray, y_pred_proba: np.ndarray, y_pred_labels: np.ndarray) -> dict[str, object]:
+    return {
+        "y_true": np.asarray(y_true).astype(int).tolist(),
+        "y_pred_proba": np.asarray(y_pred_proba).astype(float).tolist(),
+        "y_pred_labels": np.asarray(y_pred_labels).astype(int).tolist(),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -243,12 +258,32 @@ def _diagnostic_payload(diagnostics: dict[str, object]) -> dict[str, object]:
         "alignment_cosine_pre",
         "alignment_cosine_post",
         "alignment_cosine_gain",
+        "task_prior_enabled",
+        "task_prior_strength",
+        "task_prior_norm",
+        "task_prior_training_objective",
+        "task_prior_encoder_kind",
+        "task_prior_query_dataset",
+        "task_prior_top_neighbor",
+        "task_prior_top_neighbor_prob",
+        "task_prior_base_top_neighbor",
+        "task_prior_base_top_neighbor_prob",
+        "task_prior_entropy",
+        "task_prior_exact_reuse_available",
+        "task_prior_exact_reuse_blend",
+        "task_prior_exact_reuse_used",
+        "task_prior_feedback_used",
+        "task_prior_feedback_top_source",
+        "task_prior_feedback_top_source_weight",
         "validation_best_specialist_advantage_score",
         "validation_weighted_specialist_advantage_score",
         "validation_defer_weighted_specialist_advantage_score",
         "validation_top_specialist_advantage_score",
+        "validation_positive_specialist_opportunity_score",
+        "validation_residual_usefulness_gap",
         "validation_positive_specialist_mass",
         "validation_top_specialist_positive_rate",
+        "validation_residual_usefulness_lambda",
     )
     payload: dict[str, object] = {}
     for key in keep_keys:
@@ -310,7 +345,7 @@ def run_graphdrone(X_tr, y_tr, X_te, task_type: str, seed: int = 42, n_classes: 
                 model_params=params_fp,
             ),
         )
-        cfg = _graphdrone_config(default_router_kind="noise_gate_router")
+        cfg = _graphdrone_config(default_router_kind="noise_gate_router", dataset_key=dataset)
         gd = GraphDrone(cfg)
         gd.fit(X_tr, y_tr, expert_specs=specs, problem_type="regression")
     else:
@@ -433,6 +468,8 @@ def run_task(dataset: str, fold: int, cache_dir: Path, max_samples: int, methods
                 "defer": float(defer) if not np.isnan(float(defer)) else None,
                 "elapsed": elapsed,
             }
+            if task_type == "classification" and SAVE_CLASSIFICATION_PREDICTIONS:
+                payload["predictions"] = _prediction_payload(y_te, proba, labels)
             save_cache(cpath, payload)
             rows.append({
                 **metrics,

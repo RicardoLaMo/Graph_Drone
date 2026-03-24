@@ -46,6 +46,7 @@ class GraphDroneTabArenaAdapter(AbstractExecModel):
         legitimacy_variance_threshold: float = 0.005,
         use_hyperbolic_descriptors: bool = False,
         alignment_lambda: float = 0.1,
+        residual_usefulness_lambda: float = 0.0,
         ot_prototype_count: int = 32,
         ot_epsilon: float = 0.05,
         ot_max_iter: int = 50,
@@ -68,6 +69,7 @@ class GraphDroneTabArenaAdapter(AbstractExecModel):
         self.legitimacy_variance_threshold = legitimacy_variance_threshold
         self.use_hyperbolic_descriptors = use_hyperbolic_descriptors
         self.alignment_lambda = alignment_lambda
+        self.residual_usefulness_lambda = residual_usefulness_lambda
         self.ot_prototype_count = ot_prototype_count
         self.ot_epsilon = ot_epsilon
         self.ot_max_iter = ot_max_iter
@@ -125,6 +127,7 @@ class GraphDroneTabArenaAdapter(AbstractExecModel):
             router=SetRouterConfig(
                 kind=self.router_kind,
                 alignment_lambda=self.alignment_lambda,
+                residual_usefulness_lambda=self.residual_usefulness_lambda,
                 ot_prototype_count=self.ot_prototype_count,
                 ot_epsilon=self.ot_epsilon,
                 ot_max_iter=self.ot_max_iter,

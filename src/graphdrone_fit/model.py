@@ -28,6 +28,7 @@ from .task_conditioned_prior import (
     compute_task_prior_from_bank,
 )
 from .support_encoder import MomentSupportEncoder
+from .task_conditioned_prior import build_task_context_frame_from_router_tokens, compute_task_prior_from_bank
 from .token_builder import QualityEncoding, UniversalTokenBuilder
 from .view_descriptor import ViewDescriptor
 
@@ -102,6 +103,7 @@ class GraphDrone:
         self._n_classes: int = 1
         self._clf_uses_learned_router: bool = False
         self._router_fit_diagnostics: dict[str, float] = {}
+        self._task_prior_diagnostics: dict[str, object] = {}
         self._router_training_force_anchor_only: bool = False
         self._task_prior_diagnostics: dict[str, object] = {}
         self.binary_threshold_: float = 0.5
@@ -109,6 +111,35 @@ class GraphDrone:
         # None means use standard argmax (default behavior, always set for multiclass).
         self.class_thresholds_: Optional[np.ndarray] = None
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    def _record_regression_router_fallback(
+        self,
+        *,
+        stage: str,
+        reason: str,
+        nonfinite: bool,
+        **extra: object,
+    ) -> None:
+        self._router_fit_diagnostics["regression_router_fallback_stage"] = stage
+        self._router_fit_diagnostics["regression_router_fallback_reason"] = reason
+        self._router_fit_diagnostics["validation_router_training_nonfinite_flag"] = float(nonfinite)
+        for key, value in extra.items():
+            self._router_fit_diagnostics[key] = value
+
+    @staticmethod
+    def _regression_fallback_defaults() -> dict[str, object]:
+        return {
+            "router_nonfinite_fallback": False,
+            "regression_router_fallback_stage": "none",
+            "regression_router_fallback_reason": "none",
+            "validation_router_tokens_finite_flag": float("nan"),
+            "validation_router_predictions_finite_flag": float("nan"),
+            "validation_router_targets_finite_flag": float("nan"),
+            "validation_anchor_mse_finite_flag": float("nan"),
+            "prediction_router_tokens_finite_flag": float("nan"),
+            "prediction_router_weights_finite_flag": float("nan"),
+            "prediction_router_defer_finite_flag": float("nan"),
+        }
 
     def fit(
         self,
@@ -140,6 +171,7 @@ class GraphDrone:
 
         print(f"  -> Fitting GraphDrone ({self._problem_type}, n_classes={self._n_classes}) on {len(matrix)} samples...")
         self._router_fit_diagnostics = {}
+        self._task_prior_diagnostics = {}
         self._router_training_force_anchor_only = False
         self._portfolio = fit_portfolio_from_specs(
             X_train=matrix,
@@ -188,36 +220,26 @@ class GraphDrone:
                 model_params=params,
             )
             sub_specs: list[ExpertBuildSpec] = []
-            if not skip_subs:
-                if is_binary and matrix.shape[1] < 25:
-                    sub_specs_config = [(0, 0.5)]
-                else:
-                    n_features = matrix.shape[1]
-                    if n_features <= 10:
-                        sub_specs_config = []
-                    elif n_features <= 14:
-                        sub_specs_config = [(0, 0.6)]
-                    else:
-                        sub_specs_config = [(0, 0.8), (1, 0.85), (2, 0.9)]
-
-                for sub_seed, sub_frac in sub_specs_config:
-                    rng_i = np.random.RandomState(sub_seed)
-                    sz_i = max(1, int(matrix.shape[1] * sub_frac))
-                    idx_i = tuple(sorted(rng_i.choice(matrix.shape[1], sz_i, replace=False).tolist()))
-                    sub_specs.append(
-                        ExpertBuildSpec(
-                            descriptor=ViewDescriptor(
-                                expert_id=f"SUB{sub_seed}",
-                                family="structural_subspace",
-                                view_name=f"Foundation Sub {sub_seed}",
-                                input_dim=sz_i,
-                                input_indices=idx_i,
-                            ),
-                            model_kind=model_kind,
-                            input_adapter=IdentitySelectorAdapter(indices=idx_i),
-                            model_params=params,
-                        )
+            subspace_indices = (
+                self._binary_classification_subspaces(matrix.shape[1])
+                if is_binary
+                else self._multiclass_subspaces(matrix.shape[1])
+            )
+            for sub_idx, idx_i in enumerate(subspace_indices):
+                sub_specs.append(
+                    ExpertBuildSpec(
+                        descriptor=ViewDescriptor(
+                            expert_id=f"SUB{sub_idx}",
+                            family="structural_subspace",
+                            view_name=f"Foundation Sub {sub_idx}",
+                            input_dim=len(idx_i),
+                            input_indices=idx_i,
+                        ),
+                        model_kind=model_kind,
+                        input_adapter=IdentitySelectorAdapter(indices=idx_i),
+                        model_params=params,
                     )
+                )
             return (full_spec, *sub_specs)
 
         return (
@@ -235,6 +257,43 @@ class GraphDrone:
                 model_params=params,
             ),
         )
+
+    @staticmethod
+    def _multiclass_subspaces(n_features: int) -> tuple[tuple[int, ...], ...]:
+        if n_features <= 10:
+            return ()
+        if n_features <= 14:
+            rng_i = np.random.RandomState(0)
+            sz_i = max(1, int(n_features * 0.6))
+            idx_i = tuple(sorted(rng_i.choice(n_features, sz_i, replace=False).tolist()))
+            return (idx_i,)
+        configs = []
+        for sub_seed, sub_frac in [(0, 0.8), (1, 0.85), (2, 0.9)]:
+            rng_i = np.random.RandomState(sub_seed)
+            sz_i = max(1, int(n_features * sub_frac))
+            idx_i = tuple(sorted(rng_i.choice(n_features, sz_i, replace=False).tolist()))
+            configs.append(idx_i)
+        return tuple(configs)
+
+    @staticmethod
+    def _binary_classification_subspaces(n_features: int) -> tuple[tuple[int, ...], ...]:
+        if n_features <= 2:
+            return ()
+        all_idx = np.arange(n_features)
+        split = max(1, n_features // 2)
+        lower = tuple(all_idx[:split].tolist())
+        upper = tuple(all_idx[-split:].tolist())
+        views: list[tuple[int, ...]] = []
+        for idx in (lower, upper):
+            if len(idx) < n_features and idx not in views:
+                views.append(idx)
+        for seed, frac in [(0, 0.75), (1, 0.6)]:
+            rng = np.random.RandomState(seed)
+            sz = min(n_features - 1, max(2, int(round(n_features * frac))))
+            idx = tuple(sorted(rng.choice(n_features, sz, replace=False).tolist()))
+            if len(idx) < n_features and idx not in views:
+                views.append(idx)
+        return tuple(views)
 
     def _seed_router_training(self) -> None:
         _seed_torch_generators(self.config.router.router_seed)
@@ -276,6 +335,44 @@ class GraphDrone:
             router.fit_auxiliary_state(aux_tokens, full_index=full_index)
 
     @staticmethod
+    def _regression_expert_opportunity_scores(
+        expert_predictions: torch.Tensor,
+        y_true: torch.Tensor,
+        *,
+        full_index: int,
+    ) -> torch.Tensor:
+        errors = (expert_predictions - y_true.unsqueeze(1)).abs()
+        anchor_error = errors[:, full_index : full_index + 1]
+        advantage = anchor_error - errors
+        positive = torch.clamp(advantage, min=0.0)
+        scores = positive.mean(dim=0)
+        if scores.shape[0] > full_index:
+            scores[full_index] = 0.0
+        max_score = float(scores.max().item()) if scores.numel() else 0.0
+        if max_score > 0:
+            scores = scores / max_score
+        return scores
+
+    @staticmethod
+    def _regression_row_expert_opportunity_scores(
+        expert_predictions: torch.Tensor,
+        *,
+        full_index: int,
+        alpha: float,
+    ) -> torch.Tensor:
+        if expert_predictions.ndim != 2:
+            raise ValueError(f"expert_predictions must be 2D, got shape={tuple(expert_predictions.shape)}")
+        anchor = expert_predictions[:, full_index : full_index + 1]
+        disagreement = (expert_predictions - anchor).abs()
+        disagreement[:, full_index] = 0.0
+        row_max = disagreement.max(dim=1, keepdim=True).values
+        normalized = torch.where(row_max > 0, disagreement / row_max.clamp_min(1e-12), torch.zeros_like(disagreement))
+        if alpha > 0:
+            normalized = torch.sigmoid(alpha * (normalized - 0.5))
+        normalized[:, full_index] = 0.0
+        return normalized
+
+    @staticmethod
     def _attention_diagnostics(
         *,
         expert_ids: tuple[str, ...],
@@ -308,13 +405,149 @@ class GraphDrone:
         defer_prob: torch.Tensor,
         full_index: int,
     ) -> dict[str, float]:
+        stats = GraphDrone._regression_residual_usefulness_tensors(
+            expert_predictions=expert_predictions,
+            y_true=y_true,
+            specialist_weights=specialist_weights,
+            defer_prob=defer_prob,
+            full_index=full_index,
+        )
+        active = stats["active_mask"]
+        if not bool(active.any().item()):
+            return {}
+        return {
+            "validation_best_specialist_advantage_score": float(stats["best_advantage"][active].mean().item()),
+            "validation_weighted_specialist_advantage_score": float(
+                stats["weighted_advantage"][active].mean().item()
+            ),
+            "validation_defer_weighted_specialist_advantage_score": float(
+                stats["realized_advantage"][active].mean().item()
+            ),
+            "validation_top_specialist_advantage_score": float(stats["top_advantage"][active].mean().item()),
+            "validation_positive_specialist_mass": float(stats["positive_mass"][active].mean().item()),
+            "validation_top_specialist_positive_rate": float(
+                (stats["top_advantage"][active] > 0).float().mean().item()
+            ),
+            "validation_positive_specialist_opportunity_score": float(
+                stats["positive_opportunity"][active].mean().item()
+            ),
+            "validation_residual_usefulness_gap": float(
+                stats["residual_usefulness_gap"][active].mean().item()
+            ),
+            "validation_allocation_usefulness_score": float(
+                GraphDrone._regression_allocation_usefulness_from_stats(stats).item()
+            ),
+            "validation_robust_allocation_usefulness_score": float(
+                GraphDrone._regression_robust_allocation_usefulness_from_stats(stats).item()
+            ),
+            "validation_conservative_allocation_penalty": float(
+                GraphDrone._regression_conservative_allocation_penalty_from_stats(stats).item()
+            ),
+            "validation_conservative_allocation_active_rate": float(
+                GraphDrone._regression_conservative_allocation_active_rate_from_stats(stats).item()
+            ),
+        }
+
+    @staticmethod
+    def _regression_allocation_usefulness_from_stats(stats: dict[str, torch.Tensor]) -> torch.Tensor:
+        active = stats["active_mask"]
+        if not bool(active.any().item()):
+            reference = stats["weighted_advantage"]
+            return reference.new_zeros(())
+        weighted_advantage = stats["weighted_advantage"][active].mean()
+        positive_mass = stats["positive_mass"][active].mean()
+        return weighted_advantage + 0.5 * positive_mass
+
+    @staticmethod
+    def _regression_allocation_usefulness_from_mask(
+        stats: dict[str, torch.Tensor],
+        mask: torch.Tensor,
+    ) -> torch.Tensor:
+        if not bool(mask.any().item()):
+            reference = stats["weighted_advantage"]
+            return reference.new_zeros(())
+        weighted_advantage = stats["weighted_advantage"][mask].mean()
+        positive_mass = stats["positive_mass"][mask].mean()
+        return weighted_advantage + 0.5 * positive_mass
+
+    @staticmethod
+    def _regression_robust_allocation_usefulness_from_stats(stats: dict[str, torch.Tensor]) -> torch.Tensor:
+        active = stats["active_mask"]
+        if not bool(active.any().item()):
+            reference = stats["weighted_advantage"]
+            return reference.new_zeros(())
+        indices = torch.arange(active.shape[0], device=active.device)
+        even_mask = active & ((indices % 2) == 0)
+        odd_mask = active & ((indices % 2) == 1)
+        even_score = GraphDrone._regression_allocation_usefulness_from_mask(stats, even_mask)
+        odd_score = GraphDrone._regression_allocation_usefulness_from_mask(stats, odd_mask)
+        return torch.minimum(even_score, odd_score)
+
+    @staticmethod
+    def _regression_conservative_allocation_active_rate_from_stats(
+        stats: dict[str, torch.Tensor],
+        *,
+        opportunity_threshold: float = 0.1,
+    ) -> torch.Tensor:
+        active = stats["active_mask"]
+        if not bool(active.any().item()):
+            reference = stats["weighted_advantage"]
+            return reference.new_zeros(())
+        confident = active & (stats["best_advantage"] > opportunity_threshold)
+        return confident.float().mean()
+
+    @staticmethod
+    def _regression_conservative_allocation_penalty_from_stats(
+        stats: dict[str, torch.Tensor],
+        *,
+        opportunity_threshold: float = 0.1,
+    ) -> torch.Tensor:
+        active = stats["active_mask"]
+        if not bool(active.any().item()):
+            reference = stats["weighted_advantage"]
+            return reference.new_zeros(())
+        confident = active & (stats["best_advantage"] > opportunity_threshold)
+        if not bool(confident.any().item()):
+            reference = stats["weighted_advantage"]
+            return reference.new_zeros(())
+        confidence = torch.relu(stats["best_advantage"][confident] - opportunity_threshold)
+        negative_mass = 1.0 - stats["positive_mass"][confident]
+        return (confidence * negative_mass).mean()
+
+    @staticmethod
+    def _regression_residual_usefulness_tensors(
+        *,
+        expert_predictions: torch.Tensor,
+        y_true: torch.Tensor,
+        specialist_weights: torch.Tensor,
+        defer_prob: torch.Tensor,
+        full_index: int,
+    ) -> dict[str, torch.Tensor]:
         if expert_predictions.ndim != 2:
             raise ValueError(f"Expected [N, E] expert predictions, got shape {tuple(expert_predictions.shape)}")
 
         non_anchor_mask = torch.ones(expert_predictions.shape[1], dtype=torch.bool, device=expert_predictions.device)
         non_anchor_mask[full_index] = False
         if int(non_anchor_mask.sum().item()) == 0:
-            return {}
+            zeros = torch.zeros(
+                expert_predictions.shape[0],
+                dtype=expert_predictions.dtype,
+                device=expert_predictions.device,
+            )
+            return {
+                "active_mask": torch.zeros(
+                    expert_predictions.shape[0],
+                    dtype=torch.bool,
+                    device=expert_predictions.device,
+                ),
+                "weighted_advantage": zeros,
+                "best_advantage": zeros,
+                "realized_advantage": zeros,
+                "top_advantage": zeros,
+                "positive_mass": zeros,
+                "positive_opportunity": zeros,
+                "residual_usefulness_gap": zeros,
+            }
 
         anchor_pred = expert_predictions[:, full_index]
         anchor_abs_err = (y_true - anchor_pred).abs().unsqueeze(1)
@@ -328,9 +561,6 @@ class GraphDrone:
         )
         specialist_weights_only = normalized_weights[:, non_anchor_mask]
         has_specialist_mass = specialist_mass.squeeze(1) > 0
-        if not bool(has_specialist_mass.any().item()):
-            return {}
-
         effective_defer = torch.where(
             specialist_mass > 0,
             defer_prob,
@@ -341,17 +571,18 @@ class GraphDrone:
         positive_mass = (specialist_weights_only * (advantage > 0).float()).sum(dim=1)
         top_indices = specialist_weights_only.argmax(dim=1, keepdim=True)
         top_advantage = advantage.gather(1, top_indices).squeeze(1)
-
-        active = has_specialist_mass
+        realized_advantage = effective_defer * weighted_advantage
+        positive_opportunity = torch.relu(best_advantage)
+        residual_usefulness_gap = torch.relu(positive_opportunity - realized_advantage)
         return {
-            "validation_best_specialist_advantage_score": float(best_advantage[active].mean().item()),
-            "validation_weighted_specialist_advantage_score": float(weighted_advantage[active].mean().item()),
-            "validation_defer_weighted_specialist_advantage_score": float(
-                (effective_defer[active] * weighted_advantage[active]).mean().item()
-            ),
-            "validation_top_specialist_advantage_score": float(top_advantage[active].mean().item()),
-            "validation_positive_specialist_mass": float(positive_mass[active].mean().item()),
-            "validation_top_specialist_positive_rate": float((top_advantage[active] > 0).float().mean().item()),
+            "active_mask": has_specialist_mass,
+            "weighted_advantage": weighted_advantage,
+            "best_advantage": best_advantage,
+            "realized_advantage": realized_advantage,
+            "top_advantage": top_advantage,
+            "positive_mass": positive_mass,
+            "positive_opportunity": positive_opportunity,
+            "residual_usefulness_gap": residual_usefulness_gap,
         }
 
     def _optimize_regression_router_module(
@@ -370,7 +601,11 @@ class GraphDrone:
         params = [param for param in router.parameters() if param.requires_grad]
         if not params:
             print(f"  -> {label} has no trainable parameters, skipping optimization.")
-            self._router_fit_diagnostics["validation_router_training_nonfinite_flag"] = 0.0
+            self._record_regression_router_fallback(
+                stage="train_setup",
+                reason="no_trainable_params",
+                nonfinite=False,
+            )
             return
 
         optimizer = torch.optim.Adam(params, lr=1e-3)
@@ -383,9 +618,20 @@ class GraphDrone:
         saw_nonfinite = False
         print(
             f"  -> Optimizing {label} on {self.device} "
-            f"(Patience={patience}, MSE+ResidualPenalty, anchor_mse={anchor_mse_val:.6f})..."
+            f"(Patience={patience}, MSE+ResidualPenalty"
+            f"{'+AllocationUsefulness' if self.config.router.allocation_usefulness_lambda > 0 else ''}"
+            f"{'+RobustAllocation' if self.config.router.robust_allocation_usefulness_lambda > 0 else ''}"
+            f"{'+ConservativeAllocation' if self.config.router.conservative_allocation_lambda > 0 else ''}"
+            f"{'+UsefulnessGap' if self.config.router.residual_usefulness_lambda > 0 else ''}, "
+            f"anchor_mse={anchor_mse_val:.6f})..."
         )
         autocast_enabled = self.device == "cuda"
+        self._router_fit_diagnostics["validation_router_tokens_finite_flag"] = float(torch.isfinite(v_tokens_t).all().item())
+        self._router_fit_diagnostics["validation_router_predictions_finite_flag"] = float(
+            torch.isfinite(v_preds_t).all().item()
+        )
+        self._router_fit_diagnostics["validation_router_targets_finite_flag"] = float(torch.isfinite(y_va_t).all().item())
+        self._router_fit_diagnostics["validation_anchor_mse_finite_flag"] = float(np.isfinite(anchor_mse_val))
         for _ in range(500):
             router.train()
             optimizer.zero_grad()
@@ -400,9 +646,62 @@ class GraphDrone:
                 mse = F.mse_loss(integ.squeeze(), y_va_t)
                 aux_loss = out.aux_loss if out.aux_loss is not None else mse.new_zeros(())
                 loss = mse + 2.0 * F.relu(mse - anchor_mse_val) + aux_loss
+                if self.config.router.residual_usefulness_lambda > 0:
+                    usefulness = self._regression_residual_usefulness_tensors(
+                        expert_predictions=v_preds_t,
+                        y_true=y_va_t,
+                        specialist_weights=out.specialist_weights,
+                        defer_prob=out.defer_prob,
+                        full_index=full_index,
+                    )
+                    active = usefulness["active_mask"]
+                    if bool(active.any().item()):
+                        loss = (
+                            loss
+                            + self.config.router.residual_usefulness_lambda
+                            * usefulness["residual_usefulness_gap"][active].mean()
+                        )
+                if self.config.router.allocation_usefulness_lambda > 0:
+                    usefulness = self._regression_residual_usefulness_tensors(
+                        expert_predictions=v_preds_t,
+                        y_true=y_va_t,
+                        specialist_weights=out.specialist_weights,
+                        defer_prob=out.defer_prob,
+                        full_index=full_index,
+                    )
+                    allocation_score = self._regression_allocation_usefulness_from_stats(usefulness)
+                    loss = loss - self.config.router.allocation_usefulness_lambda * allocation_score
+                if self.config.router.robust_allocation_usefulness_lambda > 0:
+                    usefulness = self._regression_residual_usefulness_tensors(
+                        expert_predictions=v_preds_t,
+                        y_true=y_va_t,
+                        specialist_weights=out.specialist_weights,
+                        defer_prob=out.defer_prob,
+                        full_index=full_index,
+                    )
+                    robust_allocation_score = self._regression_robust_allocation_usefulness_from_stats(usefulness)
+                    loss = loss - self.config.router.robust_allocation_usefulness_lambda * robust_allocation_score
+                if self.config.router.conservative_allocation_lambda > 0:
+                    usefulness = self._regression_residual_usefulness_tensors(
+                        expert_predictions=v_preds_t,
+                        y_true=y_va_t,
+                        specialist_weights=out.specialist_weights,
+                        defer_prob=out.defer_prob,
+                        full_index=full_index,
+                    )
+                    conservative_penalty = self._regression_conservative_allocation_penalty_from_stats(
+                        usefulness,
+                        opportunity_threshold=self.config.router.conservative_allocation_opportunity_threshold,
+                    )
+                    loss = loss + self.config.router.conservative_allocation_lambda * conservative_penalty
             if not torch.isfinite(loss):
                 saw_nonfinite = True
                 print(f"  -> {label} produced non-finite loss; restoring best router state.")
+                self._record_regression_router_fallback(
+                    stage="train_loss",
+                    reason="nonfinite_loss",
+                    nonfinite=True,
+                )
                 break
             loss.backward()
             grad_is_finite = True
@@ -416,6 +715,11 @@ class GraphDrone:
                 saw_nonfinite = True
                 print(f"  -> {label} produced non-finite gradients; restoring best router state.")
                 optimizer.zero_grad(set_to_none=True)
+                self._record_regression_router_fallback(
+                    stage="train_gradients",
+                    reason="nonfinite_gradients",
+                    nonfinite=True,
+                )
                 break
             torch.nn.utils.clip_grad_norm_(params, max_norm=1.0)
             optimizer.step()
@@ -424,6 +728,11 @@ class GraphDrone:
             if not params_are_finite:
                 saw_nonfinite = True
                 print(f"  -> {label} produced non-finite parameters; restoring best router state.")
+                self._record_regression_router_fallback(
+                    stage="train_parameters",
+                    reason="nonfinite_parameters",
+                    nonfinite=True,
+                )
                 break
             if loss.item() < best_loss:
                 best_loss = loss.item()
@@ -443,6 +752,27 @@ class GraphDrone:
         )
         if saw_nonfinite:
             self._router_training_force_anchor_only = True
+
+    @staticmethod
+    def _normalize_regression_router_targets(
+        *,
+        expert_predictions: torch.Tensor,
+        y_true: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, dict[str, float]]:
+        y_center = torch.median(y_true)
+        centered_targets = y_true - y_center
+        target_scale = centered_targets.std(unbiased=False)
+        if not torch.isfinite(target_scale) or float(target_scale.item()) < 1e-6:
+            target_scale = centered_targets.abs().mean()
+        if not torch.isfinite(target_scale) or float(target_scale.item()) < 1e-6:
+            target_scale = y_true.new_tensor(1.0)
+        normalized_predictions = (expert_predictions - y_center) / target_scale
+        normalized_targets = centered_targets / target_scale
+        diagnostics = {
+            "validation_router_target_center": float(y_center.detach().cpu().item()),
+            "validation_router_target_scale": float(target_scale.detach().cpu().item()),
+        }
+        return normalized_predictions, normalized_targets, diagnostics
 
     def _sample_aux_rows(self, matrix: np.ndarray, max_rows: int = 1024) -> np.ndarray:
         if len(matrix) <= max_rows:
@@ -475,11 +805,39 @@ class GraphDrone:
             quality_encoding=_make_quality_encoding(batch.quality_scores),
         )
 
+    @staticmethod
+    def _normalize_regression_token_predictions(
+        predictions: np.ndarray,
+        *,
+        full_index: int,
+    ) -> tuple[np.ndarray, dict[str, float]]:
+        pred = np.asarray(predictions, dtype=np.float32)
+        anchor = pred[:, full_index]
+        center = float(np.median(anchor))
+        scale = float(np.std(anchor - center))
+        if not np.isfinite(scale) or scale < 1e-6:
+            scale = float(np.mean(np.abs(anchor - center)))
+        if not np.isfinite(scale) or scale < 1e-6:
+            scale = float(np.std(pred))
+        if not np.isfinite(scale) or scale < 1e-6:
+            scale = 1.0
+        normalized = (pred - center) / scale
+        diagnostics = {
+            "regression_token_prediction_center": center,
+            "regression_token_prediction_scale": scale,
+        }
+        return normalized.astype(np.float32), diagnostics
+
     def _build_regression_tokens(self, X: np.ndarray, batch: ExpertPredictionBatch):
         support_enc = self._support_encoder.encode(n_rows=len(X), descriptors=batch.descriptors)
         gora_obs = self._compute_gora_obs(X, batch.descriptors)
+        normalized_predictions, token_norm_diagnostics = self._normalize_regression_token_predictions(
+            batch.predictions,
+            full_index=batch.full_index,
+        )
+        self._router_fit_diagnostics.update(token_norm_diagnostics)
         return self._token_builder.build(
-            predictions=batch.predictions,
+            predictions=normalized_predictions,
             descriptors=batch.descriptors,
             full_expert_id=batch.full_expert_id,
             support_encoding=support_enc,
@@ -611,6 +969,10 @@ class GraphDrone:
         # or without prior feedback, confidence = 0 → penalty is inactive, preserving
         # champion routing behavior. Unconditional defer penalty has been shown to hurt
         # credit_g across all tested lambda values (2026-03-23 sweep).
+        task_prior_penalty_lambda = 0.0 if router_cfg is None else float(router_cfg.task_prior_defer_penalty_lambda)
+        task_prior_defer_target = 0.8 if router_cfg is None else float(router_cfg.task_prior_defer_target)
+        task_prior_rank_loss_lambda = 0.0 if router_cfg is None else float(router_cfg.task_prior_rank_loss_lambda)
+        task_prior_rank_margin = 0.0 if router_cfg is None else float(router_cfg.task_prior_rank_margin)
         task_prior_confidence = self._task_prior_confidence_scale()
         for _ in range(500):
             self._router.train()
@@ -626,6 +988,18 @@ class GraphDrone:
                 if defer_penalty_lambda > 0 and task_prior_confidence > 0:
                     mean_defer = out.defer_prob.mean()
                     loss = loss + defer_penalty_lambda * task_prior_confidence * (mean_defer - defer_target) ** 2
+                if task_prior_penalty_lambda > 0 and task_prior_confidence > 0:
+                    mean_defer = out.defer_prob.mean()
+                    defer_penalty = (mean_defer - task_prior_defer_target) ** 2
+                    loss = loss + task_prior_penalty_lambda * task_prior_confidence * defer_penalty
+                if task_prior_rank_loss_lambda > 0 and task_prior_confidence > 0 and log_q.shape[-1] == 2:
+                    pos_score = log_q[:, 1] - log_q[:, 0]
+                    rank_loss = self._binary_pairwise_rank_loss(
+                        pos_score,
+                        y_va_t,
+                        margin=task_prior_rank_margin,
+                    )
+                    loss = loss + task_prior_rank_loss_lambda * task_prior_confidence * rank_loss
             loss.backward()
             optimizer.step()
             self._post_optimizer_step()
@@ -735,13 +1109,32 @@ class GraphDrone:
         entropy_scale = max(0.0, 1.0 - entropy / 2.0)
         return max(exact, min(1.0, top_prob + entropy_scale))
 
+    @staticmethod
+    def _binary_pairwise_rank_loss(
+        pos_score: torch.Tensor,
+        y_true: torch.Tensor,
+        *,
+        margin: float = 0.0,
+    ) -> torch.Tensor:
+        import torch.nn.functional as F
+
+        pos_mask = y_true == 1
+        neg_mask = y_true == 0
+        if not bool(pos_mask.any()) or not bool(neg_mask.any()):
+            return pos_score.new_zeros(())
+        pos_scores = pos_score[pos_mask]
+        neg_scores = pos_score[neg_mask]
+        pairwise_margin = pos_scores[:, None] - neg_scores[None, :] - margin
+        return F.softplus(-pairwise_margin).mean()
+
+
     def _maybe_attach_task_prior_router(
         self,
         *,
         router: torch.nn.Module,
         router_cfg: SetRouterConfig | None,
         tokens: torch.Tensor,
-        descriptors: tuple,
+        descriptors: tuple[ViewDescriptor, ...],
         task_type: str,
     ) -> torch.nn.Module:
         """Wrap router with TaskConditionedRouter if task_prior_bank_dir is configured."""
@@ -769,6 +1162,11 @@ class GraphDrone:
             prior_dim=prior_bundle["prior_vector"].shape[0],
             base_router=router,
             strength=router_cfg.task_prior_strength,
+            mode=router_cfg.task_prior_mode,
+            local_gate_alpha=router_cfg.task_prior_local_gate_alpha,
+            expert_local_gate_alpha=router_cfg.task_prior_expert_local_gate_alpha,
+            row_expert_opportunity_threshold=router_cfg.task_prior_row_expert_opportunity_threshold,
+            row_expert_opportunity_residual_scale=router_cfg.task_prior_row_expert_opportunity_residual_scale,
             router_kind=f"{getattr(router, 'router_kind', router_cfg.kind)}_task_prior",
         ).to(self.device)
         conditioned.set_task_prior_context(prior_bundle["prior_vector"].to(self.device))
@@ -787,6 +1185,14 @@ class GraphDrone:
             "task_prior_exact_reuse_available": bool(query_result.get("exact_reuse_available", False)),
             "task_prior_exact_reuse_blend": float(prior_bundle.get("exact_reuse_blend", 0.0)),
             "task_prior_exact_reuse_used": bool(prior_bundle.get("exact_reuse_used", False)),
+            "task_prior_mode": str(router_cfg.task_prior_mode),
+            "task_prior_local_gate_alpha": float(router_cfg.task_prior_local_gate_alpha),
+            "task_prior_expert_local_gate_alpha": float(router_cfg.task_prior_expert_local_gate_alpha),
+            "task_prior_row_expert_opportunity_alpha": float(router_cfg.task_prior_row_expert_opportunity_alpha),
+            "task_prior_row_expert_opportunity_threshold": float(router_cfg.task_prior_row_expert_opportunity_threshold),
+            "task_prior_row_expert_opportunity_residual_scale": float(
+                router_cfg.task_prior_row_expert_opportunity_residual_scale
+            ),
             "task_prior_query_dataset": query_dataset,
             "task_prior_feedback_used": bool(query_result.get("feedback_used", False)),
             "task_prior_feedback_top_source": (
@@ -818,10 +1224,15 @@ class GraphDrone:
         aux_tokens_t = aux_tokens.tokens.to(self.device)
         y_va_t = torch.tensor(y_va, dtype=torch.float32, device=self.device)
         v_preds_t = torch.tensor(va_batch.predictions, dtype=torch.float32, device=self.device)
+        v_preds_t_norm, y_va_t_norm, normalization_diagnostics = self._normalize_regression_router_targets(
+            expert_predictions=v_preds_t,
+            y_true=y_va_t,
+        )
+        self._router_fit_diagnostics.update(normalization_diagnostics)
         v_tokens_t = va_tokens.tokens.to(self.device)
 
         with torch.no_grad():
-            anchor_mse_val = F.mse_loss(v_preds_t[:, va_batch.full_index], y_va_t).item()
+            anchor_mse_val = F.mse_loss(v_preds_t_norm[:, va_batch.full_index], y_va_t_norm).item()
         if self.config.router.kind == "contextual_transformer_rotor" and self.config.router.freeze_base_router:
             print("  -> Frozen-router rotor ablation: training base router first, then freezing it.")
             base_cfg = replace(
@@ -839,8 +1250,8 @@ class GraphDrone:
             self._optimize_regression_router_module(
                 base_router,
                 v_tokens_t=v_tokens_t,
-                v_preds_t=v_preds_t,
-                y_va_t=y_va_t,
+                v_preds_t=v_preds_t_norm,
+                y_va_t=y_va_t_norm,
                 full_index=va_batch.full_index,
                 anchor_mse_val=anchor_mse_val,
                 label="Frozen-base pre-router",
@@ -859,6 +1270,32 @@ class GraphDrone:
                 token_dim=token_dim,
                 n_experts=va_tokens.tokens.shape[1],
             ).to(self.device)
+        self._router = self._maybe_attach_task_prior_router(
+            router=self._router,
+            router_cfg=self.config.router,
+            tokens=va_tokens.tokens,
+            descriptors=va_batch.descriptors,
+            task_type="regression",
+        )
+        if (
+            hasattr(self._router, "set_row_expert_opportunity_scores")
+            and self.config.router.task_prior_row_expert_opportunity_alpha > 0
+        ):
+            self._router.set_row_expert_opportunity_scores(
+                self._regression_row_expert_opportunity_scores(
+                    expert_predictions=v_preds_t,
+                    full_index=va_batch.full_index,
+                    alpha=self.config.router.task_prior_row_expert_opportunity_alpha,
+                )
+            )
+        elif hasattr(self._router, "set_expert_opportunity_scores"):
+            self._router.set_expert_opportunity_scores(
+                self._regression_expert_opportunity_scores(
+                    expert_predictions=v_preds_t,
+                    y_true=y_va_t,
+                    full_index=va_batch.full_index,
+                )
+            )
 
         self._fit_router_auxiliary_state(self._router, aux_tokens_t, full_index=aux_batch.full_index)
 
@@ -870,8 +1307,8 @@ class GraphDrone:
         self._optimize_regression_router_module(
             self._router,
             v_tokens_t=v_tokens_t,
-            v_preds_t=v_preds_t,
-            y_va_t=y_va_t,
+            v_preds_t=v_preds_t_norm,
+            y_va_t=y_va_t_norm,
             full_index=va_batch.full_index,
             anchor_mse_val=anchor_mse_val,
             label="Router",
@@ -879,19 +1316,37 @@ class GraphDrone:
         self._router.eval()
         with torch.no_grad():
             out_final = self._router(v_tokens_t, full_index=va_batch.full_index)
-            self._router_fit_diagnostics = self._regression_residual_usefulness_diagnostics(
+            usefulness_diagnostics = self._regression_residual_usefulness_diagnostics(
                 expert_predictions=v_preds_t,
                 y_true=y_va_t,
                 specialist_weights=out_final.specialist_weights,
                 defer_prob=out_final.defer_prob,
                 full_index=va_batch.full_index,
             )
-        if self._router_fit_diagnostics:
+        if usefulness_diagnostics:
+            self._router_fit_diagnostics.update(usefulness_diagnostics)
+            self._router_fit_diagnostics["validation_residual_usefulness_lambda"] = float(
+                self.config.router.residual_usefulness_lambda
+            )
+            self._router_fit_diagnostics["validation_allocation_usefulness_lambda"] = float(
+                self.config.router.allocation_usefulness_lambda
+            )
+            self._router_fit_diagnostics["validation_robust_allocation_usefulness_lambda"] = float(
+                self.config.router.robust_allocation_usefulness_lambda
+            )
+            self._router_fit_diagnostics["validation_conservative_allocation_lambda"] = float(
+                self.config.router.conservative_allocation_lambda
+            )
             print(
                 "  -> Regression router usefulness: "
-                f"weighted_adv={self._router_fit_diagnostics['validation_weighted_specialist_advantage_score']:.4f} "
-                f"best_adv={self._router_fit_diagnostics['validation_best_specialist_advantage_score']:.4f} "
-                f"positive_mass={self._router_fit_diagnostics['validation_positive_specialist_mass']:.4f}"
+                f"weighted_adv={usefulness_diagnostics['validation_weighted_specialist_advantage_score']:.4f} "
+                f"best_adv={usefulness_diagnostics['validation_best_specialist_advantage_score']:.4f} "
+                f"gap={usefulness_diagnostics['validation_residual_usefulness_gap']:.4f} "
+                f"positive_mass={usefulness_diagnostics['validation_positive_specialist_mass']:.4f} "
+                f"allocation={usefulness_diagnostics['validation_allocation_usefulness_score']:.4f} "
+                f"robust_allocation={usefulness_diagnostics['validation_robust_allocation_usefulness_score']:.4f} "
+                f"conservative_penalty={usefulness_diagnostics['validation_conservative_allocation_penalty']:.4f} "
+                f"conservative_active={usefulness_diagnostics['validation_conservative_allocation_active_rate']:.4f}"
             )
 
     def _compute_gora_obs(self, X: np.ndarray, descriptors: tuple[ViewDescriptor, ...]) -> torch.Tensor:
@@ -998,6 +1453,7 @@ class GraphDrone:
                 diagnostics["alignment_aux_loss"] = float(router_out.aux_loss.detach().cpu().item())
             if router_out.extra_diagnostics:
                 diagnostics.update(router_out.extra_diagnostics)
+            diagnostics.update(self._task_prior_diagnostics)
             diagnostics.update(
                 self._attention_diagnostics(
                     expert_ids=active_batch.expert_ids,
@@ -1037,7 +1493,9 @@ class GraphDrone:
                 "mean_defer_prob": 0.0,
                 "full_index": int(batch.full_index),
             }
+            diagnostics.update(self._regression_fallback_defaults())
             diagnostics.update(self._portfolio_diagnostics(batch))
+            diagnostics.update(self._router_fit_diagnostics)
             diagnostics.update(self._legitimacy_diagnostics(decision, router_skipped=True))
             return anchor_preds, diagnostics
 
@@ -1054,7 +1512,16 @@ class GraphDrone:
                 "effective_defer_rate": 0.0,
                 "full_index": int(active_batch.full_index),
                 "router_nonfinite_fallback": True,
+                "regression_router_fallback_stage": self._router_fit_diagnostics.get(
+                    "regression_router_fallback_stage", "train_unknown"
+                ),
+                "regression_router_fallback_reason": self._router_fit_diagnostics.get(
+                    "regression_router_fallback_reason", "unknown"
+                ),
             }
+            base_defaults = self._regression_fallback_defaults()
+            base_defaults.update(diagnostics)
+            diagnostics = base_defaults
             diagnostics.update(self._portfolio_diagnostics(active_batch))
             diagnostics.update(self._router_fit_diagnostics)
             diagnostics.update(self._legitimacy_diagnostics(decision, router_skipped=False))
@@ -1064,6 +1531,18 @@ class GraphDrone:
         self._router.eval()
         with torch.no_grad():
             token_tensor = tokens.tokens.to(self.device)
+            if (
+                hasattr(self._router, "set_row_expert_opportunity_scores")
+                and self.config.router.task_prior_row_expert_opportunity_alpha > 0
+            ):
+                pred_tensor = torch.as_tensor(active_batch.predictions, dtype=torch.float32, device=self.device)
+                self._router.set_row_expert_opportunity_scores(
+                    self._regression_row_expert_opportunity_scores(
+                        expert_predictions=pred_tensor,
+                        full_index=active_batch.full_index,
+                        alpha=self.config.router.task_prior_row_expert_opportunity_alpha,
+                    )
+                )
             router_out = self._router(token_tensor, full_index=active_batch.full_index)
             router_has_nonfinite = (
                 (not torch.isfinite(router_out.specialist_weights).all())
@@ -1079,7 +1558,15 @@ class GraphDrone:
                     "full_index": int(active_batch.full_index),
                     "router_nonfinite_fallback": True,
                     "effective_defer_rate": 0.0,
+                    "regression_router_fallback_stage": "predict_router_output",
+                    "regression_router_fallback_reason": "nonfinite_router_output",
+                    "prediction_router_tokens_finite_flag": bool(torch.isfinite(token_tensor).all().item()),
+                    "prediction_router_weights_finite_flag": bool(torch.isfinite(router_out.specialist_weights).all().item()),
+                    "prediction_router_defer_finite_flag": bool(torch.isfinite(router_out.defer_prob).all().item()),
                 }
+                base_defaults = self._regression_fallback_defaults()
+                base_defaults.update(diagnostics)
+                diagnostics = base_defaults
                 diagnostics.update(self._portfolio_diagnostics(active_batch))
                 diagnostics.update(self._router_fit_diagnostics)
                 diagnostics.update(self._legitimacy_diagnostics(decision, router_skipped=False))
@@ -1088,7 +1575,8 @@ class GraphDrone:
 
         preds = anchor_preds.copy()
         preds[active_mask] = integration.predictions
-        diagnostics = dict(integration.diagnostics)
+        diagnostics = self._regression_fallback_defaults()
+        diagnostics.update(integration.diagnostics)
         diagnostics.update(self._router_fit_diagnostics)
         if router_out.ot_costs is not None:
             diagnostics["mean_ot_cost"] = float(router_out.ot_costs.mean().item())
@@ -1096,6 +1584,7 @@ class GraphDrone:
             diagnostics["alignment_aux_loss"] = float(router_out.aux_loss.detach().cpu().item())
         if router_out.extra_diagnostics:
             diagnostics.update(router_out.extra_diagnostics)
+        diagnostics.update(self._task_prior_diagnostics)
         diagnostics.update(
             self._attention_diagnostics(
                 expert_ids=active_batch.expert_ids,

@@ -144,14 +144,29 @@ class ContextualTransformerRouter(nn.Module):
         validity, ot_costs = self.noise_gate_module(tokens, full_index=full_index)
         return tokens * validity, ot_costs, validity
 
-    def forward(self, tokens: torch.Tensor, *, full_index: int) -> RouterOutputs:
+    def forward(
+        self,
+        tokens: torch.Tensor,
+        *,
+        full_index: int,
+        expert_logit_bias: torch.Tensor | None = None,
+        defer_logit_bias: torch.Tensor | None = None,
+        anchor_delta: torch.Tensor | None = None,
+    ) -> RouterOutputs:
         gated_tokens, ot_costs, validity = self._apply_noise_gate(tokens, full_index=full_index)
         anchor_token = gated_tokens[:, full_index, :]
+        if anchor_delta is not None:
+            anchor_token = anchor_token + anchor_delta
         q = self.q_proj(anchor_token)
         k = self.k_proj(gated_tokens)
         attn_scores = torch.einsum("bh,beh->be", q, k) * self.scale
+        if expert_logit_bias is not None:
+            attn_scores = attn_scores + expert_logit_bias
         specialist_weights = torch.softmax(attn_scores, dim=-1)
-        defer_prob = torch.sigmoid(self.defer_head(anchor_token))
+        defer_logits = self.defer_head(anchor_token)
+        if defer_logit_bias is not None:
+            defer_logits = defer_logits + defer_logit_bias.view(-1, 1)
+        defer_prob = torch.sigmoid(defer_logits)
         diagnostics = {
             "n_experts": float(tokens.shape[1]),
             "n_specialists": float(max(tokens.shape[1] - 1, 0)),
@@ -202,7 +217,15 @@ class RotorAlignedRouter(nn.Module):
     def fit_auxiliary_state(self, tokens: torch.Tensor, *, full_index: int) -> None:
         self.base_router.fit_auxiliary_state(tokens, full_index=full_index)
 
-    def forward(self, tokens: torch.Tensor, *, full_index: int) -> RouterOutputs:
+    def forward(
+        self,
+        tokens: torch.Tensor,
+        *,
+        full_index: int,
+        expert_logit_bias: torch.Tensor | None = None,
+        defer_logit_bias: torch.Tensor | None = None,
+        anchor_delta: torch.Tensor | None = None,
+    ) -> RouterOutputs:
         aligned = tokens.clone()
         anchor = tokens[:, full_index, :]
         losses: list[torch.Tensor] = []
@@ -220,7 +243,13 @@ class RotorAlignedRouter(nn.Module):
             post_cosines.append(F.cosine_similarity(rotated, anchor, dim=-1).mean())
             rotor_idx += 1
 
-        outputs = self.base_router(aligned, full_index=full_index)
+        outputs = self.base_router(
+            aligned,
+            full_index=full_index,
+            expert_logit_bias=expert_logit_bias,
+            defer_logit_bias=defer_logit_bias,
+            anchor_delta=anchor_delta,
+        )
         aux_loss = None
         diagnostics = dict(outputs.extra_diagnostics or {})
         if losses:
@@ -248,6 +277,186 @@ class RotorAlignedRouter(nn.Module):
             aux_loss=aux_loss,
             extra_diagnostics=diagnostics,
         )
+
+
+class TaskConditionedRouter(nn.Module):
+    """Inject a dataset-level prior into routing, either as an anchor shift or routing bias."""
+
+    def __init__(
+        self,
+        *,
+        token_dim: int,
+        prior_dim: int,
+        base_router: nn.Module,
+        strength: float,
+        mode: str,
+        local_gate_alpha: float,
+        expert_local_gate_alpha: float,
+        row_expert_opportunity_threshold: float = 0.0,
+        row_expert_opportunity_residual_scale: float = 0.0,
+        router_kind: str,
+    ):
+        super().__init__()
+        self.base_router = base_router
+        self.strength = strength
+        self.mode = mode
+        self.local_gate_alpha = local_gate_alpha
+        self.expert_local_gate_alpha = expert_local_gate_alpha
+        self.row_expert_opportunity_threshold = row_expert_opportunity_threshold
+        self.row_expert_opportunity_residual_scale = row_expert_opportunity_residual_scale
+        self.router_kind = router_kind
+        self.prior_to_token = nn.Linear(prior_dim, token_dim)
+        self.prior_to_logit = nn.Linear(prior_dim, token_dim)
+        self.prior_to_defer = nn.Linear(prior_dim, 1)
+        self.register_buffer("_task_prior_context", torch.zeros(prior_dim), persistent=False)
+        self._expert_opportunity_scores: torch.Tensor | None = None
+        self._row_expert_opportunity_scores: torch.Tensor | None = None
+        self._has_task_prior = False
+
+    @torch.no_grad()
+    def set_task_prior_context(self, context: torch.Tensor) -> None:
+        context = torch.as_tensor(context, dtype=self._task_prior_context.dtype, device=self._task_prior_context.device)
+        if context.ndim != 1:
+            raise ValueError(f"task prior context must be 1D, got shape={tuple(context.shape)}")
+        if context.shape[0] != self._task_prior_context.shape[0]:
+            raise ValueError(
+                f"task prior context dim mismatch: expected {self._task_prior_context.shape[0]}, got {context.shape[0]}"
+            )
+        self._task_prior_context.copy_(context)
+        self._has_task_prior = True
+
+    @torch.no_grad()
+    def set_expert_opportunity_scores(self, scores: torch.Tensor) -> None:
+        score_tensor = torch.as_tensor(scores, dtype=self._task_prior_context.dtype, device=self._task_prior_context.device)
+        if score_tensor.ndim != 1:
+            raise ValueError(f"expert opportunity scores must be 1D, got shape={tuple(score_tensor.shape)}")
+        self._expert_opportunity_scores = score_tensor.clone()
+
+    @torch.no_grad()
+    def set_row_expert_opportunity_scores(self, scores: torch.Tensor) -> None:
+        score_tensor = torch.as_tensor(scores, dtype=self._task_prior_context.dtype, device=self._task_prior_context.device)
+        if score_tensor.ndim != 2:
+            raise ValueError(f"row expert opportunity scores must be 2D, got shape={tuple(score_tensor.shape)}")
+        self._row_expert_opportunity_scores = score_tensor.clone()
+
+    @torch.no_grad()
+    def fit_auxiliary_state(self, tokens: torch.Tensor, *, full_index: int) -> None:
+        if hasattr(self.base_router, "fit_auxiliary_state"):
+            self.base_router.fit_auxiliary_state(tokens, full_index=full_index)
+
+    def forward(self, tokens: torch.Tensor, *, full_index: int) -> RouterOutputs:
+        if not self._has_task_prior or self.strength <= 0:
+            outputs = self.base_router(tokens, full_index=full_index)
+            diagnostics = dict(outputs.extra_diagnostics or {})
+            diagnostics.update({"task_prior_enabled": 0.0, "task_prior_mode": self.mode})
+            return replace(outputs, router_kind=self.router_kind, extra_diagnostics=diagnostics)
+
+        prior_context = self._task_prior_context.to(tokens.device)
+        anchor_delta = None
+        expert_logit_bias = None
+        defer_logit_bias = None
+        routing_bias_mean = 0.0
+        routing_bias_std = 0.0
+        defer_bias_mean = 0.0
+        local_gate_mean = 1.0
+        local_gate_std = 0.0
+        expert_local_gate_mean = 1.0
+        expert_local_gate_std = 0.0
+        expert_opportunity_mean = 1.0
+        row_expert_opportunity_mean = 1.0
+        row_expert_opportunity_std = 0.0
+        row_expert_opportunity_multiplier_mean = 1.0
+        row_expert_opportunity_multiplier_std = 0.0
+        if self.mode == "routing_bias":
+            prior_basis = F.normalize(self.prior_to_logit(prior_context), dim=0)
+            normalized_tokens = F.normalize(tokens, dim=-1)
+            anchor_basis = F.normalize(tokens[:, full_index, :], dim=-1)
+            prior_anchor = F.normalize(self.prior_to_token(prior_context), dim=0)
+            if self.local_gate_alpha > 0:
+                local_gate = torch.sigmoid(self.local_gate_alpha * torch.einsum("bd,d->b", anchor_basis, prior_anchor))
+            else:
+                local_gate = torch.ones(tokens.shape[0], device=tokens.device, dtype=tokens.dtype)
+            expert_local_gate = torch.ones(
+                (tokens.shape[0], tokens.shape[1]),
+                device=tokens.device,
+                dtype=tokens.dtype,
+            )
+            if self.expert_local_gate_alpha > 0:
+                expert_local_gate = torch.sigmoid(
+                    self.expert_local_gate_alpha * torch.einsum("bed,d->be", normalized_tokens, prior_basis)
+                )
+            if self._expert_opportunity_scores is not None:
+                opportunity = self._expert_opportunity_scores.to(tokens.device)
+                if opportunity.shape[0] == tokens.shape[1]:
+                    expert_local_gate = expert_local_gate * opportunity.unsqueeze(0)
+                    expert_opportunity_mean = float(opportunity.mean().item())
+            if self._row_expert_opportunity_scores is not None:
+                row_opportunity = self._row_expert_opportunity_scores.to(tokens.device)
+                if row_opportunity.shape == expert_local_gate.shape:
+                    row_multiplier = row_opportunity
+                    if self.row_expert_opportunity_residual_scale > 0:
+                        row_multiplier = 1.0 + self.row_expert_opportunity_residual_scale * torch.clamp(
+                            row_opportunity - self.row_expert_opportunity_threshold,
+                            min=0.0,
+                        )
+                    expert_local_gate = expert_local_gate * row_multiplier
+                    row_expert_opportunity_mean = float(row_opportunity.mean().item())
+                    row_expert_opportunity_std = float(row_opportunity.std(unbiased=False).item())
+                    row_expert_opportunity_multiplier_mean = float(row_multiplier.mean().item())
+                    row_expert_opportunity_multiplier_std = float(row_multiplier.std(unbiased=False).item())
+            expert_logit_bias = (
+                self.strength
+                * local_gate.unsqueeze(1)
+                * expert_local_gate
+                * torch.einsum("bed,d->be", normalized_tokens, prior_basis)
+            )
+            expert_logit_bias[:, full_index] = 0.0
+            defer_scalar = self.strength * self.prior_to_defer(prior_context)
+            defer_logit_bias = local_gate * defer_scalar.expand(tokens.shape[0])
+            routing_bias_mean = float(expert_logit_bias.mean().item())
+            routing_bias_std = float(expert_logit_bias.std(unbiased=False).item())
+            defer_bias_mean = float(defer_logit_bias.mean().item())
+            local_gate_mean = float(local_gate.mean().item())
+            local_gate_std = float(local_gate.std(unbiased=False).item())
+            expert_local_gate_mean = float(expert_local_gate.mean().item())
+            expert_local_gate_std = float(expert_local_gate.std(unbiased=False).item())
+        else:
+            prior_shift = self.prior_to_token(prior_context).to(tokens.device)
+            anchor_delta = self.strength * prior_shift.unsqueeze(0)
+
+        outputs = self.base_router(
+            tokens,
+            full_index=full_index,
+            expert_logit_bias=expert_logit_bias,
+            defer_logit_bias=defer_logit_bias,
+            anchor_delta=anchor_delta,
+        )
+        diagnostics = dict(outputs.extra_diagnostics or {})
+        diagnostics.update(
+            {
+                "task_prior_enabled": 1.0,
+                "task_prior_strength": float(self.strength),
+                "task_prior_norm": float(self._task_prior_context.norm().item()),
+                "task_prior_mode": self.mode,
+                "task_prior_routing_bias_mean": routing_bias_mean,
+                "task_prior_routing_bias_std": routing_bias_std,
+                "task_prior_defer_bias_mean": defer_bias_mean,
+                "task_prior_local_gate_alpha": float(self.local_gate_alpha),
+                "task_prior_local_gate_mean": local_gate_mean,
+                "task_prior_local_gate_std": local_gate_std,
+                "task_prior_expert_local_gate_alpha": float(self.expert_local_gate_alpha),
+                "task_prior_expert_local_gate_mean": expert_local_gate_mean,
+                "task_prior_expert_local_gate_std": expert_local_gate_std,
+                "task_prior_expert_opportunity_mean": expert_opportunity_mean,
+                "task_prior_row_expert_opportunity_mean": row_expert_opportunity_mean,
+                "task_prior_row_expert_opportunity_std": row_expert_opportunity_std,
+                "task_prior_row_expert_opportunity_threshold": float(self.row_expert_opportunity_threshold),
+                "task_prior_row_expert_opportunity_residual_scale": float(self.row_expert_opportunity_residual_scale),
+                "task_prior_row_expert_opportunity_multiplier_mean": row_expert_opportunity_multiplier_mean,
+                "task_prior_row_expert_opportunity_multiplier_std": row_expert_opportunity_multiplier_std,
+            }
+        )
+        return replace(outputs, router_kind=self.router_kind, extra_diagnostics=diagnostics)
 
 
 def _make_noise_gate(config: SetRouterConfig, token_dim: int) -> nn.Module | None:

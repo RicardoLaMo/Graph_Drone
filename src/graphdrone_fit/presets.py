@@ -47,11 +47,20 @@ def _env_int(name: str, default: int) -> int:
     return int(raw) if raw is not None else default
 
 
+def _env_str(name: str, default: str | None = None) -> str | None:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = raw.strip()
+    return value or default
+
+
 def build_graphdrone_config_from_preset(
     *,
     preset: str,
     n_classes: int = 1,
     default_router_kind: str,
+    task_prior_dataset_key: str | None = None,
 ) -> GraphDroneConfig:
     resolved_preset = resolve_graphdrone_preset_name(preset)
 
@@ -231,6 +240,13 @@ def build_graphdrone_config_from_preset(
         router=SetRouterConfig(
             kind=os.getenv("GRAPHDRONE_ROUTER_KIND", default_router_kind),
             alignment_lambda=_env_float("GRAPHDRONE_ALIGNMENT_LAMBDA", 0.1),
+            residual_usefulness_lambda=_env_float("GRAPHDRONE_RESIDUAL_USEFULNESS_LAMBDA", 0.0),
+            allocation_usefulness_lambda=_env_float("GRAPHDRONE_ALLOCATION_USEFULNESS_LAMBDA", 0.0),
+            conservative_allocation_lambda=_env_float("GRAPHDRONE_CONSERVATIVE_ALLOCATION_LAMBDA", 0.0),
+            conservative_allocation_opportunity_threshold=_env_float(
+                "GRAPHDRONE_CONSERVATIVE_ALLOCATION_OPPORTUNITY_THRESHOLD", 0.1
+            ),
+            robust_allocation_usefulness_lambda=_env_float("GRAPHDRONE_ROBUST_ALLOCATION_USEFULNESS_LAMBDA", 0.0),
             router_seed=_env_int("GRAPHDRONE_ROUTER_SEED", 42),
             freeze_base_router=_env_flag("GRAPHDRONE_FREEZE_BASE_ROUTER", False),
             ot_prototype_count=_env_int("GRAPHDRONE_OT_PROTOTYPE_COUNT", 32),
@@ -238,6 +254,27 @@ def build_graphdrone_config_from_preset(
             ot_max_iter=_env_int("GRAPHDRONE_OT_MAX_ITER", 50),
             ot_alpha=_env_float("GRAPHDRONE_OT_ALPHA", 6.0),
             ot_threshold=_env_float("GRAPHDRONE_OT_THRESHOLD", 0.25),
+            task_prior_bank_dir=_env_str("GRAPHDRONE_TASK_PRIOR_BANK_DIR", None),
+            task_prior_encoder_kind=_env_str("GRAPHDRONE_TASK_PRIOR_ENCODER_KIND", "transformer") or "transformer",
+            task_prior_mode=_env_str("GRAPHDRONE_TASK_PRIOR_MODE", "anchor_shift") or "anchor_shift",
+            task_prior_strength=_env_float("GRAPHDRONE_TASK_PRIOR_STRENGTH", 0.5),
+            task_prior_local_gate_alpha=_env_float("GRAPHDRONE_TASK_PRIOR_LOCAL_GATE_ALPHA", 0.0),
+            task_prior_expert_local_gate_alpha=_env_float("GRAPHDRONE_TASK_PRIOR_EXPERT_LOCAL_GATE_ALPHA", 0.0),
+            task_prior_row_expert_opportunity_alpha=_env_float(
+                "GRAPHDRONE_TASK_PRIOR_ROW_EXPERT_OPPORTUNITY_ALPHA", 0.0
+            ),
+            task_prior_row_expert_opportunity_threshold=_env_float(
+                "GRAPHDRONE_TASK_PRIOR_ROW_EXPERT_OPPORTUNITY_THRESHOLD", 0.0
+            ),
+            task_prior_row_expert_opportunity_residual_scale=_env_float(
+                "GRAPHDRONE_TASK_PRIOR_ROW_EXPERT_OPPORTUNITY_RESIDUAL_SCALE", 0.0
+            ),
+            task_prior_dataset_key=task_prior_dataset_key or _env_str("GRAPHDRONE_TASK_PRIOR_DATASET_KEY", None),
+            task_prior_exact_reuse_blend=_env_float("GRAPHDRONE_TASK_PRIOR_EXACT_REUSE_BLEND", 0.5),
+            task_prior_defer_penalty_lambda=_env_float("GRAPHDRONE_TASK_PRIOR_DEFER_PENALTY_LAMBDA", 0.0),
+            task_prior_defer_target=_env_float("GRAPHDRONE_TASK_PRIOR_DEFER_TARGET", 0.8),
+            task_prior_rank_loss_lambda=_env_float("GRAPHDRONE_TASK_PRIOR_RANK_LOSS_LAMBDA", 0.0),
+            task_prior_rank_margin=_env_float("GRAPHDRONE_TASK_PRIOR_RANK_MARGIN", 0.0),
         ),
         legitimacy_gate=LegitimacyGateConfig(
             enabled=_env_flag("GRAPHDRONE_ENABLE_LEGITIMACY_GATE", True),

@@ -45,6 +45,11 @@ class SetRouterConfig:
     ] = "bootstrap_full_only"
     sparse_top_k: int = 1
     alignment_lambda: float = 0.0
+    residual_usefulness_lambda: float = 0.0
+    allocation_usefulness_lambda: float = 0.0
+    conservative_allocation_lambda: float = 0.0
+    conservative_allocation_opportunity_threshold: float = 0.1
+    robust_allocation_usefulness_lambda: float = 0.0
     router_seed: int = 42
     freeze_base_router: bool = False
     ot_prototype_count: int = 32
@@ -61,9 +66,19 @@ class SetRouterConfig:
     # All fields default to None/0 which disables the prior entirely (no-op).
     task_prior_bank_dir: str | None = None
     task_prior_encoder_kind: Literal["transformer", "gru"] = "transformer"
+    task_prior_mode: Literal["anchor_shift", "routing_bias"] = "anchor_shift"
     task_prior_strength: float = 0.5
+    task_prior_local_gate_alpha: float = 0.0
+    task_prior_expert_local_gate_alpha: float = 0.0
+    task_prior_row_expert_opportunity_alpha: float = 0.0
+    task_prior_row_expert_opportunity_threshold: float = 0.0
+    task_prior_row_expert_opportunity_residual_scale: float = 0.0
     task_prior_dataset_key: str | None = None
     task_prior_exact_reuse_blend: float = 0.5
+    task_prior_defer_penalty_lambda: float = 0.0
+    task_prior_defer_target: float = 0.8
+    task_prior_rank_loss_lambda: float = 0.0
+    task_prior_rank_margin: float = 0.0
     # OOF threshold calibration: compute F1-maximizing threshold on OOF blend
     # predictions after router training and apply it at inference (binary only).
     # Set calibrate_threshold=False (default) to disable (preserves prior behavior).
@@ -85,6 +100,27 @@ class SetRouterConfig:
             raise ValueError(f"sparse_top_k must be positive, got {self.sparse_top_k}")
         if self.alignment_lambda < 0:
             raise ValueError(f"alignment_lambda must be non-negative, got {self.alignment_lambda}")
+        if self.residual_usefulness_lambda < 0:
+            raise ValueError(
+                f"residual_usefulness_lambda must be non-negative, got {self.residual_usefulness_lambda}"
+            )
+        if self.allocation_usefulness_lambda < 0:
+            raise ValueError(
+                f"allocation_usefulness_lambda must be non-negative, got {self.allocation_usefulness_lambda}"
+            )
+        if self.conservative_allocation_lambda < 0:
+            raise ValueError(
+                f"conservative_allocation_lambda must be non-negative, got {self.conservative_allocation_lambda}"
+            )
+        if self.conservative_allocation_opportunity_threshold < 0:
+            raise ValueError(
+                "conservative_allocation_opportunity_threshold must be non-negative, got "
+                f"{self.conservative_allocation_opportunity_threshold}"
+            )
+        if self.robust_allocation_usefulness_lambda < 0:
+            raise ValueError(
+                f"robust_allocation_usefulness_lambda must be non-negative, got {self.robust_allocation_usefulness_lambda}"
+            )
         if self.router_seed < 0:
             raise ValueError(f"router_seed must be non-negative, got {self.router_seed}")
         if self.ot_prototype_count < 1:
@@ -99,9 +135,53 @@ class SetRouterConfig:
             raise ValueError(f"defer_target must be in [0, 1], got {self.defer_target}")
         if self.task_prior_strength < 0:
             raise ValueError(f"task_prior_strength must be non-negative, got {self.task_prior_strength}")
+        if self.task_prior_local_gate_alpha < 0:
+            raise ValueError(
+                f"task_prior_local_gate_alpha must be non-negative, got {self.task_prior_local_gate_alpha}"
+            )
+        if self.task_prior_expert_local_gate_alpha < 0:
+            raise ValueError(
+                "task_prior_expert_local_gate_alpha must be non-negative, got "
+                f"{self.task_prior_expert_local_gate_alpha}"
+            )
+        if self.task_prior_row_expert_opportunity_alpha < 0:
+            raise ValueError(
+                "task_prior_row_expert_opportunity_alpha must be non-negative, got "
+                f"{self.task_prior_row_expert_opportunity_alpha}"
+            )
+        if not 0.0 <= self.task_prior_row_expert_opportunity_threshold <= 1.0:
+            raise ValueError(
+                "task_prior_row_expert_opportunity_threshold must be in [0, 1], got "
+                f"{self.task_prior_row_expert_opportunity_threshold}"
+            )
+        if self.task_prior_row_expert_opportunity_residual_scale < 0:
+            raise ValueError(
+                "task_prior_row_expert_opportunity_residual_scale must be non-negative, got "
+                f"{self.task_prior_row_expert_opportunity_residual_scale}"
+            )
+        if self.task_prior_mode not in {"anchor_shift", "routing_bias"}:
+            raise ValueError(
+                f"task_prior_mode must be one of ['anchor_shift', 'routing_bias'], got {self.task_prior_mode!r}"
+            )
         if not 0.0 <= self.task_prior_exact_reuse_blend <= 1.0:
             raise ValueError(
                 f"task_prior_exact_reuse_blend must be in [0, 1], got {self.task_prior_exact_reuse_blend}"
+            )
+        if self.task_prior_defer_penalty_lambda < 0:
+            raise ValueError(
+                f"task_prior_defer_penalty_lambda must be non-negative, got {self.task_prior_defer_penalty_lambda}"
+            )
+        if not 0.0 <= self.task_prior_defer_target <= 1.0:
+            raise ValueError(
+                f"task_prior_defer_target must be in [0, 1], got {self.task_prior_defer_target}"
+            )
+        if self.task_prior_rank_loss_lambda < 0:
+            raise ValueError(
+                f"task_prior_rank_loss_lambda must be non-negative, got {self.task_prior_rank_loss_lambda}"
+            )
+        if self.task_prior_rank_margin < 0:
+            raise ValueError(
+                f"task_prior_rank_margin must be non-negative, got {self.task_prior_rank_margin}"
             )
         if self.task_prior_bank_dir is not None and not str(self.task_prior_bank_dir).strip():
             raise ValueError("task_prior_bank_dir must be non-empty when provided")

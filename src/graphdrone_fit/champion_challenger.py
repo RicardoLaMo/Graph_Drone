@@ -36,6 +36,28 @@ OPTIONAL_DELTA_COLUMNS = (
     "validation_weighted_specialist_advantage_score",
     "validation_defer_weighted_specialist_advantage_score",
     "validation_top_specialist_advantage_score",
+    "validation_positive_specialist_opportunity_score",
+    "validation_residual_usefulness_gap",
+    "validation_positive_specialist_mass",
+    "validation_top_specialist_positive_rate",
+    "validation_residual_usefulness_lambda",
+)
+
+MECHANISM_BASE_COLUMNS = (
+    "defer",
+    "alignment_aux_loss",
+    "alignment_cosine_pre",
+    "alignment_cosine_post",
+    "alignment_cosine_gain",
+    "mean_specialist_mass",
+    "mean_anchor_attention_weight",
+    "non_anchor_attention_entropy",
+    "validation_best_specialist_advantage_score",
+    "validation_weighted_specialist_advantage_score",
+    "validation_defer_weighted_specialist_advantage_score",
+    "validation_top_specialist_advantage_score",
+    "validation_positive_specialist_opportunity_score",
+    "validation_residual_usefulness_gap",
     "validation_positive_specialist_mass",
     "validation_top_specialist_positive_rate",
 )
@@ -159,6 +181,31 @@ def build_dataset_summary(paired_df: pd.DataFrame) -> pd.DataFrame:
         for col in paired_df.columns
         if col not in PAIR_KEYS and col not in exclude and pd.api.types.is_numeric_dtype(paired_df[col])
     ]
+    return (
+        paired_df.groupby(["dataset", "task_type"], dropna=False)[numeric_cols]
+        .mean()
+        .reset_index()
+        .sort_values(["task_type", "dataset"])
+        .reset_index(drop=True)
+    )
+
+
+def build_mechanism_summary(paired_df: pd.DataFrame) -> pd.DataFrame:
+    if paired_df.empty:
+        return paired_df.copy()
+
+    summary_columns = ["dataset", "task_type"]
+    for base_name in MECHANISM_BASE_COLUMNS:
+        for suffix in ("_champion", "_challenger", "_delta"):
+            col = f"{base_name}{suffix}"
+            if col in paired_df.columns:
+                summary_columns.append(col)
+
+    summary_columns = list(dict.fromkeys(summary_columns))
+    if len(summary_columns) <= 2:
+        return pd.DataFrame(columns=summary_columns)
+
+    numeric_cols = [col for col in summary_columns if col not in {"dataset", "task_type"}]
     return (
         paired_df.groupby(["dataset", "task_type"], dropna=False)[numeric_cols]
         .mean()
@@ -389,6 +436,31 @@ def build_markdown_report(
         lines.append(_format_table(task_summary, present_cols, sort_by=["dataset"]))
         lines.extend(["```", ""])
 
+        mechanism_summary = build_mechanism_summary(paired_df)
+        task_mechanism = mechanism_summary[mechanism_summary["task_type"] == task_type]
+        preferred_mechanism_cols = [
+            "dataset",
+            "alignment_cosine_gain_challenger",
+            "alignment_cosine_gain_delta",
+            "validation_weighted_specialist_advantage_score_champion",
+            "validation_weighted_specialist_advantage_score_challenger",
+            "validation_weighted_specialist_advantage_score_delta",
+            "validation_positive_specialist_mass_champion",
+            "validation_positive_specialist_mass_challenger",
+            "validation_positive_specialist_mass_delta",
+            "validation_residual_usefulness_gap_champion",
+            "validation_residual_usefulness_gap_challenger",
+            "validation_residual_usefulness_gap_delta",
+            "defer_champion",
+            "defer_challenger",
+            "defer_delta",
+        ]
+        present_mechanism_cols = [col for col in preferred_mechanism_cols if col in task_mechanism.columns]
+        if len(present_mechanism_cols) > 1:
+            lines.extend([f"### {heading} Mechanisms", "", "```text"])
+            lines.append(_format_table(task_mechanism, present_mechanism_cols, sort_by=["dataset"]))
+            lines.extend(["```", ""])
+
     if anchor_reference is not None and not anchor_reference.empty:
         lines.extend(["## TabPFN Anchor", "", "```text"])
         lines.append(
@@ -414,8 +486,10 @@ def write_comparison_artifacts(
 ) -> None:
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    mechanism_summary = build_mechanism_summary(paired_df)
     paired_df.to_csv(out_dir / "paired_task_deltas.csv", index=False)
     dataset_summary.to_csv(out_dir / "paired_dataset_summary.csv", index=False)
+    mechanism_summary.to_csv(out_dir / "paired_mechanism_summary.csv", index=False)
     if anchor_reference is not None and not anchor_reference.empty:
         anchor_reference.to_csv(out_dir / "tabpfn_anchor_summary.csv", index=False)
     (out_dir / "promotion_decision.json").write_text(json.dumps(_as_json_ready(decision), indent=2))

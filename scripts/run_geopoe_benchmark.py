@@ -87,11 +87,12 @@ GRAPHDRONE_VERSION = os.getenv("GRAPHDRONE_VERSION_OVERRIDE", "v1-geopoe-2026.03
 GRAPHDRONE_PRESET = os.getenv("GRAPHDRONE_PRESET", "afc_candidate")
 
 
-def _graphdrone_config(*, n_classes: int = 1, default_router_kind: str) -> GraphDroneConfig:
+def _graphdrone_config(*, n_classes: int = 1, default_router_kind: str, dataset_key: str | None = None) -> GraphDroneConfig:
     return build_graphdrone_config_from_preset(
         preset=GRAPHDRONE_PRESET,
         n_classes=n_classes,
         default_router_kind=default_router_kind,
+        task_prior_dataset_key=dataset_key,
     )
 
 
@@ -226,6 +227,15 @@ def _diagnostic_payload(diagnostics: dict[str, object]) -> dict[str, object]:
         "legitimacy_score_mean",
         "router_skipped",
         "router_nonfinite_fallback",
+        "regression_router_fallback_stage",
+        "regression_router_fallback_reason",
+        "validation_router_tokens_finite_flag",
+        "validation_router_predictions_finite_flag",
+        "validation_router_targets_finite_flag",
+        "validation_anchor_mse_finite_flag",
+        "prediction_router_tokens_finite_flag",
+        "prediction_router_weights_finite_flag",
+        "prediction_router_defer_finite_flag",
         "mean_ot_cost",
         "mean_specialist_validity",
         "closed_specialist_frac",
@@ -235,12 +245,51 @@ def _diagnostic_payload(diagnostics: dict[str, object]) -> dict[str, object]:
         "alignment_cosine_pre",
         "alignment_cosine_post",
         "alignment_cosine_gain",
+        "task_prior_enabled",
+        "task_prior_mode",
+        "task_prior_strength",
+        "task_prior_local_gate_alpha",
+        "task_prior_local_gate_mean",
+        "task_prior_local_gate_std",
+        "task_prior_expert_local_gate_alpha",
+        "task_prior_expert_local_gate_mean",
+        "task_prior_expert_local_gate_std",
+        "task_prior_expert_opportunity_mean",
+        "task_prior_row_expert_opportunity_mean",
+        "task_prior_row_expert_opportunity_std",
+        "task_prior_row_expert_opportunity_threshold",
+        "task_prior_row_expert_opportunity_residual_scale",
+        "task_prior_row_expert_opportunity_multiplier_mean",
+        "task_prior_row_expert_opportunity_multiplier_std",
+        "task_prior_norm",
+        "task_prior_routing_bias_mean",
+        "task_prior_routing_bias_std",
+        "task_prior_defer_bias_mean",
+        "task_prior_training_objective",
+        "task_prior_encoder_kind",
+        "task_prior_query_dataset",
+        "task_prior_top_neighbor",
+        "task_prior_top_neighbor_prob",
+        "task_prior_base_top_neighbor",
+        "task_prior_base_top_neighbor_prob",
+        "task_prior_entropy",
+        "task_prior_exact_reuse_available",
+        "task_prior_exact_reuse_blend",
+        "task_prior_exact_reuse_used",
+        "task_prior_feedback_used",
+        "task_prior_feedback_top_source",
+        "task_prior_feedback_top_source_weight",
         "validation_best_specialist_advantage_score",
         "validation_weighted_specialist_advantage_score",
         "validation_defer_weighted_specialist_advantage_score",
         "validation_top_specialist_advantage_score",
+        "validation_positive_specialist_opportunity_score",
+        "validation_residual_usefulness_gap",
         "validation_positive_specialist_mass",
         "validation_top_specialist_positive_rate",
+        "validation_allocation_usefulness_score",
+        "validation_allocation_usefulness_lambda",
+        "validation_residual_usefulness_lambda",
     )
     payload: dict[str, object] = {}
     for key in keep_keys:
@@ -271,7 +320,7 @@ def _diagnostic_payload(diagnostics: dict[str, object]) -> dict[str, object]:
     return payload
 
 
-def run_graphdrone(X_tr, y_tr, X_te, task_type: str, seed: int = 42, n_classes: int = None):
+def run_graphdrone(X_tr, y_tr, X_te, task_type: str, *, dataset: str, seed: int = 42, n_classes: int = None):
     """
     Two independent engines:
     - Regression: FULL + 3×SUB TabPFN views, GORA observers, contextual_transformer
@@ -318,7 +367,7 @@ def run_graphdrone(X_tr, y_tr, X_te, task_type: str, seed: int = 42, n_classes: 
                 model_params=params_fp,
             ))
         specs = (full_spec, *sub_specs)
-        cfg = _graphdrone_config(default_router_kind="contextual_transformer")
+        cfg = _graphdrone_config(default_router_kind="contextual_transformer", dataset_key=dataset)
     else:
         # GeoPOE classification: multi-view SUB portfolio + static anchor-boosted GeoPOE
         # 3 SUB views with different seeds/subspace sizes → richer ensemble diversity
@@ -350,7 +399,7 @@ def run_graphdrone(X_tr, y_tr, X_te, task_type: str, seed: int = 42, n_classes: 
                 model_params=params_fp,
             ))
         specs = (full_spec, *sub_specs)
-        cfg = _graphdrone_config(n_classes=n_classes, default_router_kind="bootstrap_full_only")
+        cfg = _graphdrone_config(n_classes=n_classes, default_router_kind="bootstrap_full_only", dataset_key=dataset)
 
     gd = GraphDrone(cfg)
     # Pass problem_type explicitly so integer-valued regression targets (e.g. cpu_act)
@@ -417,7 +466,7 @@ def run_task(dataset: str, fold: int, cache_dir: Path, max_samples: int, methods
             if method == "tabpfn":
                 out = run_tabpfn(X_tr, y_tr, X_te, task_type)
             else:
-                out = run_graphdrone(X_tr, y_tr, X_te, task_type, seed=42, n_classes=global_n_classes)
+                out = run_graphdrone(X_tr, y_tr, X_te, task_type, dataset=dataset, seed=42, n_classes=global_n_classes)
 
             elapsed = time.time() - t0
 
@@ -543,6 +592,104 @@ def _win_rate(df: pd.DataFrame, metric: str, challenger: str, baselines: list[st
     return pd.DataFrame(rows)
 
 
+def _regression_fallback_summary(df: pd.DataFrame) -> pd.DataFrame:
+    required = {
+        "task_type",
+        "dataset",
+        "method",
+        "regression_router_fallback_stage",
+        "regression_router_fallback_reason",
+    }
+    if not required.issubset(df.columns):
+        return pd.DataFrame()
+    reg = df[df["task_type"] == "regression"].copy()
+    if reg.empty:
+        return pd.DataFrame()
+    reg["regression_router_fallback_stage"] = (
+        reg["regression_router_fallback_stage"].fillna("missing").astype(str)
+    )
+    reg["regression_router_fallback_reason"] = (
+        reg["regression_router_fallback_reason"].fillna("missing").astype(str)
+    )
+    summary = (
+        reg.groupby(
+            [
+                "dataset",
+                "method",
+                "regression_router_fallback_stage",
+                "regression_router_fallback_reason",
+            ],
+            dropna=False,
+        )
+        .size()
+        .reset_index(name="count")
+        .sort_values(
+            ["dataset", "method", "count", "regression_router_fallback_stage", "regression_router_fallback_reason"],
+            ascending=[True, True, False, True, True],
+        )
+        .reset_index(drop=True)
+    )
+    return summary
+
+
+def _regression_route_state_summary(df: pd.DataFrame) -> pd.DataFrame:
+    required = {
+        "task_type",
+        "dataset",
+        "method",
+        "router_kind",
+        "router_nonfinite_fallback",
+        "regression_router_fallback_stage",
+        "regression_router_fallback_reason",
+        "early_exit",
+        "router_skipped",
+    }
+    if not required.issubset(df.columns):
+        return pd.DataFrame()
+    reg = df[df["task_type"] == "regression"].copy()
+    if reg.empty:
+        return pd.DataFrame()
+
+    def classify(row: pd.Series) -> str:
+        router_kind = str(row.get("router_kind", "") or "")
+        early_exit = bool(row.get("early_exit", False))
+        router_skipped = bool(row.get("router_skipped", False))
+        nonfinite = bool(row.get("router_nonfinite_fallback", False))
+        if router_kind == "legitimacy_gate_anchor_only" or (early_exit and router_skipped):
+            return "legitimacy_gate_early_exit"
+        if nonfinite or "nonfinite_fallback" in router_kind or router_kind == "router_training_nonfinite_anchor_only":
+            return "router_fallback"
+        return "clean_routed"
+
+    reg["route_state"] = reg.apply(classify, axis=1)
+    reg["regression_router_fallback_stage"] = (
+        reg["regression_router_fallback_stage"].fillna("none").astype(str)
+    )
+    reg["regression_router_fallback_reason"] = (
+        reg["regression_router_fallback_reason"].fillna("none").astype(str)
+    )
+    summary = (
+        reg.groupby(
+            [
+                "dataset",
+                "method",
+                "route_state",
+                "regression_router_fallback_stage",
+                "regression_router_fallback_reason",
+            ],
+            dropna=False,
+        )
+        .size()
+        .reset_index(name="count")
+        .sort_values(
+            ["dataset", "method", "count", "route_state", "regression_router_fallback_stage"],
+            ascending=[True, True, False, True, True],
+        )
+        .reset_index(drop=True)
+    )
+    return summary
+
+
 def build_report(all_rows: list[dict], output_dir: Path):
     output_dir.mkdir(parents=True, exist_ok=True)
     df = pd.DataFrame(all_rows)
@@ -554,6 +701,12 @@ def build_report(all_rows: list[dict], output_dir: Path):
                     and pd.api.types.is_numeric_dtype(df[c])]
     agg = df.groupby(["dataset", "method", "task_type"])[numeric_cols].mean().reset_index()
     agg.to_csv(output_dir / "results_summary.csv", index=False)
+    fallback_summary = _regression_fallback_summary(df)
+    if not fallback_summary.empty:
+        fallback_summary.to_csv(output_dir / "regression_fallback_summary.csv", index=False)
+    route_state_summary = _regression_route_state_summary(df)
+    if not route_state_summary.empty:
+        route_state_summary.to_csv(output_dir / "regression_route_state_summary.csv", index=False)
 
     lines = [
         "=" * 80,
@@ -579,6 +732,39 @@ def build_report(all_rows: list[dict], output_dir: Path):
             lines.append("Win-rate (GraphDrone R² > TabPFN default, per dataset per fold)")
             lines.append(wr[["dataset", "vs", "win_rate", "delta_r2"]].to_string(index=False,
                 float_format="{:.3f}".format))
+            lines.append("")
+
+        if not fallback_summary.empty:
+            lines.append("Regression Fallback Summary")
+            lines.append("-" * 80)
+            lines.append(
+                fallback_summary[
+                    [
+                        "dataset",
+                        "method",
+                        "regression_router_fallback_stage",
+                        "regression_router_fallback_reason",
+                        "count",
+                    ]
+                ].to_string(index=False)
+            )
+            lines.append("")
+
+        if not route_state_summary.empty:
+            lines.append("Regression Route State Summary")
+            lines.append("-" * 80)
+            lines.append(
+                route_state_summary[
+                    [
+                        "dataset",
+                        "method",
+                        "route_state",
+                        "regression_router_fallback_stage",
+                        "regression_router_fallback_reason",
+                        "count",
+                    ]
+                ].to_string(index=False)
+            )
             lines.append("")
 
     # Classification table
