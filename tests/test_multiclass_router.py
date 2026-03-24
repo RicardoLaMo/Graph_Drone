@@ -87,9 +87,8 @@ def test_multiclass_router_disabled_by_default():
 # ---------------------------------------------------------------------------
 
 def test_single_expert_falls_back_to_static():
-    """FULL-only portfolio (<=10 features, no SUBs) must fall back to static GeoPOE
-    even when use_learned_router_for_classification=True."""
-    # 10 features → _build_default_specs returns FULL only for multiclass
+    """FULL-only portfolio (<=10 features) must fall back to static GeoPOE."""
+    # 10 features → _build_default_specs returns FULL only for multiclass (<3 experts)
     X, y = _make_multiclass_data(n=500, n_features=10, n_classes=3)
     cfg = GraphDroneConfig(
         n_classes=3,
@@ -99,7 +98,24 @@ def test_single_expert_falls_back_to_static():
     gd = GraphDrone(cfg)
     gd.fit(X, y, problem_type="classification")
     assert gd._clf_uses_learned_router is False, (
-        "Single-expert (FULL-only) portfolio must fall back to static GeoPOE"
+        "1-expert (FULL-only) portfolio must fall back to static GeoPOE"
+    )
+
+
+def test_two_expert_multiclass_falls_back_to_static():
+    """2-expert multiclass (11–14 features: FULL + 1 SUB) must also fall back.
+    Empirically, 2-expert routing is unstable (SDSS17 regression: defer to weak SUB hurts F1)."""
+    # 12 features → FULL + 1×SUB@60% = 2 experts → requires >=3 for learned routing
+    X, y = _make_multiclass_data(n=700, n_features=12, n_classes=3)
+    cfg = GraphDroneConfig(
+        n_classes=3,
+        router=SetRouterConfig(kind="noise_gate_router"),
+        use_learned_router_for_classification=True,
+    )
+    gd = GraphDrone(cfg)
+    gd.fit(X, y, problem_type="classification")
+    assert gd._clf_uses_learned_router is False, (
+        "2-expert multiclass must fall back to static GeoPOE (requires 3+ experts)"
     )
 
 

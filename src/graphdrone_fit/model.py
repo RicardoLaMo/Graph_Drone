@@ -495,9 +495,16 @@ class GraphDrone:
         is_binary: bool,
     ) -> None:
         use_learned, router_cfg = self._classification_router_config(is_binary=is_binary)
-        # Guard: single-expert portfolio (FULL-only) has nothing to route — static blend.
-        if use_learned and len(expert_specs) <= 1:
-            print("  -> Classification router skipped: single-expert portfolio, using static GeoPOE blend.")
+        # Guard: for multiclass, require at least 3 experts for stable routing.
+        # With 1–2 experts the router has too little specialist diversity and empirically
+        # regresses (SDSS17 2-expert case: defer saturation on weak 7-feature SUB hurt F1 -0.007).
+        # Binary is exempt: it has been validated on 2-expert portfolios.
+        min_experts = 1 if is_binary else 3
+        if use_learned and len(expert_specs) < min_experts:
+            print(
+                f"  -> Classification router skipped: only {len(expert_specs)} expert(s) "
+                f"(multiclass requires {min_experts}+), using static GeoPOE blend."
+            )
             use_learned = False
             router_cfg = None
         self._clf_uses_learned_router = use_learned
