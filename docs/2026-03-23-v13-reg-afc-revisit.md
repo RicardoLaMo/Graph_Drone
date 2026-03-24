@@ -258,3 +258,124 @@ So the current state of the claim is:
 - regression task-prior routing is real
 - it can help on at least one hard regime when the learned router survives
 - but on the mini-full fold-0 contract, the broader bottleneck is still regression router stability on the hard datasets, not absence of a useful task prior
+
+## Sixth result: hard-regime stability fix for live regression task priors
+
+Contracts:
+- first stabilized hard-regime pass: `eval/v13_reg_task_prior_hardregimes_quick_v1/comparison/promotion_decision.json`
+- fully stabilized hard-regime pass: `eval/v13_reg_task_prior_hardregimes_quick_v2/comparison/promotion_decision.json`
+- refreshed-bank hard-regime pass: `eval/v13_reg_task_prior_hardregimes_quick_v3/comparison/promotion_decision.json`
+- challenger raw reports:
+  - `eval/v13_reg_task_prior_hardregimes_quick_v2/raw/challenger/regression/report/results_granular.csv`
+  - `eval/v13_reg_task_prior_hardregimes_quick_v3/raw/challenger/regression/report/results_granular.csv`
+
+Setup:
+- datasets: `california`, `diamonds`, `house_prices`
+- regression legitimacy gate disabled
+- live task prior enabled with exact reuse blend
+- new stabilization changes:
+  - normalize regression router training targets before learned routing optimization
+  - normalize regression prediction channels before token construction
+
+What was fixed:
+- the earlier hard-regime blocker was not lack of task-bank coverage
+- it was scale instability inside regression router training and token construction
+- after adding both normalization stages, all hard-regime task-folds stayed `clean_routed`
+  instead of falling into `train_gradients/nonfinite_gradients`
+
+What cleared:
+- `v13_reg_task_prior_hardregimes_quick_v2` kept all 9 hard-regime task-folds live:
+  - `router_kind=contextual_transformer_router_task_prior`
+  - `router_nonfinite_fallback=0`
+  - `regression_router_fallback_stage=none`
+  - `regression_router_fallback_reason=none`
+- the contract became nearly flat rather than catastrophically negative:
+  - mean RMSE relative improvement: `-0.000535`
+  - mean R² delta: `-0.000155`
+
+What the refreshed bank changed:
+- a six-dataset regression task bank was rebuilt to include:
+  - `california`
+  - `cpu_act`
+  - `diamonds`
+  - `elevators`
+  - `house_prices`
+  - `kin8nm`
+- exact reuse then became available on all three hard regimes in `quick_v3`
+
+What did not clear:
+- even after stability was fixed and the bank knew all three hard regimes directly,
+  the refreshed-bank contract still returned `hold`
+  - mean RMSE relative improvement: `-0.002261`
+  - mean R² delta: `-0.000356`
+- the top-neighbor structure also stayed semantically weak:
+  - `california -> cpu_act`
+  - `diamonds -> cpu_act`
+  - `house_prices -> cpu_act`
+
+Most important interpretation:
+- this round clears the stability question much more than the task-prior question
+- the hard regression regimes can now stay on a live routed surface under the task-prior router
+- once that routed surface exists, the current task-prior coupling is only making small or slightly negative outcome changes
+- adding exact reuse for `diamonds` and `house_prices` did not materially improve the hard-regime outcome once routing was stable
+
+So the new state of the lane is:
+- hard-regime regression router stability is largely cleared as the dominant blocker
+- bank coverage is no longer the main missing piece either
+- the next live problem is task-prior coupling strength and shape on the stabilized hard-regime surface
+
+## Seventh result: task-prior coupling sweep on the stabilized hard-regime surface
+
+Contracts:
+- stronger global prior strength:
+  - `eval/v13_reg_task_prior_hardregimes_coupling_strength1_v1/comparison/promotion_decision.json`
+  - `eval/v13_reg_task_prior_hardregimes_coupling_strength1_v1/comparison/paired_task_deltas.csv`
+- stronger exact-reuse blend:
+  - `eval/v13_reg_task_prior_hardregimes_coupling_exact1_v1/comparison/promotion_decision.json`
+  - `eval/v13_reg_task_prior_hardregimes_coupling_exact1_v1/comparison/paired_task_deltas.csv`
+
+Setup:
+- same stabilized hard-regime slice: `california`, `diamonds`, `house_prices`
+- same refreshed six-dataset regression bank
+- same live task-prior route
+- only coupling knobs changed
+
+Probe A:
+- `task_prior_strength=1.0`
+- `task_prior_exact_reuse_blend=0.6`
+
+Probe B:
+- `task_prior_strength=0.5`
+- `task_prior_exact_reuse_blend=1.0`
+
+What cleared:
+- both probes stayed fully `clean_routed`
+- no regression router fallback returned
+- so the sweep isolates prior coupling rather than re-opening the stability problem
+
+What did not clear:
+- stronger global coupling was worse than the stabilized baseline:
+  - mean RMSE relative improvement: `-0.001753`
+  - mean R² delta: `-0.000179`
+- maximal exact-reuse blending was worse again:
+  - mean RMSE relative improvement: `-0.003013`
+  - mean R² delta: `-0.000389`
+
+Most important per-fold degradations:
+- stronger global coupling:
+  - `california fold=1`: `-0.016901` RMSE relative improvement
+- maximal exact reuse:
+  - `california fold=2`: `-0.012733`
+  - `diamonds fold=2`: `-0.007276`
+
+Most important interpretation:
+- the current task prior is not simply under-coupled
+- making the prior stronger globally makes the stabilized hard-regime result worse
+- forcing exact reuse harder also makes it worse
+- that means the next problem is not just parameter tuning on the current additive conditioning path
+
+So the current read becomes:
+- stability: cleared locally
+- bank membership: no longer the main blocker
+- simple coupling sweeps: falsified as the main fix
+- next design question: how should the regression task prior shape routing behavior, rather than how much of the current prior vector should be injected
