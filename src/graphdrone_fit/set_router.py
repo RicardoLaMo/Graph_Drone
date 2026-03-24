@@ -292,6 +292,8 @@ class TaskConditionedRouter(nn.Module):
         mode: str,
         local_gate_alpha: float,
         expert_local_gate_alpha: float,
+        row_expert_opportunity_threshold: float = 0.0,
+        row_expert_opportunity_residual_scale: float = 0.0,
         router_kind: str,
     ):
         super().__init__()
@@ -300,6 +302,8 @@ class TaskConditionedRouter(nn.Module):
         self.mode = mode
         self.local_gate_alpha = local_gate_alpha
         self.expert_local_gate_alpha = expert_local_gate_alpha
+        self.row_expert_opportunity_threshold = row_expert_opportunity_threshold
+        self.row_expert_opportunity_residual_scale = row_expert_opportunity_residual_scale
         self.router_kind = router_kind
         self.prior_to_token = nn.Linear(prior_dim, token_dim)
         self.prior_to_logit = nn.Linear(prior_dim, token_dim)
@@ -361,6 +365,8 @@ class TaskConditionedRouter(nn.Module):
         expert_opportunity_mean = 1.0
         row_expert_opportunity_mean = 1.0
         row_expert_opportunity_std = 0.0
+        row_expert_opportunity_multiplier_mean = 1.0
+        row_expert_opportunity_multiplier_std = 0.0
         if self.mode == "routing_bias":
             prior_basis = F.normalize(self.prior_to_logit(prior_context), dim=0)
             normalized_tokens = F.normalize(tokens, dim=-1)
@@ -387,9 +393,17 @@ class TaskConditionedRouter(nn.Module):
             if self._row_expert_opportunity_scores is not None:
                 row_opportunity = self._row_expert_opportunity_scores.to(tokens.device)
                 if row_opportunity.shape == expert_local_gate.shape:
-                    expert_local_gate = expert_local_gate * row_opportunity
+                    row_multiplier = row_opportunity
+                    if self.row_expert_opportunity_residual_scale > 0:
+                        row_multiplier = 1.0 + self.row_expert_opportunity_residual_scale * torch.clamp(
+                            row_opportunity - self.row_expert_opportunity_threshold,
+                            min=0.0,
+                        )
+                    expert_local_gate = expert_local_gate * row_multiplier
                     row_expert_opportunity_mean = float(row_opportunity.mean().item())
                     row_expert_opportunity_std = float(row_opportunity.std(unbiased=False).item())
+                    row_expert_opportunity_multiplier_mean = float(row_multiplier.mean().item())
+                    row_expert_opportunity_multiplier_std = float(row_multiplier.std(unbiased=False).item())
             expert_logit_bias = (
                 self.strength
                 * local_gate.unsqueeze(1)
@@ -436,6 +450,10 @@ class TaskConditionedRouter(nn.Module):
                 "task_prior_expert_opportunity_mean": expert_opportunity_mean,
                 "task_prior_row_expert_opportunity_mean": row_expert_opportunity_mean,
                 "task_prior_row_expert_opportunity_std": row_expert_opportunity_std,
+                "task_prior_row_expert_opportunity_threshold": float(self.row_expert_opportunity_threshold),
+                "task_prior_row_expert_opportunity_residual_scale": float(self.row_expert_opportunity_residual_scale),
+                "task_prior_row_expert_opportunity_multiplier_mean": row_expert_opportunity_multiplier_mean,
+                "task_prior_row_expert_opportunity_multiplier_std": row_expert_opportunity_multiplier_std,
             }
         )
         return replace(outputs, router_kind=self.router_kind, extra_diagnostics=diagnostics)

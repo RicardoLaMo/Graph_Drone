@@ -64,6 +64,8 @@ class SetRouterConfig:
     task_prior_local_gate_alpha: float = 0.0
     task_prior_expert_local_gate_alpha: float = 0.0
     task_prior_row_expert_opportunity_alpha: float = 0.0
+    task_prior_row_expert_opportunity_threshold: float = 0.0
+    task_prior_row_expert_opportunity_residual_scale: float = 0.0
     task_prior_dataset_key: str | None = None
     task_prior_exact_reuse_blend: float = 0.5
     task_prior_defer_penalty_lambda: float = 0.0
@@ -126,6 +128,16 @@ class SetRouterConfig:
             raise ValueError(
                 "task_prior_row_expert_opportunity_alpha must be non-negative, got "
                 f"{self.task_prior_row_expert_opportunity_alpha}"
+            )
+        if not 0.0 <= self.task_prior_row_expert_opportunity_threshold <= 1.0:
+            raise ValueError(
+                "task_prior_row_expert_opportunity_threshold must be in [0, 1], got "
+                f"{self.task_prior_row_expert_opportunity_threshold}"
+            )
+        if self.task_prior_row_expert_opportunity_residual_scale < 0:
+            raise ValueError(
+                "task_prior_row_expert_opportunity_residual_scale must be non-negative, got "
+                f"{self.task_prior_row_expert_opportunity_residual_scale}"
             )
         if self.task_prior_mode not in {"anchor_shift", "routing_bias"}:
             raise ValueError(

@@ -629,3 +629,51 @@ So the next state of the lane is:
 - keep `routing_bias` and expert-local gating
 - stop treating raw disagreement magnitude as the opportunity teacher
 - the next design should use a residual or thresholded modulation of expert-local gates, so row-level opportunity shapes routing without collapsing specialist contribution
+
+## Thirteenth result: residual row-opportunity modulation
+
+Contract:
+- `eval/v13_reg_task_prior_hardregimes_routingbias_expertrowresid_v1/comparison/promotion_decision.json`
+- `eval/v13_reg_task_prior_hardregimes_routingbias_expertrowresid_v1/comparison/paired_task_deltas.csv`
+- challenger raw report:
+  `eval/v13_reg_task_prior_hardregimes_routingbias_expertrowresid_v1/raw/challenger/regression/report/results_granular.csv`
+
+Architecture change:
+- keep the row-conditional expert-opportunity signal
+- stop multiplying the expert-local gate by raw row opportunity directly
+- instead apply row opportunity as a residual boost above a threshold
+
+Setup:
+- `task_prior_mode=routing_bias`
+- `task_prior_strength=0.5`
+- `task_prior_local_gate_alpha=2.0`
+- `task_prior_expert_local_gate_alpha=2.0`
+- `task_prior_row_expert_opportunity_alpha=4.0`
+- `task_prior_row_expert_opportunity_threshold=0.6`
+- `task_prior_row_expert_opportunity_residual_scale=0.5`
+- `task_prior_exact_reuse_blend=0.6`
+- same stabilized hard-regime slice: `california`, `diamonds`, `house_prices`
+
+What cleared:
+- all 9 task-folds again stayed fully `clean_routed`
+- this confirms the hard-regime stabilization base is robust enough for repeated routing-policy experiments
+- the residual formulation avoided the strongest expert-local suppression seen in the direct row-opportunity run
+
+What did not clear:
+- promotion stayed `hold`
+- mean RMSE relative improvement regressed to `-0.000457`
+- this is worse than:
+  - expert-local gate: `+0.000200`
+  - direct row-opportunity gate: `-0.000236`
+
+Most important interpretation:
+- this is a stronger negative result than the direct row-opportunity formulation
+- softening disagreement into a residual modulation did not rescue the teacher
+- that means the problem is not only over-suppression
+- the deeper issue is that disagreement-derived row opportunity, even in a softer form, is not the right teacher family for this regression routing problem
+
+So the current state of the lane is:
+- keep the stabilized routed surface
+- keep `routing_bias` and expert-local gating as the best-known local/global task-prior architecture
+- stop spending on disagreement-derived opportunity teachers
+- the next team should move to a different teacher family rather than another disagreement reparameterization

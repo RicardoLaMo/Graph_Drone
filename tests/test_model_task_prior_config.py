@@ -16,6 +16,8 @@ def test_binary_classification_router_config_preserves_task_prior_fields() -> No
                 task_prior_local_gate_alpha=3.0,
                 task_prior_expert_local_gate_alpha=1.5,
                 task_prior_row_expert_opportunity_alpha=2.5,
+                task_prior_row_expert_opportunity_threshold=0.6,
+                task_prior_row_expert_opportunity_residual_scale=0.4,
                 task_prior_dataset_key="credit_g",
                 task_prior_exact_reuse_blend=0.8,
                 task_prior_defer_penalty_lambda=0.6,
@@ -36,6 +38,8 @@ def test_binary_classification_router_config_preserves_task_prior_fields() -> No
     assert cfg.task_prior_local_gate_alpha == 3.0
     assert cfg.task_prior_expert_local_gate_alpha == 1.5
     assert cfg.task_prior_row_expert_opportunity_alpha == 2.5
+    assert cfg.task_prior_row_expert_opportunity_threshold == 0.6
+    assert cfg.task_prior_row_expert_opportunity_residual_scale == 0.4
     assert cfg.task_prior_dataset_key == "credit_g"
     assert cfg.task_prior_exact_reuse_blend == 0.8
     assert cfg.task_prior_defer_penalty_lambda == 0.6
