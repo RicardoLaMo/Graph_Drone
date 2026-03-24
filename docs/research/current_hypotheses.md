@@ -3,7 +3,7 @@
 This file is generated from `docs/research/findings.jsonl`.
 It is the current research surface for scaling decisions, not an append-only history.
 
-Updated: 2026-03-24T13:02:53.929933+00:00
+Updated: 2026-03-24T13:13:13.625404+00:00
 
 ## How To Read This
 
@@ -71,11 +71,13 @@ Updated: 2026-03-24T13:02:53.929933+00:00
 | `v13-reg-afc-robust-allocation-target` | `v13_regression` | No, not in this formulation. The robust allocation objective improved weighted specialist advantage and positive specialist mass on cpu_act, elevators, and kin8nm relative to the champion, but the quick held-out regression result still regressed and did so more than the conservative variant. This means simple validation split-consistency is not enough to turn the current allocation target into a reliable teacher for the regression router. | `exp/v13-reg-afc-revisit` | `2026-03-23-v13-reg-afc-revisit.md` |
 | `v13-reg-task-prior-coupling-sweep` | `v13_regression` | No. On the stabilized hard-regime surface, both stronger global prior strength and maximal exact-reuse blending made the regression challenger worse while keeping all task-folds clean_routed. The current bottleneck is not simply insufficient prior weight on the existing additive conditioning path. | `exp/v13-reg-afc-revisit` | `2026-03-23-v13-reg-afc-revisit.md` |
 | `v13-reg-task-prior-expert-opportunity-gate` | `v13_regression` | No, not in this formulation. On the stabilized hard-regime regression slice, adding static dataset-level per-expert opportunity scores on top of expert-local routing bias kept all task-folds clean_routed and made the mechanism visibly live, but it regressed mean RMSE relative to both the champion and the simpler expert-local gate. That means mean validation opportunity per expert is too coarse to serve as a reliable teacher for live regression routing. | `exp/v13-reg-afc-revisit` | `2026-03-23-v13-reg-afc-revisit.md` |
+| `v13-reg-task-prior-row-opportunity-gate` | `v13_regression` | No, not in this formulation. On the stabilized hard-regime regression slice, replacing static expert opportunity with row-conditional expert-vs-anchor disagreement kept all task-folds clean_routed and produced real route changes, but it regressed mean RMSE relative to the champion and underperformed both the simpler expert-local gate and the static-opportunity variant. Raw disagreement magnitude is therefore not a sufficient opportunity teacher for live regression routing. | `exp/v13-reg-afc-revisit` | `2026-03-23-v13-reg-afc-revisit.md` |
 
 ## Recent Findings
 
 | Timestamp | Claim ID | Status | Summary |
 |---|---|---|---|
+| `2026-03-24T13:13:13.624904+00:00` | `v13-reg-task-prior-row-opportunity-gate` | `falsified` | Row-conditional expert opportunity preserved the stabilized routed surface and changed the live routing behavior, but it made the hard-regime contract worse overall. This falsifies raw row-level disagreement as the next teacher signal for regression task-prior routing. |
 | `2026-03-24T13:02:53.929467+00:00` | `v13-reg-task-prior-expert-opportunity-gate` | `falsified` | Opportunity-aware expert-local gating preserved the stabilized routed surface and activated real task-prior opportunity diagnostics, but it underperformed the simpler expert-local gate. This falsifies static dataset-level per-expert opportunity weighting as the next teacher signal for regression task-prior routing. |
 | `2026-03-24T12:49:09.293327+00:00` | `v13-reg-task-prior-expert-local-gate` | `partially_causal` | Per-expert local-global gating is more effective than one scalar local gate. The result is still only a small gain, but it makes the local-global alignment idea materially more credible on regression. |
 | `2026-03-24T12:31:12.646048+00:00` | `v13-reg-task-prior-local-global-gate` | `partially_causal` | Local-global prior shaping is more defensible than global-only injection, but the first cosine-gated formulation only nudged the near-flat routing-bias result rather than converting it into a real gain. |
@@ -87,5 +89,4 @@ Updated: 2026-03-24T13:02:53.929933+00:00
 | `2026-03-24T02:55:59.478299+00:00` | `v13-reg-task-prior-regime-router` | `partially_causal` | The first live regression task-prior run was invalid because regression never attached the task-prior wrapper and dropped task-prior diagnostics. After fixing both issues, the rerun produced explicit task-prior activation, exact reuse on known datasets, and a promotable quick-contract win concentrated on california. |
 | `2026-03-24T02:55:25.905176+00:00` | `v13-reg-task-prior-regime-router` | `partially_causal` | The first live regression task-prior run was invalid because regression never attached the task-prior wrapper and dropped task-prior diagnostics. After fixing both issues, the rerun produced explicit task-prior activation, exact reuse on known datasets, and a promotable quick-contract win concentrated on california. |
 | `2026-03-24T02:07:03.566799+00:00` | `v13-reg-afc-robust-allocation-target` | `falsified` | A robustness-aware AFC allocation reward still improved the local mechanism surface across the clean-routed regression slice, but held-out RMSE regressed more, not less. The current validation-side allocation target is therefore not causal enough even with a simple consistency filter. |
-| `2026-03-24T01:40:20.860371+00:00` | `v13-reg-afc-allocation-translation` | `partially_causal` | Rotor plus an allocation objective is the first AFC regression variant that improves the allocation surface across the entire clean-routed quick slice, but the held-out RMSE still regresses slightly and latency gets worse. The blocker has shifted from geometry-to-allocation translation toward allocation-to-outcome translation and routing efficiency. |
 
