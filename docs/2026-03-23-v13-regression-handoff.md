@@ -8,6 +8,9 @@ Prepared from branch:
 Prepared for:
 - internal/external research teams continuing GraphDrone regression
 
+Operating reference:
+- `docs/2026-03-24-v13-objectives-and-operating-model.md`
+
 ## Why v1.3 is regression-first
 
 The binary classification line proved that the research operating system is working:
